@@ -75,13 +75,20 @@ class ModelRegistry:
         return cls._instances[name]
 
     @classmethod
-    def load_model(cls, name: str) -> BaseImageModel:
-        """Load a model by name."""
+    def load_model(cls, name: str, auto_unload_others: bool = True) -> BaseImageModel:
+        """Load a model by name, optionally unloading others first to free VRAM."""
         model = cls.get_model(name)
         if model is None:
             raise ValueError(f"Unknown model: {name}")
 
         if not model.is_loaded:
+            # Unload other models first to free VRAM
+            if auto_unload_others:
+                for other_name in cls.get_loaded_models():
+                    if other_name != name:
+                        logger.info(f"Auto-unloading {other_name} to free VRAM")
+                        cls.unload_model(other_name)
+
             logger.info(f"Loading model: {name}")
             model.load()
             logger.info(f"Model loaded: {name}")

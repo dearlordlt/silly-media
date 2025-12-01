@@ -13,7 +13,7 @@ dependencies = [
     "pillow>=10.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
-    "diffusers @ git+https://github.com/DoctorKey/diffusers.git@ovis-image",
+    "diffusers @ git+https://github.com/huggingface/diffusers.git",
 ]
 
 [project.optional-dependencies]

@@ -6,13 +6,13 @@
 set -e
 
 API_URL="${API_URL:-http://localhost:4201}"
-MODEL="${MODEL:-ovis-image-7b}"
+MODEL="${MODEL:-z-image-turbo}"
 OUTPUT_DIR="$(dirname "$0")/images"
 
 # Default values
 PROMPT=""
 NEGATIVE_PROMPT=""
-STEPS=50
+STEPS=9
 CFG_SCALE=5.0
 SEED=""
 WIDTH=""
@@ -73,14 +73,14 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  -p, --prompt      Text prompt (required)"
             echo "  -n, --negative    Negative prompt"
-            echo "  -s, --steps       Inference steps (default: 50)"
-            echo "  -c, --cfg         CFG scale (default: 5.0)"
+            echo "  -s, --steps       Inference steps (default: 9 for z-image-turbo)"
+            echo "  -c, --cfg         CFG scale (default: 5.0, ignored by turbo models)"
             echo "  --seed            Random seed for reproducibility"
             echo "  -w, --width       Image width (64-2048)"
             echo "  -h, --height      Image height (64-2048)"
             echo "  -a, --aspect      Aspect ratio (1:1, 16:9, 9:16, 4:3, 3:4, etc.)"
             echo "  -b, --base-size   Base size for aspect ratio (default: 1024)"
-            echo "  -m, --model       Model name (default: ovis-image-7b)"
+            echo "  -m, --model       Model name (default: z-image-turbo)"
             echo "  -o, --output      Output directory (default: ./images)"
             echo ""
             echo "Examples:"

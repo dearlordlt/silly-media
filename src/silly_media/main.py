@@ -36,10 +36,10 @@ async def lifespan(app: FastAPI):
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
 
-    # Preload the default model
+    # Preload the default model (z-image-turbo is faster and works with official diffusers)
     logger.info("Preloading default model...")
     try:
-        ModelRegistry.load_model("ovis-image-7b")
+        ModelRegistry.load_model("z-image-turbo")
     except Exception as e:
         logger.error(f"Failed to preload model: {e}")
 

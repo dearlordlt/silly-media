@@ -4,6 +4,17 @@ Base URL: `http://localhost:4201`
 
 ---
 
+## Available Models
+
+| Model | ID | Steps | Speed | Notes |
+|-------|-----|-------|-------|-------|
+| Z-Image Turbo | `z-image-turbo` | 9 | Fast | Default, bilingual text rendering |
+| Ovis Image 7B | `ovis-image-7b` | 50 | Slower | Requires custom diffusers fork |
+
+**Note:** Only one model can be loaded at a time (auto-unloads others to fit in VRAM).
+
+---
+
 ## Health Check
 
 ### `GET /health`
@@ -14,8 +25,8 @@ Check API and model status.
 ```json
 {
   "status": "healthy",
-  "models_loaded": ["ovis-image-7b"],
-  "available_models": ["ovis-image-7b"]
+  "models_loaded": ["z-image-turbo"],
+  "available_models": ["z-image-turbo"]
 }
 ```
 
@@ -30,8 +41,8 @@ List available and loaded models.
 **Response**
 ```json
 {
-  "available": ["ovis-image-7b"],
-  "loaded": ["ovis-image-7b"]
+  "available": ["z-image-turbo"],
+  "loaded": ["z-image-turbo"]
 }
 ```
 
@@ -63,22 +74,26 @@ Generate an image using the specified model.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model name (e.g., `ovis-image-7b`) |
+| `model` | string | Model name (e.g., `z-image-turbo`) |
 
 **Request Body**
 ```json
 {
   "prompt": "string, required",
   "negative_prompt": "string, optional",
-  "num_inference_steps": "int, optional (1-100, default 50)",
+  "num_inference_steps": "int, optional (default varies by model)",
   "cfg_scale": "float, optional (1.0-20.0, default 5.0)",
-  "seed": "int, optional",
+  "seed": "int, optional (-1 or omit for random)",
   "width": "int, optional (64-2048)",
   "height": "int, optional (64-2048)",
   "aspect_ratio": "string, optional",
   "base_size": "int, optional (256-2048, default 1024)"
 }
 ```
+
+**Model-specific defaults:**
+- `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
+- `ovis-image-7b`: 50 steps, cfg_scale 5.0
 
 **Response**
 - Content-Type: `image/png`
@@ -150,10 +165,10 @@ Omit all sizing options for 1024×1024:
 
 ## Examples
 
-### Basic Generation
+### Basic Generation (Z-Image Turbo)
 
 ```bash
-curl -X POST http://localhost:4201/generate/ovis-image-7b \
+curl -X POST http://localhost:4201/generate/z-image-turbo \
   -H "Content-Type: application/json" \
   -d '{"prompt": "a red panda eating bamboo"}' \
   -o image.png
@@ -162,7 +177,7 @@ curl -X POST http://localhost:4201/generate/ovis-image-7b \
 ### With Aspect Ratio
 
 ```bash
-curl -X POST http://localhost:4201/generate/ovis-image-7b \
+curl -X POST http://localhost:4201/generate/z-image-turbo \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "a red panda eating bamboo",
@@ -174,13 +189,12 @@ curl -X POST http://localhost:4201/generate/ovis-image-7b \
 ### Full Parameters
 
 ```bash
-curl -X POST http://localhost:4201/generate/ovis-image-7b \
+curl -X POST http://localhost:4201/generate/z-image-turbo \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "a red panda eating bamboo, detailed fur, forest background",
     "negative_prompt": "blurry, low quality",
-    "num_inference_steps": 50,
-    "cfg_scale": 5.0,
+    "num_inference_steps": 9,
     "seed": 42,
     "width": 1024,
     "height": 1024
@@ -194,7 +208,7 @@ curl -X POST http://localhost:4201/generate/ovis-image-7b \
 import requests
 
 response = requests.post(
-    "http://localhost:4201/generate/ovis-image-7b",
+    "http://localhost:4201/generate/z-image-turbo",
     json={
         "prompt": "a red panda eating bamboo",
         "aspect_ratio": "3:2",
