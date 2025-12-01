@@ -86,7 +86,8 @@ while [[ $# -gt 0 ]]; do
             echo "Examples:"
             echo "  $0 -p \"a red panda eating bamboo\""
             echo "  $0 -p \"sunset over mountains\" -a 16:9 --seed 42"
-            echo "  $0 -p \"portrait photo\" -w 768 -h 1024 -s 30"
+            echo "  $0 -p \"portrait photo\" -w 768 -h 1024"
+            echo "  $0 -p \"test prompt\" -m z-image-turbo  # switch model"
             exit 0
             ;;
         *)
