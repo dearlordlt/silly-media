@@ -1,0 +1,51 @@
+services:
+  silly-media:
+    build: .
+    ports:
+      - "4201:4201"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4201/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # Development mode with hot reload
+  silly-media-dev:
+    build: .
+    ports:
+      - "4201:4201"
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - ./src:/app/src:ro
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["python", "-m", "uvicorn", "silly_media.main:app", "--host", "0.0.0.0", "--port", "4201", "--reload", "--reload-dir", "/app/src"]
+    profiles:
+      - dev
+
+volumes:
+  huggingface-cache:

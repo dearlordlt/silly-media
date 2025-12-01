@@ -1,0 +1,37 @@
+[project]
+name = "silly-media"
+version = "0.1.0"
+description = "Multi-model text-to-image API service"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "torch>=2.0.0",
+    "transformers>=4.45.0",
+    "accelerate>=1.0.0",
+    "safetensors>=0.4.0",
+    "pillow>=10.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "diffusers @ git+https://github.com/DoctorKey/diffusers.git@ovis-image",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.7.0",
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/silly_media"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

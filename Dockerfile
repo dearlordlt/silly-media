@@ -1,0 +1,38 @@
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Python 3.10 and dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-venv \
+    python3-pip \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN pip3 install uv
+
+# Set up HuggingFace cache directories
+ENV HF_HOME=/root/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/root/.cache/huggingface
+
+WORKDIR /app
+
+# Copy dependency files first for caching
+COPY pyproject.toml ./
+
+# Create virtual environment and install dependencies
+RUN uv venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+RUN uv pip install -e .
+
+# Copy application code
+COPY src/ ./src/
+
+# Expose port
+EXPOSE 4201
+
+# Run the application
+CMD ["python", "-m", "silly_media.main"]
