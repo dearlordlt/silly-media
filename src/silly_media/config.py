@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     default_width: int = 1024
     default_height: int = 1024
 
+    # Model loading settings
+    model_preload: bool = True  # Load default model on startup
+    model_idle_timeout: int = 300  # Seconds before unloading idle model (0 = never)
+    default_model: str = "z-image-turbo"  # Model to preload/use by default
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -1,6 +1,8 @@
 """Base classes for image generation models."""
 
+import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -46,6 +48,9 @@ class ModelRegistry:
 
     _models: dict[str, type[BaseImageModel]] = {}
     _instances: dict[str, BaseImageModel] = {}
+    _last_used: float = 0  # Timestamp of last model use
+    _idle_task: asyncio.Task | None = None
+    _idle_timeout: int = 0  # Seconds before unloading (0 = disabled)
 
     @classmethod
     def register(cls, name: str, model_class: type[BaseImageModel]) -> None:
@@ -75,6 +80,53 @@ class ModelRegistry:
         return cls._instances[name]
 
     @classmethod
+    def set_idle_timeout(cls, timeout: int) -> None:
+        """Set the idle timeout in seconds. 0 = disabled."""
+        cls._idle_timeout = timeout
+        logger.info(f"Model idle timeout set to {timeout}s (0 = disabled)")
+
+    @classmethod
+    def _touch(cls) -> None:
+        """Update last used timestamp and restart idle timer."""
+        cls._last_used = time.time()
+        cls._schedule_idle_check()
+
+    @classmethod
+    def _schedule_idle_check(cls) -> None:
+        """Schedule an idle check task."""
+        if cls._idle_timeout <= 0:
+            return
+
+        # Cancel existing task if any
+        if cls._idle_task is not None and not cls._idle_task.done():
+            cls._idle_task.cancel()
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                cls._idle_task = loop.create_task(cls._idle_check())
+        except RuntimeError:
+            # No event loop running yet
+            pass
+
+    @classmethod
+    async def _idle_check(cls) -> None:
+        """Check if models should be unloaded due to idle timeout."""
+        await asyncio.sleep(cls._idle_timeout)
+
+        elapsed = time.time() - cls._last_used
+        if elapsed >= cls._idle_timeout:
+            loaded = cls.get_loaded_models()
+            if loaded:
+                logger.info(f"Idle timeout ({cls._idle_timeout}s) reached, unloading models...")
+                cls.unload_all()
+        else:
+            # Not enough time passed, reschedule
+            remaining = cls._idle_timeout - elapsed
+            await asyncio.sleep(remaining)
+            await cls._idle_check()
+
+    @classmethod
     def load_model(cls, name: str, auto_unload_others: bool = True) -> BaseImageModel:
         """Load a model by name, optionally unloading others first to free VRAM."""
         model = cls.get_model(name)
@@ -92,6 +144,9 @@ class ModelRegistry:
             logger.info(f"Loading model: {name}")
             model.load()
             logger.info(f"Model loaded: {name}")
+
+        # Update last used time and schedule idle check
+        cls._touch()
 
         return model
 

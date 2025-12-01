@@ -36,12 +36,18 @@ async def lifespan(app: FastAPI):
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
 
-    # Preload the default model (z-image-turbo is faster and works with official diffusers)
-    logger.info("Preloading default model...")
-    try:
-        ModelRegistry.load_model("z-image-turbo")
-    except Exception as e:
-        logger.error(f"Failed to preload model: {e}")
+    # Configure idle timeout
+    ModelRegistry.set_idle_timeout(settings.model_idle_timeout)
+
+    # Optionally preload the default model
+    if settings.model_preload:
+        logger.info(f"Preloading default model: {settings.default_model}")
+        try:
+            ModelRegistry.load_model(settings.default_model)
+        except Exception as e:
+            logger.error(f"Failed to preload model: {e}")
+    else:
+        logger.info("Model preloading disabled, will load on first request")
 
     yield
 

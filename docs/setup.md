@@ -85,6 +85,34 @@ docker volume rm silly-media_huggingface-cache
 | `HF_TOKEN` | - | HuggingFace API token |
 | `PORT` | 4201 | API port |
 | `LOG_LEVEL` | INFO | Logging level |
+| `MODEL_PRELOAD` | true | Load model on startup |
+| `MODEL_IDLE_TIMEOUT` | 300 | Seconds before unloading idle model (0 = never) |
+| `DEFAULT_MODEL` | z-image-turbo | Model to preload/use by default |
+
+## VRAM Management
+
+The model uses ~22GB VRAM when loaded. To free VRAM when not generating:
+
+**Option 1: Idle timeout (recommended)**
+```bash
+# In .env - unload after 5 minutes of inactivity
+MODEL_IDLE_TIMEOUT=300
+```
+
+**Option 2: No preload + short timeout**
+```bash
+# In .env - only load when needed, unload quickly
+MODEL_PRELOAD=false
+MODEL_IDLE_TIMEOUT=60
+```
+
+**Option 3: Always loaded (no timeout)**
+```bash
+# In .env - keep model in VRAM permanently
+MODEL_IDLE_TIMEOUT=0
+```
+
+When the model is unloaded, the next generation request will take ~10-30s longer to reload.
 
 ## Troubleshooting
 
