@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
         logger.info(f"Preloading default model: {settings.default_model}")
         try:
             ModelRegistry.load_model(settings.default_model)
+            # Start idle timer after preload (we're now in async context)
+            ModelRegistry.touch()
         except Exception as e:
             logger.error(f"Failed to preload model: {e}")
     else:
@@ -142,6 +144,9 @@ async def generate_image(
 
         elapsed = time.time() - start_time
         logger.info(f"Generation completed in {elapsed:.2f}s")
+
+        # Start/reset the idle timer now that we're in an async context
+        ModelRegistry.touch()
 
         return Response(content=buffer.getvalue(), media_type="image/png")
 

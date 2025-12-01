@@ -57,10 +57,17 @@ class ZImageTurboModel(BaseImageModel):
             return
 
         if self._pipe is not None:
+            # Move to CPU first to release CUDA memory
+            self._pipe.to("cpu")
             del self._pipe
             self._pipe = None
 
+        # Aggressive CUDA cleanup
+        import gc
+        gc.collect()
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
         self._loaded = False
         logger.info(f"{self.model_id} unloaded")
 

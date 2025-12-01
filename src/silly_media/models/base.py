@@ -86,7 +86,7 @@ class ModelRegistry:
         logger.info(f"Model idle timeout set to {timeout}s (0 = disabled)")
 
     @classmethod
-    def _touch(cls) -> None:
+    def touch(cls) -> None:
         """Update last used timestamp and restart idle timer."""
         cls._last_used = time.time()
         cls._schedule_idle_check()
@@ -102,29 +102,38 @@ class ModelRegistry:
             cls._idle_task.cancel()
 
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                cls._idle_task = loop.create_task(cls._idle_check())
+            loop = asyncio.get_running_loop()
+            cls._idle_task = loop.create_task(cls._idle_check())
+            logger.debug(f"Scheduled idle check in {cls._idle_timeout}s")
         except RuntimeError:
-            # No event loop running yet
-            pass
+            # No event loop running - will be scheduled on next touch() call
+            logger.debug("No event loop running, idle check will be scheduled later")
 
     @classmethod
     async def _idle_check(cls) -> None:
         """Check if models should be unloaded due to idle timeout."""
-        await asyncio.sleep(cls._idle_timeout)
+        try:
+            logger.info(f"Idle timer started: will unload in {cls._idle_timeout}s if no activity")
 
-        elapsed = time.time() - cls._last_used
-        if elapsed >= cls._idle_timeout:
-            loaded = cls.get_loaded_models()
-            if loaded:
-                logger.info(f"Idle timeout ({cls._idle_timeout}s) reached, unloading models...")
-                cls.unload_all()
-        else:
-            # Not enough time passed, reschedule
-            remaining = cls._idle_timeout - elapsed
-            await asyncio.sleep(remaining)
-            await cls._idle_check()
+            while True:
+                # Calculate how long to sleep based on last activity
+                elapsed = time.time() - cls._last_used
+                remaining = cls._idle_timeout - elapsed
+
+                if remaining <= 0:
+                    # Timeout reached, unload models
+                    loaded = cls.get_loaded_models()
+                    if loaded:
+                        logger.info(f"Idle timeout ({cls._idle_timeout}s) reached, unloading models: {loaded}")
+                        cls.unload_all()
+                        logger.info("Models unloaded, VRAM freed")
+                    return
+
+                logger.info(f"Idle timer: {elapsed:.0f}s since last activity, sleeping {remaining:.0f}s")
+                await asyncio.sleep(remaining)
+
+        except asyncio.CancelledError:
+            logger.info("Idle timer reset (new activity detected)")
 
     @classmethod
     def load_model(cls, name: str, auto_unload_others: bool = True) -> BaseImageModel:
@@ -145,8 +154,8 @@ class ModelRegistry:
             model.load()
             logger.info(f"Model loaded: {name}")
 
-        # Update last used time and schedule idle check
-        cls._touch()
+        # Update last used time (idle check scheduled from generate endpoint)
+        cls._last_used = time.time()
 
         return model
 

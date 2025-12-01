@@ -5,10 +5,11 @@ services:
       - "4201:4201"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
+    env_file:
+      - .env
     environment:
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface
-      - HF_TOKEN=${HF_TOKEN}
     deploy:
       resources:
         reservations:
@@ -32,10 +33,11 @@ services:
     volumes:
       - huggingface-cache:/root/.cache/huggingface
       - ./src:/app/src:ro
+    env_file:
+      - .env
     environment:
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface
-      - HF_TOKEN=${HF_TOKEN}
     deploy:
       resources:
         reservations:
