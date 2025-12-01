@@ -20,16 +20,16 @@ ENV TRANSFORMERS_CACHE=/root/.cache/huggingface
 
 WORKDIR /app
 
-# Copy dependency files first for caching
-COPY pyproject.toml ./
-
-# Create virtual environment and install dependencies
+# Create virtual environment
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
-RUN uv pip install -e .
 
-# Copy application code
+# Copy everything needed for install
+COPY pyproject.toml ./
 COPY src/ ./src/
+
+# Install the package
+RUN uv pip install -e .
 
 # Expose port
 EXPOSE 4201
