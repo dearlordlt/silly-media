@@ -67,7 +67,7 @@ class GenerateRequest(BaseModel):
     cfg_scale: Annotated[
         float, Field(default=None, ge=1.0, le=20.0, description="Classifier-free guidance scale")
     ] = None
-    seed: Annotated[int | None, Field(default=None, ge=0, description="Random seed for reproducibility")] = None
+    seed: Annotated[int | None, Field(default=None, ge=-1, description="Random seed (-1 or omit for random)")] = None
 
     # Flexible sizing options - use ONE of these approaches:
     # Option 1: Explicit dimensions

@@ -61,7 +61,7 @@ class OvisImageModel(BaseImageModel):
             raise RuntimeError("Model not loaded")
 
         generator = None
-        if request.seed is not None:
+        if request.seed is not None and request.seed >= 0:
             generator = torch.Generator(device="cuda").manual_seed(request.seed)
 
         logger.info(

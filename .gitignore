@@ -46,3 +46,6 @@ htmlcov/
 *.safetensors
 *.bin
 *.ckpt
+
+# Generated images
+images/
