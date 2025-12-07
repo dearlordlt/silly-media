@@ -224,6 +224,19 @@
       background: var(--accent);
       border-color: var(--accent);
     }
+    .gallery-item .name-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.8));
+      color: white;
+      padding: 20px 8px 8px;
+      font-size: 0.8rem;
+      text-align: center;
+      pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    }
 
     .empty-gallery {
       text-align: center;
@@ -331,6 +344,19 @@
       color: var(--text-dim);
       font-size: 0.9rem;
     }
+    .modal-name-label {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 8px 20px;
+      border-radius: var(--radius);
+      font-size: 1.1rem;
+      font-weight: 600;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
     .modal-info {
       background: var(--surface);
       padding: 12px 16px;
@@ -380,10 +406,182 @@
       opacity: 1;
       border-color: var(--accent);
     }
+    .thumbnail {
+      position: relative;
+    }
     .thumbnail img {
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+    .thumbnail .thumb-name {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      font-size: 0.55rem;
+      padding: 2px;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .thumbnail.thumb-jump,
+    .thumbnail.thumb-ellipsis {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--surface);
+      opacity: 0.7;
+    }
+    .thumbnail.thumb-jump:hover { opacity: 1; }
+    .thumbnail.thumb-jump span,
+    .thumbnail.thumb-ellipsis span {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+    }
+    .thumbnail.thumb-ellipsis {
+      cursor: default;
+    }
+
+    /* Batch mode */
+    .batch-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--surface2);
+    }
+    .batch-section textarea {
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 0.8rem;
+      min-height: 120px;
+    }
+    .json-error {
+      background: #dc262633;
+      color: #fca5a5;
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      margin-bottom: 8px;
+      display: none;
+    }
+    .json-error.show { display: block; }
+    .json-valid {
+      background: #16a34a33;
+      color: var(--success);
+      padding: 8px 10px;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      margin-bottom: 8px;
+      display: none;
+    }
+    .json-valid.show { display: block; }
+    .batch-progress {
+      background: var(--bg);
+      padding: 10px;
+      border-radius: var(--radius);
+      margin-bottom: 8px;
+    }
+    .batch-progress-bar {
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .batch-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.3s;
+    }
+    .batch-progress-text {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+    .batch-names {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 8px;
+      font-size: 0.85rem;
+    }
+    .batch-names .prev-name,
+    .batch-names .next-name {
+      color: var(--text-dim);
+      font-size: 0.75rem;
+    }
+    .batch-names .current-name {
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 1rem;
+    }
+    .batch-names .arrow {
+      color: var(--text-dim);
+      font-size: 0.7rem;
+    }
+    .variables-hint {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+    }
+    .variables-hint code {
+      background: var(--bg);
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+
+    /* Gallery folders */
+    .gallery-folders {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .folder-tab {
+      padding: 6px 12px;
+      background: var(--bg);
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .folder-tab:hover { background: var(--surface2); }
+    .folder-tab.active {
+      background: var(--accent);
+      color: white;
+    }
+    .folder-tab .count {
+      opacity: 0.7;
+      margin-left: 4px;
+    }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .pagination button {
+      min-width: 36px;
+    }
+    .pagination button.active {
+      background: var(--accent);
+      color: white;
+    }
+    .pagination-ellipsis {
+      padding: 0 8px;
+      color: var(--text-dim);
+    }
+
+    /* Lazy loading placeholder */
+    .lazy-img {
+      background: var(--surface2);
+      min-height: 100px;
     }
 
     /* Toast */
@@ -537,6 +735,33 @@
           <button class="btn-danger btn-small" onclick="clearHistory()" style="margin-top:8px;width:100%">Clear History</button>
         </div>
       </div>
+
+      <div class="batch-section">
+        <div class="collapsible-header" onclick="toggleCollapsible('batchSection')">
+          <label style="margin:0;cursor:pointer">Batch Mode</label>
+          <span id="batchSection-icon">+</span>
+        </div>
+        <div id="batchSection" class="collapsible-content">
+          <div class="variables-hint">
+            Use <code>{variable}</code> in your prompt. JSON array with objects containing any keys.
+          </div>
+          <textarea id="batchJson" placeholder='[
+  {"name": "Character1", "outfit": "Red dress"},
+  {"name": "Character2", "outfit": "Blue suit"}
+]'></textarea>
+          <div id="jsonError" class="json-error"></div>
+          <div id="jsonValid" class="json-valid"></div>
+          <div id="batchProgress" class="batch-progress" style="display:none">
+            <div class="batch-progress-bar">
+              <div class="batch-progress-fill" id="batchProgressFill" style="width:0%"></div>
+            </div>
+            <div class="batch-progress-text" id="batchProgressText">0 / 0</div>
+            <div class="batch-names" id="batchNames"></div>
+          </div>
+          <button id="batchGenerateBtn" class="btn-primary" onclick="generateBatch()" style="width:100%">Generate Batch</button>
+          <button id="batchCancelBtn" class="btn-danger" onclick="cancelBatch()" style="width:100%;margin-top:8px;display:none">Cancel Batch</button>
+        </div>
+      </div>
     </div>
 
     <!-- Preview & Gallery -->
@@ -556,7 +781,9 @@
             <button class="btn-danger btn-small" onclick="clearGallery()">Clear All</button>
           </div>
         </div>
+        <div id="galleryFolders" class="gallery-folders"></div>
         <div id="gallery" class="gallery-grid"></div>
+        <div id="galleryPagination"></div>
       </div>
     </div>
   </div>
@@ -570,6 +797,7 @@
       <span class="modal-nav prev" id="modalPrev" onclick="navigateModal(-1)">&lsaquo;</span>
       <img id="modalImg" src="">
       <span class="modal-nav next" id="modalNext" onclick="navigateModal(1)">&rsaquo;</span>
+      <div class="modal-name-label" id="modalNameLabel" style="display: none;"></div>
     </div>
 
     <div class="thumbnail-strip" id="thumbnailStrip" onclick="event.stopPropagation()"></div>
@@ -590,15 +818,22 @@
   <script>
     // IndexedDB for storing images
     const DB_NAME = 'sillyMediaGallery';
+    const DB_VERSION = 2; // Bumped for thumbnail support
     const STORE_NAME = 'images';
     const SETTINGS_KEY = 'sillyMediaSettings';
     const HISTORY_KEY = 'sillyMediaHistory';
     const MAX_HISTORY = 50;
+    const THUMB_SIZE = 200; // Thumbnail max dimension
+    const PAGE_SIZE = 24; // Images per page
     let db;
     let selectedItems = new Set();
     let currentModalId = null;
     let galleryImages = []; // Cache for carousel navigation
     let currentImageIndex = 0;
+    let currentFolder = 'all'; // Current gallery folder filter
+    let batchCancelled = false; // Flag to cancel batch generation
+    let currentPage = 0; // Current gallery page
+    let galleryObserver = null; // IntersectionObserver for lazy loading
 
     // Initialize
     async function init() {
@@ -611,7 +846,7 @@
 
     function openDB() {
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, 1);
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
         request.onupgradeneeded = (e) => {
@@ -619,7 +854,31 @@
           if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
           }
+          // Migration: generate thumbnails for existing images will happen lazily
         };
+      });
+    }
+
+    // Generate thumbnail from full image data URL
+    function generateThumbnail(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width, h = img.height;
+          if (w > h) {
+            if (w > THUMB_SIZE) { h = h * THUMB_SIZE / w; w = THUMB_SIZE; }
+          } else {
+            if (h > THUMB_SIZE) { w = w * THUMB_SIZE / h; h = THUMB_SIZE; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = () => resolve(dataUrl); // Fallback to full image
+        img.src = dataUrl;
       });
     }
 
@@ -627,21 +886,28 @@
       return db.transaction(STORE_NAME, mode).objectStore(STORE_NAME);
     }
 
-    async function saveImage(blob, settings) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const store = dbTransaction('readwrite');
-          const item = {
-            data: reader.result,
-            settings,
-            timestamp: Date.now()
-          };
-          const request = store.add(item);
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => reject(request.error);
-        };
+    async function saveImage(blob, settings, folder = null) {
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve) => {
+        reader.onload = () => resolve(reader.result);
         reader.readAsDataURL(blob);
+      });
+
+      // Generate thumbnail
+      const thumbnail = await generateThumbnail(dataUrl);
+
+      return new Promise((resolve, reject) => {
+        const store = dbTransaction('readwrite');
+        const item = {
+          data: dataUrl,
+          thumbnail,
+          settings,
+          timestamp: Date.now(),
+          folder: folder
+        };
+        const request = store.add(item);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
       });
     }
 
@@ -866,6 +1132,9 @@
         el.addEventListener('change', saveSettings);
       });
 
+      // Batch JSON validation on input
+      document.getElementById('batchJson').addEventListener('input', validateBatchJson);
+
       // Keyboard shortcuts
       document.addEventListener('keydown', (e) => {
         const modalOpen = document.getElementById('modal').classList.contains('open');
@@ -988,34 +1257,165 @@
       status.className = 'status ' + type;
     }
 
-    async function loadGallery() {
-      const images = await getAllImages();
-      const gallery = document.getElementById('gallery');
-      document.getElementById('galleryCount').textContent = images.length;
+    // Cache for filtered/sorted images
+    let filteredImages = [];
 
-      if (images.length === 0) {
-        gallery.innerHTML = '<div class="empty-gallery">No images yet. Generate some!</div>';
-        return;
+    async function loadGallery(resetPage = true) {
+      const allImages = await getAllImages();
+      const gallery = document.getElementById('gallery');
+      const foldersEl = document.getElementById('galleryFolders');
+
+      if (resetPage) currentPage = 0;
+
+      // Get unique folders
+      const folders = new Set(['all']);
+      allImages.forEach(img => {
+        if (img.folder) folders.add(img.folder);
+      });
+
+      // Build folder tabs
+      if (folders.size > 1) {
+        const folderCounts = {};
+        folderCounts['all'] = allImages.length;
+        allImages.forEach(img => {
+          const f = img.folder || 'all';
+          folderCounts[f] = (folderCounts[f] || 0) + 1;
+        });
+
+        foldersEl.innerHTML = Array.from(folders).map(f => `
+          <div class="folder-tab ${currentFolder === f ? 'active' : ''}" onclick="setFolder('${escapeHtml(f)}')">
+            ${f === 'all' ? 'All' : escapeHtml(f)}<span class="count">(${folderCounts[f] || 0})</span>
+          </div>
+        `).join('');
+      } else {
+        foldersEl.innerHTML = '';
+      }
+
+      // Filter images by current folder
+      filteredImages = allImages;
+      if (currentFolder !== 'all') {
+        filteredImages = allImages.filter(img => img.folder === currentFolder);
       }
 
       // Sort by newest first
-      images.sort((a, b) => b.timestamp - a.timestamp);
+      filteredImages.sort((a, b) => b.timestamp - a.timestamp);
 
-      gallery.innerHTML = images.map(img => `
+      const totalImages = filteredImages.length;
+      const totalPages = Math.ceil(totalImages / PAGE_SIZE);
+      document.getElementById('galleryCount').textContent = totalImages;
+
+      if (totalImages === 0) {
+        gallery.innerHTML = '<div class="empty-gallery">No images yet. Generate some!</div>';
+        document.getElementById('galleryPagination').innerHTML = '';
+        return;
+      }
+
+      // Get current page images
+      const start = currentPage * PAGE_SIZE;
+      const pageImages = filteredImages.slice(start, start + PAGE_SIZE);
+
+      gallery.innerHTML = pageImages.map(img => {
+        const nameLabel = img.settings?._variables?.name;
+        const thumbSrc = img.thumbnail || img.data; // Fallback for old images
+        return `
         <div class="gallery-item ${selectedItems.has(img.id) ? 'selected' : ''}"
              data-id="${img.id}"
              onclick="toggleSelect(event, ${img.id})"
              ondblclick="openModal(${img.id})">
-          <img src="${img.data}" alt="Generated image" loading="lazy">
+          <img data-src="${thumbSrc}" alt="Generated image" class="lazy-img">
           <div class="checkbox">${selectedItems.has(img.id) ? '✓' : ''}</div>
+          ${nameLabel ? `<div class="name-label">${escapeHtml(nameLabel)}</div>` : ''}
           <div class="overlay">
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); openModal(${img.id})">View</button>
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); downloadImage(${img.id})">Save</button>
           </div>
         </div>
-      `).join('');
+      `}).join('');
+
+      // Build pagination
+      renderPagination(totalPages);
+
+      // Setup lazy loading
+      setupLazyLoading();
 
       updateDeleteButton();
+    }
+
+    function renderPagination(totalPages) {
+      const paginationEl = document.getElementById('galleryPagination');
+      if (totalPages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+      }
+
+      let html = '<div class="pagination">';
+
+      // Previous button
+      html += `<button class="btn-secondary btn-small" ${currentPage === 0 ? 'disabled' : ''} onclick="goToPage(${currentPage - 1})">←</button>`;
+
+      // Page numbers (show max 7 pages with ellipsis)
+      const maxVisible = 7;
+      let startPage = Math.max(0, currentPage - Math.floor(maxVisible / 2));
+      let endPage = Math.min(totalPages - 1, startPage + maxVisible - 1);
+      if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(0, endPage - maxVisible + 1);
+      }
+
+      if (startPage > 0) {
+        html += `<button class="btn-secondary btn-small" onclick="goToPage(0)">1</button>`;
+        if (startPage > 1) html += `<span class="pagination-ellipsis">...</span>`;
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="btn-secondary btn-small ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i + 1}</button>`;
+      }
+
+      if (endPage < totalPages - 1) {
+        if (endPage < totalPages - 2) html += `<span class="pagination-ellipsis">...</span>`;
+        html += `<button class="btn-secondary btn-small" onclick="goToPage(${totalPages - 1})">${totalPages}</button>`;
+      }
+
+      // Next button
+      html += `<button class="btn-secondary btn-small" ${currentPage === totalPages - 1 ? 'disabled' : ''} onclick="goToPage(${currentPage + 1})">→</button>`;
+
+      html += '</div>';
+      paginationEl.innerHTML = html;
+    }
+
+    function goToPage(page) {
+      currentPage = page;
+      loadGallery(false);
+      document.getElementById('gallery').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function setupLazyLoading() {
+      // Disconnect old observer
+      if (galleryObserver) galleryObserver.disconnect();
+
+      galleryObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const img = entry.target;
+            if (img.dataset.src) {
+              img.src = img.dataset.src;
+              img.removeAttribute('data-src');
+              img.classList.remove('lazy-img');
+              galleryObserver.unobserve(img);
+            }
+          }
+        });
+      }, { rootMargin: '100px' });
+
+      document.querySelectorAll('.lazy-img').forEach(img => {
+        galleryObserver.observe(img);
+      });
+    }
+
+    function setFolder(folder) {
+      currentFolder = folder;
+      currentPage = 0;
+      selectedItems.clear();
+      loadGallery();
     }
 
     function toggleSelect(event, id) {
@@ -1073,9 +1473,16 @@
     }
 
     async function openModal(id) {
-      // Get all images for carousel
-      galleryImages = await getAllImages();
-      galleryImages.sort((a, b) => b.timestamp - a.timestamp);
+      // Get all images for carousel, filtered by current folder
+      let allImages = await getAllImages();
+      allImages.sort((a, b) => b.timestamp - a.timestamp);
+
+      // Filter by current folder
+      if (currentFolder !== 'all') {
+        galleryImages = allImages.filter(img => img.folder === currentFolder);
+      } else {
+        galleryImages = allImages;
+      }
 
       // Find current index
       currentImageIndex = galleryImages.findIndex(img => img.id === id);
@@ -1097,29 +1504,102 @@
       document.getElementById('modalInfo').textContent = JSON.stringify(img.settings, null, 2);
       document.getElementById('modalCounter').textContent = `${currentImageIndex + 1} / ${galleryImages.length}`;
 
+      // Update name label
+      const nameLabel = img.settings?._variables?.name;
+      const nameLabelEl = document.getElementById('modalNameLabel');
+      if (nameLabel) {
+        nameLabelEl.textContent = nameLabel;
+        nameLabelEl.style.display = 'block';
+      } else {
+        nameLabelEl.style.display = 'none';
+      }
+
       // Update nav buttons
       document.getElementById('modalPrev').classList.toggle('disabled', currentImageIndex === 0);
       document.getElementById('modalNext').classList.toggle('disabled', currentImageIndex === galleryImages.length - 1);
 
-      // Update active thumbnail
-      document.querySelectorAll('.thumbnail').forEach((thumb, i) => {
-        thumb.classList.toggle('active', i === currentImageIndex);
-      });
+      // For large galleries, rebuild the window; for small, just update active state
+      if (galleryImages.length > THUMB_WINDOW * 2) {
+        updateThumbnailWindow();
+      } else {
+        // Update active thumbnail
+        document.querySelectorAll('.thumbnail').forEach((thumb, i) => {
+          thumb.classList.toggle('active', i === currentImageIndex);
+        });
 
-      // Scroll thumbnail into view
-      const activeThumb = document.querySelector('.thumbnail.active');
-      if (activeThumb) {
-        activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        // Scroll thumbnail into view
+        const activeThumb = document.querySelector('.thumbnail.active');
+        if (activeThumb) {
+          activeThumb.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
       }
     }
 
+    const THUMB_WINDOW = 21; // Show 21 thumbnails at a time (10 on each side + current)
+
     function buildThumbnailStrip() {
       const strip = document.getElementById('thumbnailStrip');
-      strip.innerHTML = galleryImages.map((img, i) => `
-        <div class="thumbnail ${i === currentImageIndex ? 'active' : ''}" onclick="goToImage(${i})">
-          <img src="${img.data}" alt="">
-        </div>
-      `).join('');
+      const total = galleryImages.length;
+
+      // For small galleries, render all
+      if (total <= THUMB_WINDOW * 2) {
+        strip.innerHTML = galleryImages.map((img, i) => {
+          const nameLabel = img.settings?._variables?.name;
+          const thumbSrc = img.thumbnail || img.data;
+          return `
+          <div class="thumbnail ${i === currentImageIndex ? 'active' : ''}" onclick="goToImage(${i})">
+            <img src="${thumbSrc}" alt="">
+            ${nameLabel ? `<div class="thumb-name">${escapeHtml(nameLabel)}</div>` : ''}
+          </div>
+        `}).join('');
+        return;
+      }
+
+      // For large galleries, use windowed rendering
+      updateThumbnailWindow();
+    }
+
+    function updateThumbnailWindow() {
+      const strip = document.getElementById('thumbnailStrip');
+      const total = galleryImages.length;
+      if (total <= THUMB_WINDOW * 2) return; // Let buildThumbnailStrip handle small galleries
+
+      const halfWindow = Math.floor(THUMB_WINDOW / 2);
+      let start = Math.max(0, currentImageIndex - halfWindow);
+      let end = Math.min(total, currentImageIndex + halfWindow + 1);
+
+      // Adjust window if at edges
+      if (start === 0) end = Math.min(total, THUMB_WINDOW);
+      if (end === total) start = Math.max(0, total - THUMB_WINDOW);
+
+      let html = '';
+
+      // Show "jump to start" button if not at beginning
+      if (start > 0) {
+        html += `<div class="thumbnail thumb-jump" onclick="goToImage(0)"><span>1</span></div>`;
+        if (start > 1) html += `<div class="thumbnail thumb-ellipsis"><span>...</span></div>`;
+      }
+
+      // Render visible thumbnails
+      for (let i = start; i < end; i++) {
+        const img = galleryImages[i];
+        const nameLabel = img.settings?._variables?.name;
+        const thumbSrc = img.thumbnail || img.data;
+        html += `
+          <div class="thumbnail ${i === currentImageIndex ? 'active' : ''}" onclick="goToImage(${i})">
+            <img src="${thumbSrc}" alt="">
+            ${nameLabel ? `<div class="thumb-name">${escapeHtml(nameLabel)}</div>` : ''}
+          </div>
+        `;
+      }
+
+      // Show "jump to end" button if not at end
+      if (end < total) {
+        if (end < total - 1) html += `<div class="thumbnail thumb-ellipsis"><span>...</span></div>`;
+        html += `<div class="thumbnail thumb-jump" onclick="goToImage(${total - 1})"><span>${total}</span></div>`;
+      }
+
+      strip.innerHTML = html;
     }
 
     function navigateModal(direction) {
@@ -1204,8 +1684,22 @@
 
       const link = document.createElement('a');
       link.href = img.data;
-      const timestamp = new Date(img.timestamp).toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      link.download = `silly-media-${timestamp}.png`;
+
+      // Determine filename: use {name} variable if available, otherwise timestamp
+      const name = img.settings?._variables?.name;
+      const ext = img.data.startsWith('data:image/png') ? 'png' :
+                  img.data.startsWith('data:image/jpeg') ? 'jpg' :
+                  img.data.startsWith('data:image/webp') ? 'webp' : 'png';
+
+      if (name) {
+        // Sanitize filename (remove invalid characters)
+        const safeName = name.replace(/[<>:"/\\|?*]/g, '_').trim();
+        link.download = `${safeName}.${ext}`;
+      } else {
+        const timestamp = new Date(img.timestamp).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        link.download = `silly-media-${timestamp}.${ext}`;
+      }
+
       link.click();
       showToast('Image downloaded');
     }
@@ -1255,6 +1749,187 @@ with open("image.png", "wb") as f:
       toast.textContent = message;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Batch generation
+    function validateBatchJson() {
+      const textarea = document.getElementById('batchJson');
+      const errorEl = document.getElementById('jsonError');
+      const validEl = document.getElementById('jsonValid');
+      const text = textarea.value.trim();
+
+      errorEl.classList.remove('show');
+      validEl.classList.remove('show');
+
+      if (!text) return null;
+
+      try {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) {
+          throw new Error('JSON must be an array of objects');
+        }
+        if (data.length === 0) {
+          throw new Error('Array is empty');
+        }
+        if (!data.every(item => typeof item === 'object' && item !== null && !Array.isArray(item))) {
+          throw new Error('Each item must be an object');
+        }
+
+        // Get all variable names
+        const allKeys = new Set();
+        data.forEach(item => Object.keys(item).forEach(k => allKeys.add(k)));
+
+        validEl.textContent = `Valid JSON: ${data.length} items with variables: ${Array.from(allKeys).join(', ')}`;
+        validEl.classList.add('show');
+        return data;
+      } catch (e) {
+        let message = e.message;
+        // Try to provide more helpful error for JSON syntax errors
+        if (e instanceof SyntaxError) {
+          const match = e.message.match(/position (\d+)/);
+          if (match) {
+            const pos = parseInt(match[1]);
+            const lines = text.substring(0, pos).split('\n');
+            message = `Syntax error at line ${lines.length}, column ${lines[lines.length-1].length + 1}: ${e.message}`;
+          }
+        }
+        errorEl.textContent = message;
+        errorEl.classList.add('show');
+        return null;
+      }
+    }
+
+    function interpolatePrompt(template, variables) {
+      return template.replace(/\{(\w+)\}/g, (match, key) => {
+        return variables.hasOwnProperty(key) ? variables[key] : match;
+      });
+    }
+
+    async function generateBatch() {
+      const batchData = validateBatchJson();
+      if (!batchData) {
+        showStatus('Please enter valid JSON', 'error');
+        return;
+      }
+
+      const promptTemplate = document.getElementById('prompt').value.trim();
+      if (!promptTemplate) {
+        showStatus('Please enter a prompt template with {variables}', 'error');
+        return;
+      }
+
+      // Create a folder name for this batch
+      const folderName = `Batch ${new Date().toLocaleString()}`;
+
+      const btn = document.getElementById('batchGenerateBtn');
+      const cancelBtn = document.getElementById('batchCancelBtn');
+      const progressEl = document.getElementById('batchProgress');
+      const progressFill = document.getElementById('batchProgressFill');
+      const progressText = document.getElementById('batchProgressText');
+      const batchNamesEl = document.getElementById('batchNames');
+
+      btn.style.display = 'none';
+      cancelBtn.style.display = 'block';
+      progressEl.style.display = 'block';
+      batchCancelled = false;
+
+      const total = batchData.length;
+      let completed = 0;
+
+      // Helper to update batch names display
+      function updateBatchNames(index) {
+        const prev = index > 0 ? batchData[index - 1]?.name : null;
+        const current = batchData[index]?.name;
+        const next = index < batchData.length - 1 ? batchData[index + 1]?.name : null;
+
+        if (current) {
+          let html = '';
+          if (prev) html += `<span class="prev-name">${escapeHtml(prev)}</span><span class="arrow">→</span>`;
+          html += `<span class="current-name">${escapeHtml(current)}</span>`;
+          if (next) html += `<span class="arrow">→</span><span class="next-name">${escapeHtml(next)}</span>`;
+          batchNamesEl.innerHTML = html;
+        } else {
+          batchNamesEl.innerHTML = '';
+        }
+      }
+
+      for (let i = 0; i < batchData.length; i++) {
+        if (batchCancelled) {
+          showStatus(`Batch cancelled after ${completed} images`, 'error');
+          break;
+        }
+
+        const variables = batchData[i];
+        const prompt = interpolatePrompt(promptTemplate, variables);
+        const negativeTemplate = document.getElementById('negativePrompt').value;
+        const negativePrompt = interpolatePrompt(negativeTemplate, variables);
+
+        progressText.textContent = `${i + 1} / ${total}`;
+        progressFill.style.width = `${(i / total) * 100}%`;
+        updateBatchNames(i);
+
+        const settings = getSettings();
+        settings.prompt = prompt;
+        if (negativePrompt) settings.negative_prompt = negativePrompt;
+        settings._variables = variables; // Store variables for name display
+
+        const url = `${getApiUrl()}/generate/${getModel()}`;
+
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || error.error || 'Generation failed');
+          }
+
+          const blob = await response.blob();
+
+          // Save with folder
+          await saveImage(blob, settings, folderName);
+          completed++;
+
+          // Update progress
+          progressFill.style.width = `${((i + 1) / total) * 100}%`;
+
+          // Show preview
+          const imgUrl = URL.createObjectURL(blob);
+          showPreview(imgUrl, null);
+
+          // Debounce between generations to let GPU breathe
+          if (i < batchData.length - 1) {
+            await new Promise(r => setTimeout(r, 500));
+          }
+
+        } catch (error) {
+          console.error(`Failed to generate image ${i + 1}:`, error);
+          showStatus(`Error on image ${i + 1}: ${error.message}`, 'error');
+          // Continue with next image instead of stopping
+        }
+      }
+
+      btn.style.display = 'block';
+      cancelBtn.style.display = 'none';
+      progressEl.style.display = 'none';
+      batchNamesEl.innerHTML = '';
+
+      if (!batchCancelled) {
+        showStatus(`Batch complete: ${completed}/${total} images`, 'success');
+      }
+
+      await loadGallery();
+      // Switch to the new folder
+      currentFolder = folderName;
+      await loadGallery();
+    }
+
+    function cancelBatch() {
+      batchCancelled = true;
+      document.getElementById('batchCancelBtn').textContent = 'Cancelling...';
     }
 
     // Initialize on load
