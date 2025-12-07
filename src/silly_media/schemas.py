@@ -65,7 +65,7 @@ class GenerateRequest(BaseModel):
         int, Field(default=None, ge=1, le=100, description="Number of denoising steps")
     ] = None
     cfg_scale: Annotated[
-        float, Field(default=None, ge=1.0, le=20.0, description="Classifier-free guidance scale")
+        float, Field(default=None, ge=0.0, le=20.0, description="Classifier-free guidance scale (0 for turbo models)")
     ] = None
     seed: Annotated[int | None, Field(default=None, ge=-1, description="Random seed (-1 or omit for random)")] = None
 

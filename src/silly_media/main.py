@@ -8,6 +8,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Path
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from .config import settings
@@ -63,6 +64,15 @@ app = FastAPI(
     description="Multi-model text-to-image generation API",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# Enable CORS for local UI
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
