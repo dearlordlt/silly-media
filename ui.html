@@ -509,9 +509,14 @@
       font-size: 0.85rem;
     }
     .batch-names .prev-name,
-    .batch-names .next-name {
+    .batch-names .next-name,
+    .batch-names .ref-name {
       color: var(--text-dim);
-      font-size: 0.75rem;
+      font-size: 0.85rem;
+    }
+    .batch-names .ref-name sup {
+      font-size: 0.6rem;
+      color: var(--accent2);
     }
     .batch-names .current-name {
       font-weight: 700;
@@ -521,6 +526,7 @@
     .batch-names .arrow {
       color: var(--text-dim);
       font-size: 0.7rem;
+      margin: 0 2px;
     }
     .variables-hint {
       font-size: 0.75rem;
@@ -532,6 +538,92 @@
       padding: 2px 4px;
       border-radius: 3px;
     }
+    .help-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      background: var(--accent);
+      color: white;
+      border-radius: 50%;
+      font-size: 0.7rem;
+      font-weight: bold;
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .help-icon:hover { filter: brightness(1.2); }
+
+    /* Help Modal */
+    .help-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .help-modal.open { display: flex; }
+    .help-content {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      position: relative;
+    }
+    .help-content h3 {
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .help-content h4 {
+      color: var(--text);
+      margin: 16px 0 8px;
+      font-size: 0.95rem;
+    }
+    .help-content p {
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      margin-bottom: 8px;
+    }
+    .help-content pre {
+      background: var(--bg);
+      padding: 12px;
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      overflow-x: auto;
+      margin-bottom: 8px;
+    }
+    .help-content code {
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--accent);
+    }
+    .help-content table {
+      width: 100%;
+      font-size: 0.8rem;
+      margin: 8px 0;
+    }
+    .help-content td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--surface2);
+    }
+    .help-content td:first-child {
+      white-space: nowrap;
+    }
+    .help-close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      font-size: 1.5rem;
+      color: var(--text-dim);
+      cursor: pointer;
+    }
+    .help-close:hover { color: var(--text); }
 
     /* Gallery folders */
     .gallery-folders {
@@ -739,13 +831,10 @@
 
       <div class="batch-section">
         <div class="collapsible-header" onclick="toggleCollapsible('batchSection')">
-          <label style="margin:0;cursor:pointer">Batch Mode</label>
+          <label style="margin:0;cursor:pointer">Batch Mode <span class="help-icon" onclick="event.stopPropagation(); showVariablesHelp()">?</span></label>
           <span id="batchSection-icon">+</span>
         </div>
         <div id="batchSection" class="collapsible-content">
-          <div class="variables-hint">
-            Use <code>{variable}</code> in your prompt. JSON array with objects containing any keys.
-          </div>
           <textarea id="batchJson" placeholder='[
   {"name": "Character1", "outfit": "Red dress"},
   {"name": "Character2", "outfit": "Blue suit"}
@@ -816,6 +905,44 @@
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>
+
+  <!-- Help Modal -->
+  <div class="help-modal" id="helpModal" onclick="closeHelpModal(event)">
+    <div class="help-content" onclick="event.stopPropagation()">
+      <span class="help-close" onclick="closeHelpModal()">&times;</span>
+      <h3>Batch Mode Variables</h3>
+
+      <h4>JSON Variables <code>{variable}</code></h4>
+      <p>Use values from your JSON data:</p>
+      <pre>Prompt: "{name} wearing {outfit}"
+JSON: [{"name": "Alice", "outfit": "red dress"}]
+Result: "Alice wearing red dress"</pre>
+
+      <h4>Relative References <code>{variable+N}</code></h4>
+      <p>Reference other items in the batch (circular):</p>
+      <pre>Prompt: "{name} with {name+1}"
+JSON: [{"name": "Alice"}, {"name": "Bob"}, {"name": "Charlie"}]
+Results:
+  1: "Alice with Bob"
+  2: "Bob with Charlie"
+  3: "Charlie with Alice" (wraps around)</pre>
+      <p><code>{name-1}</code> gets previous item, <code>{name+2}</code> skips one, etc.</p>
+
+      <h4>Random Built-ins <code>[variable]</code></h4>
+      <p>Random values picked fresh for each image:</p>
+      <table>
+        <tr><td><code>[location]</code></td><td>bedroom, beach, forest, city street, etc.</td></tr>
+        <tr><td><code>[time]</code></td><td>at dawn, at sunset, at night, etc.</td></tr>
+        <tr><td><code>[weather]</code></td><td>sunny, rainy, foggy, stormy, etc.</td></tr>
+        <tr><td><code>[mood]</code></td><td>peaceful, dramatic, romantic, etc.</td></tr>
+        <tr><td><code>[lighting]</code></td><td>soft natural light, neon lights, candlelight, etc.</td></tr>
+      </table>
+
+      <h4>Example Combined</h4>
+      <pre>Prompt: "{name} in the [location] [time], [mood] [lighting]"
+Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
+    </div>
+  </div>
 
   <script>
     // IndexedDB for storing images
@@ -1842,6 +1969,15 @@ with open("image.png", "wb") as f:
       setTimeout(() => toast.classList.remove('show'), 2000);
     }
 
+    function showVariablesHelp() {
+      document.getElementById('helpModal').classList.add('open');
+    }
+
+    function closeHelpModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('helpModal').classList.remove('open');
+    }
+
     // Batch generation
     function validateBatchJson() {
       const textarea = document.getElementById('batchJson');
@@ -1890,9 +2026,53 @@ with open("image.png", "wb") as f:
       }
     }
 
+    // Built-in random variables
+    const BUILTIN_VARS = {
+      location: [
+        'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace',
+        'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage',
+        'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall',
+        'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness',
+        'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub',
+        'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden'
+      ],
+      time: [
+        'at dawn', 'at sunrise', 'in the early morning', 'in the morning light',
+        'at midday', 'in the afternoon', 'in the golden hour', 'at sunset',
+        'at dusk', 'at twilight', 'in the evening', 'at night',
+        'at midnight', 'under moonlight', 'during blue hour', 'in the fog',
+        'during a thunderstorm', 'in the rain', 'during snowfall', 'on a cloudy day'
+      ],
+      weather: [
+        'sunny', 'cloudy', 'overcast', 'rainy', 'stormy',
+        'snowy', 'foggy', 'misty', 'windy', 'clear skies'
+      ],
+      mood: [
+        'peaceful', 'dramatic', 'mysterious', 'romantic', 'melancholic',
+        'energetic', 'serene', 'tense', 'joyful', 'contemplative'
+      ],
+      lighting: [
+        'soft natural light', 'harsh sunlight', 'golden hour glow', 'neon lights',
+        'candlelight', 'moonlight', 'studio lighting', 'dramatic shadows',
+        'backlit silhouette', 'ambient glow', 'bioluminescent', 'fairy lights'
+      ]
+    };
+
+    function getRandomBuiltin(key) {
+      const values = BUILTIN_VARS[key.toLowerCase()];
+      if (!values) return null;
+      return values[Math.floor(Math.random() * values.length)];
+    }
+
     function interpolatePrompt(template, variables, batchData = null, currentIndex = 0) {
-      // Match {variable} or {variable+N} or {variable-N}
-      return template.replace(/\{(\w+)([+-]\d+)?\}/g, (match, key, offset) => {
+      // First, replace built-in random variables [location], [time], etc.
+      let result = template.replace(/\[(\w+)\]/g, (match, key) => {
+        const value = getRandomBuiltin(key);
+        return value !== null ? value : match;
+      });
+
+      // Then, replace {variable} or {variable+N} or {variable-N}
+      result = result.replace(/\{(\w+)([+-]\d+)?\}/g, (match, key, offset) => {
         if (offset && batchData) {
           // Relative reference like {name+1} or {name-1}
           const offsetNum = parseInt(offset, 10);
@@ -1905,6 +2085,8 @@ with open("image.png", "wb") as f:
         // Regular reference like {name}
         return variables.hasOwnProperty(key) ? variables[key] : match;
       });
+
+      return result;
     }
 
     async function generateBatch() {
@@ -1938,21 +2120,45 @@ with open("image.png", "wb") as f:
       const total = batchData.length;
       let completed = 0;
 
-      // Helper to update batch names display
-      function updateBatchNames(index) {
-        const prev = index > 0 ? batchData[index - 1]?.name : null;
-        const current = batchData[index]?.name;
-        const next = index < batchData.length - 1 ? batchData[index + 1]?.name : null;
-
-        if (current) {
-          let html = '';
-          if (prev) html += `<span class="prev-name">${escapeHtml(prev)}</span><span class="arrow">→</span>`;
-          html += `<span class="current-name">${escapeHtml(current)}</span>`;
-          if (next) html += `<span class="arrow">→</span><span class="next-name">${escapeHtml(next)}</span>`;
-          batchNamesEl.innerHTML = html;
-        } else {
-          batchNamesEl.innerHTML = '';
+      // Find all {name} references with offsets in the prompt
+      function findNameReferences(template) {
+        const refs = [];
+        const regex = /\{name([+-]\d+)?\}/g;
+        let match;
+        while ((match = regex.exec(template)) !== null) {
+          const offset = match[1] ? parseInt(match[1], 10) : 0;
+          if (!refs.includes(offset)) refs.push(offset);
         }
+        return refs.sort((a, b) => a - b);
+      }
+
+      const nameRefs = findNameReferences(promptTemplate);
+
+      // Helper to update batch names display showing all referenced names
+      function updateBatchNames(index) {
+        if (nameRefs.length === 0 || !batchData[0]?.name) {
+          batchNamesEl.innerHTML = '';
+          return;
+        }
+
+        const total = batchData.length;
+        const names = nameRefs.map(offset => {
+          const targetIndex = ((index + offset) % total + total) % total;
+          const name = batchData[targetIndex]?.name || '?';
+          const label = offset === 0 ? '' : (offset > 0 ? `+${offset}` : `${offset}`);
+          const isMain = offset === 0;
+          return { name, label, isMain };
+        });
+
+        let html = names.map(({ name, label, isMain }) => {
+          if (isMain) {
+            return `<span class="current-name">${escapeHtml(name)}</span>`;
+          } else {
+            return `<span class="ref-name">${escapeHtml(name)}<sup>${label}</sup></span>`;
+          }
+        }).join('<span class="arrow">+</span>');
+
+        batchNamesEl.innerHTML = html;
       }
 
       for (let i = 0; i < batchData.length; i++) {
