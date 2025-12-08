@@ -1037,6 +1037,9 @@ Results:
         <tr><td><code>[object]</code></td><td>chair, bed, table, stairs, swing, etc.</td></tr>
         <tr><td><code>[race]</code></td><td>caucasian, african, asian, latino, etc.</td></tr>
         <tr><td><code>[expression]</code></td><td>smiling, serious, laughing, seductive, etc.</td></tr>
+        <tr><td><code>[hairstyle]</code></td><td>with long wavy hair, with a ponytail, with bangs, etc.</td></tr>
+        <tr><td><code>[haircolor]</code></td><td>blonde, brunette, red, black, pink, etc.</td></tr>
+        <tr><td><code>[hairstyle-color]</code></td><td>combines both: with long wavy blonde hair, with a red ponytail</td></tr>
       </table>
 
       <h4>Number Ranges <code>[N-M]</code></h4>
@@ -1045,14 +1048,14 @@ Results:
 → "asian woman, 27 years old, smiling"</pre>
 
       <h4>Examples</h4>
-      <pre>"{name} [pose] on [object] in [location], [expression]"
-→ "Alice sitting on chair in coffee shop, laughing"
+      <pre>"{name} [hairstyle-color], [pose] in [location], [expression]"
+→ "Alice with a blonde ponytail, sitting in coffee shop, laughing"
 
-"[race] woman, [expression], wearing [size] [color] dress"
-→ "nordic woman, seductive, wearing small red dress"
+"[race] woman [hairstyle-color], [expression], wearing [color] dress"
+→ "nordic woman with long wavy red hair, seductive, wearing blue dress"
 
-"{name} [pose] on [object], [expression], [mood] [lighting]"
-→ "Alice leaning on railing, thoughtful, romantic golden hour glow"</pre>
+"{name} [hairstyle-color], [pose] on [object], [mood] [lighting]"
+→ "Alice with a messy brunette bun, leaning on railing, romantic golden hour glow"</pre>
     </div>
   </div>
 
@@ -2404,9 +2407,49 @@ with open("image.png", "wb") as f:
         'seductive', 'flirty', 'sultry', 'playful',
         'thoughtful', 'pensive', 'contemplative', 'dreamy',
         'scared', 'terrified', 'worried', 'anxious',
-        'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running makeup', 'smudged makeup', 'dilated pupils', 'biting lip', 'tongue out', 'blushing', 'wide smile', 'raised eyebrow'
+        'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running makeup', 'smudged makeup', 'dilated pupils', 'biting lip', 'tongue out', 'blushing', 'wide smile', 'raised eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb'
+      ],
+      hairstyle: [
+        'with long straight hair', 'with long wavy hair', 'with long curly hair',
+        'with medium straight hair', 'with medium wavy hair', 'with medium curly hair',
+        'with short straight hair', 'with short wavy hair', 'with short curly hair',
+        'with a bob cut', 'with a pixie cut', 'with an undercut',
+        'with a ponytail', 'with a high ponytail', 'with a side ponytail',
+        'with a bun', 'with a messy bun', 'with a top knot',
+        'with braids', 'with a french braid', 'with box braids',
+        'with pigtails', 'with twin tails', 'with space buns',
+        'with bangs', 'with side swept bangs', 'with curtain bangs',
+        'with an updo', 'with loose waves', 'with hair down'
+      ],
+      haircolor: [
+        'blonde', 'platinum blonde', 'golden blonde', 'strawberry blonde',
+        'brunette', 'brown', 'light brown', 'dark brown', 'chestnut',
+        'black', 'jet black', 'raven',
+        'red', 'ginger', 'auburn', 'copper',
+        'gray', 'silver', 'white',
+        'pink', 'blue', 'purple', 'green', 'rainbow', 'ombre'
       ]
     };
+
+    // Combine hairstyle with color: "with long wavy hair" + "blonde" = "with long wavy blonde hair"
+    function getHairstyleWithColor() {
+      const style = getRandomBuiltin('hairstyle');
+      const color = getRandomBuiltin('haircolor');
+      // Insert color before "hair", or add "hair" at end for styles without it
+      if (style.includes(' hair')) {
+        return style.replace(' hair', ` ${color} hair`);
+      } else if (style.startsWith('with a ')) {
+        // "with a ponytail" -> "with a blonde ponytail hair"
+        return 'with a ' + color + ' ' + style.slice(7) + ' hair';
+      } else if (style.startsWith('with an ')) {
+        // "with an updo" -> "with a blonde updo hair"
+        return 'with a ' + color + ' ' + style.slice(8) + ' hair';
+      } else if (style.startsWith('with ')) {
+        // "with braids" -> "with blonde braids hair"
+        return 'with ' + color + ' ' + style.slice(5) + ' hair';
+      }
+      return style; // fallback
+    }
 
     function getRandomBuiltin(key) {
       const values = BUILTIN_VARS[key.toLowerCase()];
@@ -2415,8 +2458,11 @@ with open("image.png", "wb") as f:
     }
 
     function interpolatePrompt(template, variables, batchData = null, currentIndex = 0) {
-      // First, replace number range variables [N-M] like [30-40]
-      let result = template.replace(/\[(\d+)-(\d+)\]/g, (match, min, max) => {
+      // First, replace special combo variables like [hairstyle-color]
+      let result = template.replace(/\[hairstyle-color\]/gi, () => getHairstyleWithColor());
+
+      // Then, replace number range variables [N-M] like [30-40]
+      result = result.replace(/\[(\d+)-(\d+)\]/g, (match, min, max) => {
         const minNum = parseInt(min, 10);
         const maxNum = parseInt(max, 10);
         if (minNum > maxNum) return match; // Invalid range
