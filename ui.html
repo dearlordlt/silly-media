@@ -782,8 +782,18 @@
       border-bottom: 1px solid var(--surface2);
     }
     .collapsible-header:hover { color: var(--accent); }
+    .collapsible-header.small {
+      padding: 4px 0;
+      margin-bottom: 4px;
+      margin-top: 8px;
+    }
     .collapsible-content { display: none; }
     .collapsible-content.open { display: block; }
+    .neg-history-section {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--surface2);
+    }
   </style>
 </head>
 <body>
@@ -801,6 +811,16 @@
       </div>
       <div id="negativeSection" class="collapsible-content">
         <textarea id="negativePrompt" placeholder="What to avoid..." style="min-height:60px"></textarea>
+        <div class="neg-history-section">
+          <div class="collapsible-header small" onclick="event.stopPropagation(); toggleCollapsible('negHistorySection')">
+            <label style="margin:0;cursor:pointer;font-size:0.8rem">History (<span id="negHistoryCount">0</span>)</label>
+            <span id="negHistorySection-icon">+</span>
+          </div>
+          <div id="negHistorySection" class="collapsible-content">
+            <div id="negHistoryList" class="history-list" style="max-height:120px"></div>
+            <button class="btn-danger btn-small" onclick="clearNegHistory()" style="margin-top:6px;width:100%;font-size:0.75rem">Clear History</button>
+          </div>
+        </div>
       </div>
 
       <label for="aspectRatio">Aspect Ratio</label>
@@ -1000,11 +1020,20 @@ Results:
         <tr><td><code>[weather]</code></td><td>sunny, rainy, foggy, stormy, etc.</td></tr>
         <tr><td><code>[mood]</code></td><td>peaceful, dramatic, romantic, etc.</td></tr>
         <tr><td><code>[lighting]</code></td><td>soft natural light, neon lights, candlelight, etc.</td></tr>
+        <tr><td><code>[color]</code></td><td>red, emerald, navy, gold, lavender, etc.</td></tr>
+        <tr><td><code>[size]</code></td><td>small, medium, large</td></tr>
+        <tr><td><code>[pose]</code></td><td>standing, sitting, dancing, kneeling, etc.</td></tr>
       </table>
 
-      <h4>Example Combined</h4>
-      <pre>Prompt: "{name} in the [location] [time], [mood] [lighting]"
-Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
+      <h4>Examples</h4>
+      <pre>"{name} [pose] in the [location] [time]"
+→ "Alice dancing in the beach at sunset"
+
+"{name} wearing a [size] [color] dress, [pose]"
+→ "Alice wearing a small red dress, sitting"
+
+"{name} and {name+1} [pose] in [location], [mood] [lighting]"
+→ "Alice and Bob walking in forest, romantic golden hour glow"</pre>
     </div>
   </div>
 
@@ -1015,6 +1044,7 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
     const STORE_NAME = 'images';
     const SETTINGS_KEY = 'sillyMediaSettings';
     const HISTORY_KEY = 'sillyMediaHistory';
+    const NEG_HISTORY_KEY = 'sillyMediaNegHistory';
     const MAX_HISTORY = 50;
     const THUMB_SIZE = 200; // Thumbnail max dimension
     const PAGE_SIZE = 24; // Images per page
@@ -1033,6 +1063,7 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       db = await openDB();
       loadSavedSettings();
       loadHistory();
+      loadNegHistory();
       await loadGallery();
       setupEventListeners();
     }
@@ -1217,6 +1248,11 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       }
       localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
       loadHistory();
+
+      // Also add negative prompt to its separate history
+      if (settings.negative_prompt) {
+        addToNegHistory(settings.negative_prompt);
+      }
     }
 
     function loadHistory() {
@@ -1291,6 +1327,78 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       localStorage.removeItem(HISTORY_KEY);
       loadHistory();
       showToast('History cleared');
+    }
+
+    // Negative prompt history
+    function getNegHistory() {
+      try {
+        return JSON.parse(localStorage.getItem(NEG_HISTORY_KEY) || '[]');
+      } catch {
+        return [];
+      }
+    }
+
+    function addToNegHistory(negPrompt) {
+      if (!negPrompt || !negPrompt.trim()) return;
+      const history = getNegHistory();
+      // Don't add duplicates
+      const existingIndex = history.findIndex(h => h.prompt === negPrompt);
+      if (existingIndex !== -1) {
+        history.splice(existingIndex, 1);
+      }
+      // Add to front
+      history.unshift({
+        prompt: negPrompt,
+        timestamp: Date.now()
+      });
+      // Limit size
+      while (history.length > MAX_HISTORY) {
+        history.pop();
+      }
+      localStorage.setItem(NEG_HISTORY_KEY, JSON.stringify(history));
+      loadNegHistory();
+    }
+
+    function loadNegHistory() {
+      const history = getNegHistory();
+      const container = document.getElementById('negHistoryList');
+      document.getElementById('negHistoryCount').textContent = history.length;
+
+      if (history.length === 0) {
+        container.innerHTML = '<div class="empty-history">No negative prompt history yet</div>';
+        return;
+      }
+
+      container.innerHTML = history.map((h, i) => `
+        <div class="history-item" onclick="applyNegHistoryItem(${i})">
+          <span class="prompt-text">${escapeHtml(h.prompt)}</span>
+          <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteNegHistoryItem(${i})">x</button>
+        </div>
+      `).join('');
+    }
+
+    function applyNegHistoryItem(index) {
+      const history = getNegHistory();
+      const h = history[index];
+      if (!h) return;
+      document.getElementById('negativePrompt').value = h.prompt;
+      saveSettings();
+      showToast('Negative prompt loaded');
+    }
+
+    function deleteNegHistoryItem(index) {
+      const history = getNegHistory();
+      history.splice(index, 1);
+      localStorage.setItem(NEG_HISTORY_KEY, JSON.stringify(history));
+      loadNegHistory();
+      showToast('Removed from history');
+    }
+
+    function clearNegHistory() {
+      if (!confirm('Clear all negative prompt history?')) return;
+      localStorage.removeItem(NEG_HISTORY_KEY);
+      loadNegHistory();
+      showToast('Negative history cleared');
     }
 
     function escapeHtml(text) {
@@ -1394,8 +1502,8 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
     }
 
     async function generate() {
-      const prompt = document.getElementById('prompt').value.trim();
-      if (!prompt) {
+      const promptTemplate = document.getElementById('prompt').value.trim();
+      if (!promptTemplate) {
         showStatus('Please enter a prompt', 'error');
         return;
       }
@@ -1405,7 +1513,16 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       btn.textContent = 'Generating...';
       showStatus('Generating image...', 'loading');
 
+      // Interpolate random variables [location], [time], etc. for single generation
+      const prompt = interpolatePrompt(promptTemplate, {});
+      const negativeTemplate = document.getElementById('negativePrompt').value;
+      const negativePrompt = interpolatePrompt(negativeTemplate, {});
+
       const settings = getSettings();
+      settings.prompt = prompt;
+      if (negativePrompt && negativePrompt.trim()) {
+        settings.negative_prompt = negativePrompt;
+      }
       const url = `${getApiUrl()}/generate/${getModel()}`;
 
       try {
@@ -1447,9 +1564,9 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       let promptHtml = '';
 
       if (prompt) {
-        // If we have template info, show highlighted version
-        if (template && variables) {
-          promptHtml = `<div class="preview-prompt">${highlightPromptVariables(template, variables, batchData, batchIndex)}</div>`;
+        // Use the already-resolved prompt with highlighting (don't regenerate random values!)
+        if (variables) {
+          promptHtml = `<div class="preview-prompt">${highlightStoredPrompt(prompt, variables, batchData, batchIndex)}</div>`;
         } else {
           promptHtml = `<div class="preview-prompt">${escapeHtml(prompt)}</div>`;
         }
@@ -1502,17 +1619,35 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
     }
 
     // Highlight stored prompt by finding variable values within the already-resolved prompt
-    function highlightStoredPrompt(prompt, variables) {
+    function highlightStoredPrompt(prompt, variables, batchData = null, batchIndex = 0) {
       let result = escapeHtml(prompt);
 
-      // Highlight each variable value found in the prompt
-      for (const [key, value] of Object.entries(variables)) {
+      // Collect all variable values to highlight (from current item and referenced items)
+      const allValues = new Set();
+
+      // Add current variables
+      for (const value of Object.values(variables)) {
         if (value && typeof value === 'string') {
-          // Escape for regex and replace all occurrences
-          const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(escaped, 'g');
-          result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
+          allValues.add(value);
         }
+      }
+
+      // Add values from all batch items (for relative references like {name+1})
+      if (batchData) {
+        for (const item of batchData) {
+          for (const value of Object.values(item)) {
+            if (value && typeof value === 'string') {
+              allValues.add(value);
+            }
+          }
+        }
+      }
+
+      // Highlight each variable value found in the prompt (pink for JSON vars)
+      for (const value of allValues) {
+        const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, 'g');
+        result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
       }
 
       // Try to identify builtin values (location, time, etc.) - they're harder to detect
@@ -2209,6 +2344,26 @@ with open("image.png", "wb") as f:
         'soft natural light', 'harsh sunlight', 'golden hour glow', 'neon lights',
         'candlelight', 'moonlight', 'studio lighting', 'dramatic shadows',
         'backlit silhouette', 'ambient glow', 'bioluminescent', 'fairy lights'
+      ],
+      color: [
+        'red', 'crimson', 'scarlet', 'burgundy', 'coral',
+        'orange', 'tangerine', 'peach', 'amber', 'rust',
+        'yellow', 'gold', 'lemon', 'mustard', 'cream',
+        'green', 'emerald', 'olive', 'mint', 'sage', 'forest green', 'lime',
+        'blue', 'navy', 'cobalt', 'sky blue', 'teal', 'turquoise', 'cyan', 'indigo',
+        'purple', 'violet', 'lavender', 'plum', 'magenta', 'fuchsia',
+        'pink', 'rose', 'blush', 'salmon', 'hot pink',
+        'brown', 'chocolate', 'tan', 'beige', 'caramel', 'copper',
+        'black', 'charcoal', 'onyx', 'ebony',
+        'white', 'ivory', 'pearl', 'snow',
+        'gray', 'silver', 'slate', 'ash'
+      ],
+      size: ['small', 'medium', 'large'],
+      pose: [
+        'standing', 'sitting', 'kneeling', 'lying down', 'crouching',
+        'walking', 'running', 'jumping', 'dancing', 'leaning',
+        'stretching', 'reaching', 'pointing', 'waving', 'crossing arms',
+        'hands on hips', 'bending over', 'squatting', 'lounging'
       ]
     };
 
@@ -2379,6 +2534,7 @@ with open("image.png", "wb") as f:
 
       btn.style.display = 'block';
       cancelBtn.style.display = 'none';
+      cancelBtn.textContent = 'Cancel Batch'; // Reset button text
       progressEl.style.display = 'none';
       batchNamesEl.innerHTML = '';
       document.getElementById('batchPrompt').textContent = '';
