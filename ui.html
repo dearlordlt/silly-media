@@ -161,6 +161,33 @@
       display: flex;
       gap: 8px;
     }
+    .preview-prompt {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.85));
+      color: white;
+      padding: 30px 12px 12px;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      max-height: 30%;
+      overflow-y: auto;
+    }
+    .preview-prompt::-webkit-scrollbar { width: 4px; }
+    .preview-prompt::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 2px; }
+    .preview-prompt .var-json {
+      color: #ff6b9d;
+      font-weight: 600;
+    }
+    .preview-prompt .var-ref {
+      color: #a78bfa;
+      font-weight: 600;
+    }
+    .preview-prompt .var-builtin {
+      color: #4ade80;
+      font-weight: 600;
+    }
 
     /* Gallery */
     .gallery-header {
@@ -358,6 +385,29 @@
       font-weight: 600;
       text-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
+    .modal-prompt {
+      background: var(--surface);
+      padding: 10px 16px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      line-height: 1.5;
+      margin-top: 8px;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .modal-prompt .var-json {
+      color: #ff6b9d;
+      font-weight: 600;
+    }
+    .modal-prompt .var-ref {
+      color: #a78bfa;
+      font-weight: 600;
+    }
+    .modal-prompt .var-builtin {
+      color: #4ade80;
+      font-weight: 600;
+    }
     .modal-info {
       background: var(--surface);
       padding: 12px 16px;
@@ -527,6 +577,17 @@
       color: var(--text-dim);
       font-size: 0.7rem;
       margin: 0 2px;
+    }
+    .batch-prompt {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border-radius: var(--radius);
+      font-size: 0.75rem;
+      color: var(--text);
+      line-height: 1.4;
+      max-height: 60px;
+      overflow-y: auto;
     }
     .variables-hint {
       font-size: 0.75rem;
@@ -847,6 +908,7 @@
             </div>
             <div class="batch-progress-text" id="batchProgressText">0 / 0</div>
             <div class="batch-names" id="batchNames"></div>
+            <div class="batch-prompt" id="batchPrompt"></div>
           </div>
           <button id="batchGenerateBtn" class="btn-primary" onclick="generateBatch()" style="width:100%">Generate Batch</button>
           <button id="batchCancelBtn" class="btn-danger" onclick="cancelBatch()" style="width:100%;margin-top:8px;display:none">Cancel Batch</button>
@@ -892,6 +954,8 @@
     </div>
 
     <div class="thumbnail-strip" id="thumbnailStrip" onclick="event.stopPropagation()"></div>
+
+    <div class="modal-prompt" id="modalPrompt" onclick="event.stopPropagation()"></div>
 
     <div class="modal-info" onclick="event.stopPropagation()">
       <pre id="modalInfo"></pre>
@@ -1365,9 +1429,9 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
         addToHistory(settings);
         await loadGallery();
 
-        // Show preview
+        // Show preview with prompt
         const imgUrl = URL.createObjectURL(blob);
-        showPreview(imgUrl, id);
+        showPreview(imgUrl, id, settings.prompt);
 
         showStatus(`Generated in ${elapsed}s`, 'success');
       } catch (error) {
@@ -1378,14 +1442,90 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       }
     }
 
-    function showPreview(url, id) {
+    function showPreview(url, id, prompt = null, template = null, variables = null, batchData = null, batchIndex = 0) {
       const container = document.getElementById('previewContainer');
+      let promptHtml = '';
+
+      if (prompt) {
+        // If we have template info, show highlighted version
+        if (template && variables) {
+          promptHtml = `<div class="preview-prompt">${highlightPromptVariables(template, variables, batchData, batchIndex)}</div>`;
+        } else {
+          promptHtml = `<div class="preview-prompt">${escapeHtml(prompt)}</div>`;
+        }
+      }
+
       container.innerHTML = `
         <img src="${url}" alt="Generated image">
+        ${promptHtml}
         <div class="preview-actions">
           <button class="btn-secondary btn-small" onclick="downloadImage(${id})">Download</button>
         </div>
       `;
+    }
+
+    function highlightPromptVariables(template, variables, batchData = null, currentIndex = 0) {
+      let result = escapeHtml(template);
+
+      // Highlight [builtin] variables (random) - green
+      result = result.replace(/\[(\w+)\]/g, (match, key) => {
+        const value = getRandomBuiltin(key);
+        if (value !== null) {
+          return `<span class="var-builtin">${escapeHtml(value)}</span>`;
+        }
+        return match;
+      });
+
+      // Highlight {variable+N} or {variable-N} references - purple
+      result = result.replace(/\{(\w+)([+-]\d+)\}/g, (match, key, offset) => {
+        if (batchData) {
+          const offsetNum = parseInt(offset, 10);
+          const total = batchData.length;
+          const targetIndex = ((currentIndex + offsetNum) % total + total) % total;
+          const targetVars = batchData[targetIndex];
+          if (targetVars?.hasOwnProperty(key)) {
+            return `<span class="var-ref">${escapeHtml(targetVars[key])}</span>`;
+          }
+        }
+        return match;
+      });
+
+      // Highlight {variable} - pink/accent
+      result = result.replace(/\{(\w+)\}/g, (match, key) => {
+        if (variables.hasOwnProperty(key)) {
+          return `<span class="var-json">${escapeHtml(variables[key])}</span>`;
+        }
+        return match;
+      });
+
+      return result;
+    }
+
+    // Highlight stored prompt by finding variable values within the already-resolved prompt
+    function highlightStoredPrompt(prompt, variables) {
+      let result = escapeHtml(prompt);
+
+      // Highlight each variable value found in the prompt
+      for (const [key, value] of Object.entries(variables)) {
+        if (value && typeof value === 'string') {
+          // Escape for regex and replace all occurrences
+          const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped, 'g');
+          result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
+        }
+      }
+
+      // Try to identify builtin values (location, time, etc.) - they're harder to detect
+      // but we can highlight known patterns
+      for (const [category, values] of Object.entries(BUILTIN_VARS)) {
+        for (const value of values) {
+          const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, 'gi');
+          result = result.replace(regex, `<span class="var-builtin">${escapeHtml(value)}</span>`);
+        }
+      }
+
+      return result;
     }
 
     function showStatus(message, type) {
@@ -1641,8 +1781,22 @@ Result: "Alice in the beach at sunset, romantic golden hour glow"</pre>
       document.getElementById('modalInfo').textContent = JSON.stringify(img.settings, null, 2);
       document.getElementById('modalCounter').textContent = `${currentImageIndex + 1} / ${galleryImages.length}`;
 
+      // Update prompt display with highlighting
+      const modalPromptEl = document.getElementById('modalPrompt');
+      const variables = img.settings?._variables;
+      if (img.settings?.prompt) {
+        if (variables) {
+          // Show highlighted prompt - reconstruct what we can
+          modalPromptEl.innerHTML = highlightStoredPrompt(img.settings.prompt, variables);
+        } else {
+          modalPromptEl.textContent = img.settings.prompt;
+        }
+      } else {
+        modalPromptEl.innerHTML = '';
+      }
+
       // Update name label
-      const nameLabel = img.settings?._variables?.name;
+      const nameLabel = variables?.name;
       const nameLabelEl = document.getElementById('modalNameLabel');
       if (nameLabel) {
         nameLabelEl.textContent = nameLabel;
@@ -2176,6 +2330,9 @@ with open("image.png", "wb") as f:
         progressFill.style.width = `${(i / total) * 100}%`;
         updateBatchNames(i);
 
+        // Show current prompt in progress area
+        document.getElementById('batchPrompt').textContent = prompt;
+
         const settings = getSettings();
         settings.prompt = prompt;
         if (negativePrompt) settings.negative_prompt = negativePrompt;
@@ -2204,13 +2361,13 @@ with open("image.png", "wb") as f:
           // Update progress
           progressFill.style.width = `${((i + 1) / total) * 100}%`;
 
-          // Show preview
+          // Show preview with highlighted prompt
           const imgUrl = URL.createObjectURL(blob);
-          showPreview(imgUrl, null);
+          showPreview(imgUrl, null, prompt, promptTemplate, variables, batchData, i);
 
           // Debounce between generations to let GPU breathe
           if (i < batchData.length - 1) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000));
           }
 
         } catch (error) {
@@ -2224,6 +2381,7 @@ with open("image.png", "wb") as f:
       cancelBtn.style.display = 'none';
       progressEl.style.display = 'none';
       batchNamesEl.innerHTML = '';
+      document.getElementById('batchPrompt').textContent = '';
 
       if (!batchCancelled) {
         showStatus(`Batch complete: ${completed}/${total} images`, 'success');
