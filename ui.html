@@ -358,13 +358,20 @@
       color: var(--text-dim);
       opacity: 0.7;
       transition: opacity 0.15s, color 0.15s;
+      margin-left: auto;
     }
     .save-btn:hover { opacity: 1; color: var(--accent); }
     .label-row {
       display: flex;
       align-items: center;
-      gap: 4px;
     }
+    .label-row label { flex: 1; }
+    .textarea-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .textarea-header label { flex: 1; font-size: 0.85rem; color: var(--text-dim); }
 
     /* Modal */
     .modal {
@@ -927,10 +934,13 @@
 
       <div class="collapsible-header" onclick="toggleCollapsible('negativeSection')">
         <label style="margin:0;cursor:pointer">Negative Prompt</label>
-        <button class="save-btn" onclick="event.stopPropagation(); saveCurrentNegPrompt()" title="Save to history">&#128190;</button>
         <span id="negativeSection-icon">+</span>
       </div>
       <div id="negativeSection" class="collapsible-content">
+        <div class="textarea-header">
+          <label>Enter negative prompt</label>
+          <button class="save-btn" onclick="saveCurrentNegPrompt()" title="Save to history">&#128190;</button>
+        </div>
         <textarea id="negativePrompt" placeholder="What to avoid..." style="min-height:60px"></textarea>
         <div class="neg-history-section">
           <div class="collapsible-header small" onclick="event.stopPropagation(); toggleCollapsible('negHistorySection')">
@@ -1039,8 +1049,8 @@
         </div>
         <div id="simpleBatchSection" class="collapsible-content">
           <p style="font-size:0.8rem;color:var(--text-dim);margin:0 0 8px">Generate X images with randomized [] variables</p>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="number" id="simpleBatchCount" value="10" min="1" max="100" style="width:70px">
+          <div style="display:flex;gap:8px;align-items:stretch">
+            <input type="number" id="simpleBatchCount" value="10" min="1" max="100" style="width:70px" onchange="saveSettings()" oninput="saveSettings()">
             <button id="simpleBatchBtn" class="btn-primary" onclick="generateSimpleBatch()" style="flex:1">Generate</button>
           </div>
           <button id="simpleBatchCancelBtn" class="btn-danger" onclick="cancelSimpleBatch()" style="width:100%;margin-top:8px;display:none">Cancel</button>
@@ -1058,11 +1068,13 @@
       <div class="batch-section">
         <div class="collapsible-header" onclick="toggleCollapsible('jsonBatchSection')">
           <label style="margin:0;cursor:pointer">JSON Batch <span class="help-icon" onclick="event.stopPropagation(); showVariablesHelp()">?</span></label>
-          <button class="save-btn" onclick="event.stopPropagation(); saveCurrentJson()" title="Save to history">&#128190;</button>
           <span id="jsonBatchSection-icon">+</span>
         </div>
         <div id="jsonBatchSection" class="collapsible-content">
-          <p style="font-size:0.8rem;color:var(--text-dim);margin:0 0 8px">Use {"{"}variables{"}"} from JSON data</p>
+          <div class="textarea-header">
+            <label>JSON data for &#123;variables&#125;</label>
+            <button class="save-btn" onclick="saveCurrentJson()" title="Save to history">&#128190;</button>
+          </div>
           <textarea id="batchJson" placeholder='[
   {"name": "Character1", "outfit": "Red dress"},
   {"name": "Character2", "outfit": "Blue suit"}
@@ -1216,7 +1228,7 @@ Results:
       <h3>Settings</h3>
       <div class="settings-row">
         <label>Batch Debounce</label>
-        <select id="settingDebounce" onchange="saveSettings()">
+        <select id="settingDebounce" onchange="saveAppSettings()">
           <option value="500">500ms</option>
           <option value="1000" selected>1000ms</option>
           <option value="2000">2000ms</option>
@@ -1372,7 +1384,8 @@ Results:
         apiUrl: document.getElementById('apiUrl').value,
         model: document.getElementById('model').value,
         negativePrompt: document.getElementById('negativePrompt').value,
-        batchJson: document.getElementById('batchJson').value
+        batchJson: document.getElementById('batchJson').value,
+        simpleBatchCount: document.getElementById('simpleBatchCount').value
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     }
@@ -1411,6 +1424,9 @@ Results:
         if (s.batchJson) {
           document.getElementById('batchJson').value = s.batchJson;
           validateBatchJson(); // Validate on load to show status
+        }
+        if (s.simpleBatchCount) {
+          document.getElementById('simpleBatchCount').value = s.simpleBatchCount;
         }
       } catch (e) {
         console.error('Failed to load settings:', e);
@@ -1728,6 +1744,7 @@ Results:
       if (history[index]) {
         document.getElementById('batchJson').value = history[index].json;
         validateBatchJson();
+        saveSettings();
         showToast('JSON loaded from history');
       }
     }
@@ -2618,7 +2635,7 @@ with open("image.png", "wb") as f:
       document.getElementById('settingsModal').classList.remove('open');
     }
 
-    function saveSettings() {
+    function saveAppSettings() {
       const settings = {
         debounce: parseInt(document.getElementById('settingDebounce').value)
       };
@@ -2730,7 +2747,7 @@ with open("image.png", "wb") as f:
       ],
       size: ['small', 'medium', 'large'],
       pose: [
-        'standing', 'sitting', 'kneeling', 'lying down', 'crouching', 'walking', 'running', 'jumping', 'dancing', 'leaning', 'stretching', 'reaching', 'pointing', 'waving', 'crossing arms', 'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy style', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated'
+        'standing', 'sitting', 'kneeling', 'lying down', 'crouching', 'walking', 'running', 'jumping', 'dancing', 'leaning', 'stretching', 'reaching', 'pointing', 'waving', 'crossing arms', 'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy style', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated', 'enslaved', 'submissive', 'dominant', 'obedient', 'pleading', 'begging', 'teasing', 'taunting', 'humiliated', 'degraded', 'objectified', 'used', 'owned'
       ],
       object: [
         'chair', 'stool', 'bench', 'sofa', 'armchair', 'throne', 'bed', 'mattress', 'pillow', 'blanket', 'table', 'desk', 'counter', 'bar', 'floor', 'carpet', 'rug', 'stairs', 'ladder', 'railing', 'balcony', 'window sill', 'doorway', 'wall', 'column', 'pillar','rock', 'tree stump', 'log', 'swing', 'hammock', 'car hood', 'motorcycle', 'bicycle', 'boat', 'pool edge', 'fountain', 'bathtub', 'shower', 'St. Andrew\'s cross', 'pillory', 'cage', 'stocks', 'cross', 'altar', 'dungeon bench', 'torture rack', 'whipping post', 'examination table', 'operating table', 'gynecological chair', 'spank bench', 'bondage table', 'humiliation stool', 'flogging bench', 'restraint bed', 'slave block', 'pillory stand', 'bondage frame', 'crop', 'paddle', 'butt-plug', 'dildo', 'vibrator', 'anal beads', 'nipple clamps', 'ball gag', 'blindfold', 'collar and leash', 'spreaders', 'chastity belt', 'shackles', 'manacles', 'chains', 'shibari-ropes'
@@ -2739,7 +2756,7 @@ with open("image.png", "wb") as f:
         'caucasian', 'african', 'asian', 'latino', 'hispanic', 'middle eastern', 'indian', 'polynesian', 'native american', 'mediterranean', 'nordic', 'slavic', 'southeast asian', 'east asian', 'mixed race', 'biracial', 'black african', 'arab', 'persian', 'maori', 'pacific islander', 'caribbean', 'afro-latino'
       ],
       expression: [
-        'smiling', 'laughing', 'grinning', 'giggling', 'serious', 'stern', 'stoic', 'neutral', 'sad', 'crying', 'tearful', 'melancholic', 'angry', 'furious', 'annoyed', 'frowning', 'surprised', 'shocked', 'amazed', 'wide-eyed', 'seductive', 'flirty', 'sultry', 'playful', 'thoughtful', 'pensive', 'contemplative', 'dreamy', 'scared', 'terrified', 'worried', 'anxious', 'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running-makeup', 'smudged-makeup', 'dilated-pupils', 'biting-lip', 'tongue out', 'blushing', 'wide-smile', 'raised-eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish-grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb'
+        'smiling', 'laughing', 'grinning', 'giggling', 'serious', 'stern', 'stoic', 'neutral', 'sad', 'crying', 'tearful', 'melancholic', 'angry', 'furious', 'annoyed', 'frowning', 'surprised', 'shocked', 'amazed', 'wide-eyed', 'seductive', 'flirty', 'sultry', 'playful', 'thoughtful', 'pensive', 'contemplative', 'dreamy', 'scared', 'terrified', 'worried', 'anxious', 'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running-makeup', 'smudged-makeup', 'dilated-pupils', 'biting-lip', 'tongue out', 'blushing', 'wide-smile', 'raised-eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish-grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb', 'embarrased', 'begging', 'defeated', 'pathetic', 'shy'
       ],
       hairstyle: [
         'with long straight hair', 'with long wavy hair', 'with long curly hair',  'with medium straight hair', 'with medium wavy hair', 'with medium curly hair', 'with short straight hair', 'with short wavy hair', 'with short curly hair', 'with a bob cut', 'with a pixie cut', 'with an undercut', 'with a ponytail', 'with a high ponytail', 'with a side ponytail', 'with a bun', 'with a messy bun', 'with a top knot', 'with braids', 'with a french braid', 'with box braids', 'with pigtails', 'with twin tails', 'with space buns', 'with bangs', 'with side swept bangs', 'with curtain bangs', 'with an updo', 'with loose waves', 'with hair down'
