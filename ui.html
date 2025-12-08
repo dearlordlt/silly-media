@@ -330,11 +330,40 @@
       font-size: 0.75rem;
     }
     .history-item:hover .delete-btn { opacity: 1; }
+    .history-item .fav-btn {
+      opacity: 0.3;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      font-size: 0.9rem;
+      color: var(--text);
+      transition: opacity 0.15s;
+    }
+    .history-item:hover .fav-btn { opacity: 0.7; }
+    .history-item .fav-btn.active { opacity: 1; color: gold; }
+    .history-item .fav-btn:hover { opacity: 1; }
     .empty-history {
       text-align: center;
       padding: 20px;
       color: var(--text-dim);
       font-size: 0.85rem;
+    }
+    .save-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px 6px;
+      font-size: 1rem;
+      color: var(--text-dim);
+      opacity: 0.7;
+      transition: opacity 0.15s, color 0.15s;
+    }
+    .save-btn:hover { opacity: 1; color: var(--accent); }
+    .label-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
     /* Modal */
@@ -890,11 +919,15 @@
         <span class="settings-icon" onclick="openSettings()" title="Settings">&#9881;</span>
       </div>
 
-      <label for="prompt">Prompt</label>
+      <div class="label-row">
+        <label for="prompt">Prompt</label>
+        <button class="save-btn" onclick="saveCurrentPrompt()" title="Save to history">&#128190;</button>
+      </div>
       <textarea id="prompt" placeholder="Describe the image you want to generate..."></textarea>
 
       <div class="collapsible-header" onclick="toggleCollapsible('negativeSection')">
         <label style="margin:0;cursor:pointer">Negative Prompt</label>
+        <button class="save-btn" onclick="event.stopPropagation(); saveCurrentNegPrompt()" title="Save to history">&#128190;</button>
         <span id="negativeSection-icon">+</span>
       </div>
       <div id="negativeSection" class="collapsible-content">
@@ -1025,6 +1058,7 @@
       <div class="batch-section">
         <div class="collapsible-header" onclick="toggleCollapsible('jsonBatchSection')">
           <label style="margin:0;cursor:pointer">JSON Batch <span class="help-icon" onclick="event.stopPropagation(); showVariablesHelp()">?</span></label>
+          <button class="save-btn" onclick="event.stopPropagation(); saveCurrentJson()" title="Save to history">&#128190;</button>
           <span id="jsonBatchSection-icon">+</span>
         </div>
         <div id="jsonBatchSection" class="collapsible-content">
@@ -1050,6 +1084,14 @@
             <div class="batch-progress-text" id="batchProgressText">0 / 0</div>
             <div class="batch-names" id="batchNames"></div>
             <div class="batch-prompt" id="batchPrompt"></div>
+          </div>
+          <div class="collapsible-header small" onclick="event.stopPropagation(); toggleCollapsible('jsonHistorySection')" style="margin-top:12px">
+            <label style="margin:0;cursor:pointer;font-size:0.8rem">JSON History (<span id="jsonHistoryCount">0</span>)</label>
+            <span id="jsonHistorySection-icon">+</span>
+          </div>
+          <div id="jsonHistorySection" class="collapsible-content">
+            <div id="jsonHistoryList" class="history-list" style="max-height:150px"></div>
+            <button class="btn-danger btn-small" onclick="clearJsonHistory()" style="margin-top:6px;width:100%;font-size:0.75rem">Clear History</button>
           </div>
         </div>
       </div>
@@ -1194,6 +1236,7 @@ Results:
     const SETTINGS_KEY = 'sillyMediaSettings';
     const HISTORY_KEY = 'sillyMediaHistory';
     const NEG_HISTORY_KEY = 'sillyMediaNegHistory';
+    const JSON_HISTORY_KEY = 'sillyMediaJsonHistory';
     const MAX_HISTORY = 50;
     const THUMB_SIZE = 200; // Thumbnail max dimension
     const PAGE_SIZE = 24; // Images per page
@@ -1214,6 +1257,7 @@ Results:
       loadSavedSettings();
       loadHistory();
       loadNegHistory();
+      loadJsonHistory();
       loadBatchRandomize();
       loadAppSettings();
       await loadGallery();
@@ -1382,28 +1426,47 @@ Results:
       }
     }
 
-    function addToHistory(settings) {
+    function addToHistory(promptText) {
+      if (!promptText?.trim()) return;
       const history = getHistory();
       // Don't add duplicates (same prompt)
-      const existingIndex = history.findIndex(h => h.prompt === settings.prompt);
+      const existingIndex = history.findIndex(h => h.prompt === promptText);
       if (existingIndex !== -1) {
-        history.splice(existingIndex, 1);
+        // Keep favorite status if already exists
+        return;
       }
       // Add to front
       history.unshift({
-        ...settings,
+        prompt: promptText,
+        favorite: false,
         timestamp: Date.now()
       });
-      // Limit size
+      // Limit size (don't remove favorites)
       while (history.length > MAX_HISTORY) {
-        history.pop();
+        const lastNonFav = history.findLastIndex(h => !h.favorite);
+        if (lastNonFav > -1) history.splice(lastNonFav, 1);
+        else break;
       }
       localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
       loadHistory();
+      showToast('Prompt saved');
+    }
 
-      // Also add negative prompt to its separate history
-      if (settings.negative_prompt) {
-        addToNegHistory(settings.negative_prompt);
+    function saveCurrentPrompt() {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) {
+        showToast('No prompt to save');
+        return;
+      }
+      addToHistory(prompt);
+    }
+
+    function toggleFavoriteHistory(index) {
+      const history = getHistory();
+      if (history[index]) {
+        history[index].favorite = !history[index].favorite;
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+        loadHistory();
       }
     }
 
@@ -1417,10 +1480,19 @@ Results:
         return;
       }
 
-      container.innerHTML = history.map((h, i) => `
-        <div class="history-item" onclick="applyHistoryItem(${i})">
+      // Sort: favorites first, then by timestamp
+      const sorted = [...history].map((h, i) => ({...h, origIndex: i}))
+        .sort((a, b) => {
+          if (a.favorite && !b.favorite) return -1;
+          if (!a.favorite && b.favorite) return 1;
+          return b.timestamp - a.timestamp;
+        });
+
+      container.innerHTML = sorted.map(h => `
+        <div class="history-item" onclick="applyHistoryItem(${h.origIndex})">
+          <button class="fav-btn ${h.favorite ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteHistory(${h.origIndex})" title="${h.favorite ? 'Unpin' : 'Pin'}">&#9733;</button>
           <span class="prompt-text">${escapeHtml(h.prompt)}</span>
-          <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${i})">x</button>
+          <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${h.origIndex})">x</button>
         </div>
       `).join('');
     }
@@ -1431,39 +1503,8 @@ Results:
       if (!h) return;
 
       document.getElementById('prompt').value = h.prompt || '';
-      document.getElementById('negativePrompt').value = h.negative_prompt || '';
-
-      if (h.num_inference_steps) {
-        document.getElementById('steps').value = h.num_inference_steps;
-        document.getElementById('stepsValue').textContent = h.num_inference_steps;
-      }
-      if (h.cfg_scale !== undefined) {
-        document.getElementById('cfgScale').value = h.cfg_scale;
-        document.getElementById('cfgScaleValue').textContent = h.cfg_scale;
-      }
-      if (h.seed) {
-        document.getElementById('seed').value = h.seed;
-      } else {
-        document.getElementById('seed').value = -1;
-      }
-
-      if (h.width && h.height) {
-        document.getElementById('aspectRatio').value = 'custom';
-        document.getElementById('customSize').style.display = 'block';
-        document.getElementById('baseSizeRow').style.display = 'none';
-        document.getElementById('width').value = h.width;
-        document.getElementById('height').value = h.height;
-      } else if (h.aspect_ratio) {
-        document.getElementById('aspectRatio').value = h.aspect_ratio;
-        document.getElementById('customSize').style.display = 'none';
-        document.getElementById('baseSizeRow').style.display = 'block';
-        if (h.base_size) {
-          document.getElementById('baseSize').value = h.base_size;
-          document.getElementById('baseSizeValue').textContent = h.base_size;
-        }
-      }
-
-      showToast('Settings loaded from history');
+      saveSettings();
+      showToast('Prompt loaded');
     }
 
     function deleteHistoryItem(index) {
@@ -1496,19 +1537,41 @@ Results:
       // Don't add duplicates
       const existingIndex = history.findIndex(h => h.prompt === negPrompt);
       if (existingIndex !== -1) {
-        history.splice(existingIndex, 1);
+        return;
       }
       // Add to front
       history.unshift({
         prompt: negPrompt,
+        favorite: false,
         timestamp: Date.now()
       });
-      // Limit size
+      // Limit size (don't remove favorites)
       while (history.length > MAX_HISTORY) {
-        history.pop();
+        const lastNonFav = history.findLastIndex(h => !h.favorite);
+        if (lastNonFav > -1) history.splice(lastNonFav, 1);
+        else break;
       }
       localStorage.setItem(NEG_HISTORY_KEY, JSON.stringify(history));
       loadNegHistory();
+      showToast('Negative prompt saved');
+    }
+
+    function saveCurrentNegPrompt() {
+      const prompt = document.getElementById('negativePrompt').value.trim();
+      if (!prompt) {
+        showToast('No negative prompt to save');
+        return;
+      }
+      addToNegHistory(prompt);
+    }
+
+    function toggleFavoriteNegHistory(index) {
+      const history = getNegHistory();
+      if (history[index]) {
+        history[index].favorite = !history[index].favorite;
+        localStorage.setItem(NEG_HISTORY_KEY, JSON.stringify(history));
+        loadNegHistory();
+      }
     }
 
     function loadNegHistory() {
@@ -1521,10 +1584,19 @@ Results:
         return;
       }
 
-      container.innerHTML = history.map((h, i) => `
-        <div class="history-item" onclick="applyNegHistoryItem(${i})">
+      // Sort: favorites first, then by timestamp
+      const sorted = [...history].map((h, i) => ({...h, origIndex: i}))
+        .sort((a, b) => {
+          if (a.favorite && !b.favorite) return -1;
+          if (!a.favorite && b.favorite) return 1;
+          return b.timestamp - a.timestamp;
+        });
+
+      container.innerHTML = sorted.map(h => `
+        <div class="history-item" onclick="applyNegHistoryItem(${h.origIndex})">
+          <button class="fav-btn ${h.favorite ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteNegHistory(${h.origIndex})" title="${h.favorite ? 'Unpin' : 'Pin'}">&#9733;</button>
           <span class="prompt-text">${escapeHtml(h.prompt)}</span>
-          <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteNegHistoryItem(${i})">x</button>
+          <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteNegHistoryItem(${h.origIndex})">x</button>
         </div>
       `).join('');
     }
@@ -1551,6 +1623,128 @@ Results:
       localStorage.removeItem(NEG_HISTORY_KEY);
       loadNegHistory();
       showToast('Negative history cleared');
+    }
+
+    // JSON History
+    function getJsonHistory() {
+      const raw = JSON.parse(localStorage.getItem(JSON_HISTORY_KEY) || '[]');
+      // Migrate old format (array of strings) to new format (array of objects)
+      return raw.map(item => typeof item === 'string' ? { json: item, favorite: false, timestamp: Date.now() } : item);
+    }
+
+    function addToJsonHistory(jsonText) {
+      if (!jsonText?.trim()) return;
+      const history = getJsonHistory();
+      // Don't add duplicates
+      const existingIndex = history.findIndex(h => h.json === jsonText);
+      if (existingIndex !== -1) {
+        return;
+      }
+      // Add to front
+      history.unshift({
+        json: jsonText,
+        favorite: false,
+        timestamp: Date.now()
+      });
+      // Limit size (don't remove favorites)
+      while (history.length > MAX_HISTORY) {
+        const lastNonFav = history.findLastIndex(h => !h.favorite);
+        if (lastNonFav > -1) history.splice(lastNonFav, 1);
+        else break;
+      }
+      localStorage.setItem(JSON_HISTORY_KEY, JSON.stringify(history));
+      loadJsonHistory();
+      showToast('JSON saved');
+    }
+
+    function saveCurrentJson() {
+      const json = document.getElementById('batchJson').value.trim();
+      if (!json) {
+        showToast('No JSON to save');
+        return;
+      }
+      // Validate first
+      try {
+        JSON.parse(json);
+      } catch (e) {
+        showToast('Invalid JSON - fix before saving');
+        return;
+      }
+      addToJsonHistory(json);
+    }
+
+    function toggleFavoriteJsonHistory(index) {
+      const history = getJsonHistory();
+      if (history[index]) {
+        history[index].favorite = !history[index].favorite;
+        localStorage.setItem(JSON_HISTORY_KEY, JSON.stringify(history));
+        loadJsonHistory();
+      }
+    }
+
+    function loadJsonHistory() {
+      const history = getJsonHistory();
+      const list = document.getElementById('jsonHistoryList');
+      const count = document.getElementById('jsonHistoryCount');
+      if (!list) return;
+
+      count.textContent = history.length;
+
+      if (history.length === 0) {
+        list.innerHTML = '<div class="empty-history">No JSON history yet</div>';
+        return;
+      }
+
+      // Sort: favorites first, then by timestamp
+      const sorted = [...history].map((h, i) => ({...h, origIndex: i}))
+        .sort((a, b) => {
+          if (a.favorite && !b.favorite) return -1;
+          if (!a.favorite && b.favorite) return 1;
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        });
+
+      list.innerHTML = sorted.map(h => {
+        // Parse to show summary
+        let summary = '';
+        try {
+          const data = JSON.parse(h.json);
+          const keys = [...new Set(data.flatMap(item => Object.keys(item)))];
+          summary = `${data.length} items: ${keys.join(', ')}`;
+        } catch (e) {
+          summary = h.json.substring(0, 50) + '...';
+        }
+        return `
+          <div class="history-item" onclick="loadJsonHistoryItem(${h.origIndex})">
+            <button class="fav-btn ${h.favorite ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteJsonHistory(${h.origIndex})" title="${h.favorite ? 'Unpin' : 'Pin'}">&#9733;</button>
+            <span class="prompt-text">${escapeHtml(summary)}</span>
+            <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteJsonHistoryItem(${h.origIndex})">x</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function loadJsonHistoryItem(index) {
+      const history = getJsonHistory();
+      if (history[index]) {
+        document.getElementById('batchJson').value = history[index].json;
+        validateBatchJson();
+        showToast('JSON loaded from history');
+      }
+    }
+
+    function deleteJsonHistoryItem(index) {
+      const history = getJsonHistory();
+      history.splice(index, 1);
+      localStorage.setItem(JSON_HISTORY_KEY, JSON.stringify(history));
+      loadJsonHistory();
+      showToast('Removed from history');
+    }
+
+    function clearJsonHistory() {
+      if (!confirm('Clear all JSON history?')) return;
+      localStorage.removeItem(JSON_HISTORY_KEY);
+      loadJsonHistory();
+      showToast('JSON history cleared');
     }
 
     function escapeHtml(text) {
@@ -1693,9 +1887,8 @@ Results:
         const blob = await response.blob();
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
-        // Save to gallery and history
+        // Save to gallery
         const id = await saveImage(blob, settings);
-        addToHistory(settings);
         await loadGallery();
 
         // Show preview with prompt
@@ -2518,100 +2711,41 @@ with open("image.png", "wb") as f:
     // Built-in random variables
     const BUILTIN_VARS = {
       location: [
-        'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace',
-        'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage',
-        'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall',
-        'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness',
-        'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub',
-        'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden', 'slave market', 'strip club', 'brothel', 'back alley', 'arena', 'carnival', 'slum district', 'industrial factory', 'abandoned warehouse', 'school', 'university campus', 'hospital room', 'laboratory', 'labor camp', 'landfill site', 'junkyard', 'construction site', 'docks', 'ship deck', 'train yard', 'airport hangar'
+        'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace', 'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage', 'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall', 'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness', 'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub', 'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden', 'slave market', 'strip club', 'brothel', 'back alley', 'arena', 'carnival', 'slum district', 'industrial factory', 'abandoned warehouse', 'school', 'university campus', 'hospital room', 'laboratory', 'labor camp', 'landfill site', 'junkyard', 'construction site', 'docks', 'ship deck', 'train yard', 'airport hangar', 'BDSM dungeon', 'torture chamber', 'prison cell', 'execution ground'
       ],
       time: [
-        'at dawn', 'at sunrise', 'in the early morning', 'in the morning light',
-        'at midday', 'in the afternoon', 'in the golden hour', 'at sunset',
-        'at dusk', 'at twilight', 'in the evening', 'at night',
-        'at midnight', 'under moonlight', 'during blue hour', 'in the fog',
-        'during a thunderstorm', 'in the rain', 'during snowfall'
+        'at dawn', 'at sunrise', 'in the early morning', 'in the morning light', 'at midday', 'in the afternoon', 'in the golden hour', 'at sunset', 'at dusk', 'at twilight', 'in the evening', 'at night', 'at midnight', 'under moonlight', 'during blue hour', 'in the fog', 'during a thunderstorm', 'in the rain', 'during snowfall'
       ],
       weather: [
-        'sunny', 'cloudy', 'overcast', 'rainy', 'stormy',
-        'snowy', 'foggy', 'misty', 'windy', 'clear skies'
+        'sunny', 'cloudy', 'overcast', 'rainy', 'stormy', 'snowy', 'foggy', 'misty', 'windy', 'clear skies'
       ],
       mood: [
-        'peaceful', 'dramatic', 'mysterious', 'romantic', 'melancholic',
-        'energetic', 'serene', 'tense', 'joyful', 'contemplative'
+        'peaceful', 'dramatic', 'mysterious', 'romantic', 'melancholic', 'energetic', 'serene', 'tense', 'joyful', 'contemplative'
       ],
       lighting: [
-        'soft natural light', 'harsh sunlight', 'golden hour glow', 'neon lights',
-        'candlelight', 'moonlight', 'studio lighting', 'dramatic shadows',
-        'backlit silhouette', 'ambient glow', 'bioluminescent', 'fairy lights'
+        'soft natural light', 'harsh sunlight', 'golden hour glow', 'neon lights', 'candlelight', 'moonlight', 'studio lighting', 'dramatic shadows', 'backlit silhouette', 'ambient glow', 'bioluminescent', 'fairy lights'
       ],
       color: [
-        'red', 'crimson', 'scarlet', 'burgundy', 'coral',
-        'orange', 'tangerine', 'peach', 'amber', 'rust',
-        'yellow', 'gold', 'lemon', 'mustard', 'cream',
-        'green', 'emerald', 'olive', 'mint', 'sage', 'forest green', 'lime',
-        'blue', 'navy', 'cobalt', 'sky blue', 'teal', 'turquoise', 'cyan', 'indigo',
-        'purple', 'violet', 'lavender', 'plum', 'magenta', 'fuchsia',
-        'pink', 'rose', 'blush', 'salmon', 'hot pink',
-        'brown', 'chocolate', 'tan', 'beige', 'caramel', 'copper',
-        'black', 'charcoal', 'onyx', 'ebony',
-        'white', 'ivory', 'pearl', 'snow',
-        'gray', 'silver', 'slate', 'ash'
+        'red', 'crimson', 'scarlet', 'burgundy', 'coral', 'orange', 'tangerine', 'peach', 'amber', 'rust', 'yellow', 'gold', 'lemon', 'mustard', 'cream', 'green', 'emerald', 'olive', 'mint', 'sage', 'forest green', 'lime', 'blue', 'navy', 'cobalt', 'sky blue', 'teal', 'turquoise', 'cyan', 'indigo', 'purple', 'violet', 'lavender', 'plum', 'magenta', 'fuchsia',  'pink', 'rose', 'blush', 'salmon', 'hot pink', 'brown', 'chocolate', 'tan', 'beige', 'caramel', 'copper', 'black', 'charcoal', 'onyx', 'ebony', 'white', 'ivory', 'pearl', 'snow', 'gray', 'silver', 'slate', 'ash'
       ],
       size: ['small', 'medium', 'large'],
       pose: [
-        'standing', 'sitting', 'kneeling', 'lying down', 'crouching',
-        'walking', 'running', 'jumping', 'dancing', 'leaning',
-        'stretching', 'reaching', 'pointing', 'waving', 'crossing arms',
-        'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy style', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated'
+        'standing', 'sitting', 'kneeling', 'lying down', 'crouching', 'walking', 'running', 'jumping', 'dancing', 'leaning', 'stretching', 'reaching', 'pointing', 'waving', 'crossing arms', 'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy style', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated'
       ],
       object: [
-        'chair', 'stool', 'bench', 'sofa', 'armchair', 'throne',
-        'bed', 'mattress', 'pillow', 'blanket',
-        'table', 'desk', 'counter', 'bar',
-        'floor', 'carpet', 'rug',
-        'stairs', 'ladder', 'railing', 'balcony',
-        'window sill', 'doorway', 'wall', 'column', 'pillar',
-        'rock', 'tree stump', 'log', 'swing', 'hammock',
-        'car hood', 'motorcycle', 'bicycle', 'boat',
-        'pool edge', 'fountain', 'bathtub', 'shower', 'St. Andrew\'s cross', 'pillory', 'cage', 'stocks', 'cross', 'altar', 'dungeon bench', 'torture rack', 'whipping post', 'examination table', 'operating table', 'gynecological chair', 'spank bench', 'bondage table', 'humiliation stool', 'flogging bench', 'restraint bed', 'slave block', 'pillory stand', 'bondage frame', 'cat o\' nine tails', 'crop', 'paddle', 'butt plug', 'dildo', 'vibrator', 'anal beads', 'nipple clamps', 'ball gag', 'blindfold', 'collar and leash', 'spreaders', 'chastity belt', 'shackles', 'manacles', 'chains', 'shibari ropes'
+        'chair', 'stool', 'bench', 'sofa', 'armchair', 'throne', 'bed', 'mattress', 'pillow', 'blanket', 'table', 'desk', 'counter', 'bar', 'floor', 'carpet', 'rug', 'stairs', 'ladder', 'railing', 'balcony', 'window sill', 'doorway', 'wall', 'column', 'pillar','rock', 'tree stump', 'log', 'swing', 'hammock', 'car hood', 'motorcycle', 'bicycle', 'boat', 'pool edge', 'fountain', 'bathtub', 'shower', 'St. Andrew\'s cross', 'pillory', 'cage', 'stocks', 'cross', 'altar', 'dungeon bench', 'torture rack', 'whipping post', 'examination table', 'operating table', 'gynecological chair', 'spank bench', 'bondage table', 'humiliation stool', 'flogging bench', 'restraint bed', 'slave block', 'pillory stand', 'bondage frame', 'crop', 'paddle', 'butt-plug', 'dildo', 'vibrator', 'anal beads', 'nipple clamps', 'ball gag', 'blindfold', 'collar and leash', 'spreaders', 'chastity belt', 'shackles', 'manacles', 'chains', 'shibari-ropes'
       ],
       race: [
-        'caucasian', 'african', 'asian', 'latino', 'hispanic',
-        'middle eastern', 'indian', 'polynesian', 'native american',
-        'mediterranean', 'nordic', 'slavic', 'southeast asian', 'east asian',
-        'mixed race', 'biracial', 'black african', 'arab', 'persian', 'maori', 'pacific islander', 'caribbean', 'afro-latino'
+        'caucasian', 'african', 'asian', 'latino', 'hispanic', 'middle eastern', 'indian', 'polynesian', 'native american', 'mediterranean', 'nordic', 'slavic', 'southeast asian', 'east asian', 'mixed race', 'biracial', 'black african', 'arab', 'persian', 'maori', 'pacific islander', 'caribbean', 'afro-latino'
       ],
       expression: [
-        'smiling', 'laughing', 'grinning', 'giggling',
-        'serious', 'stern', 'stoic', 'neutral',
-        'sad', 'crying', 'tearful', 'melancholic',
-        'angry', 'furious', 'annoyed', 'frowning',
-        'surprised', 'shocked', 'amazed', 'wide-eyed',
-        'seductive', 'flirty', 'sultry', 'playful',
-        'thoughtful', 'pensive', 'contemplative', 'dreamy',
-        'scared', 'terrified', 'worried', 'anxious',
-        'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running makeup', 'smudged makeup', 'dilated pupils', 'biting lip', 'tongue out', 'blushing', 'wide smile', 'raised eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb'
+        'smiling', 'laughing', 'grinning', 'giggling', 'serious', 'stern', 'stoic', 'neutral', 'sad', 'crying', 'tearful', 'melancholic', 'angry', 'furious', 'annoyed', 'frowning', 'surprised', 'shocked', 'amazed', 'wide-eyed', 'seductive', 'flirty', 'sultry', 'playful', 'thoughtful', 'pensive', 'contemplative', 'dreamy', 'scared', 'terrified', 'worried', 'anxious', 'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running-makeup', 'smudged-makeup', 'dilated-pupils', 'biting-lip', 'tongue out', 'blushing', 'wide-smile', 'raised-eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish-grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb'
       ],
       hairstyle: [
-        'with long straight hair', 'with long wavy hair', 'with long curly hair',
-        'with medium straight hair', 'with medium wavy hair', 'with medium curly hair',
-        'with short straight hair', 'with short wavy hair', 'with short curly hair',
-        'with a bob cut', 'with a pixie cut', 'with an undercut',
-        'with a ponytail', 'with a high ponytail', 'with a side ponytail',
-        'with a bun', 'with a messy bun', 'with a top knot',
-        'with braids', 'with a french braid', 'with box braids',
-        'with pigtails', 'with twin tails', 'with space buns',
-        'with bangs', 'with side swept bangs', 'with curtain bangs',
-        'with an updo', 'with loose waves', 'with hair down'
+        'with long straight hair', 'with long wavy hair', 'with long curly hair',  'with medium straight hair', 'with medium wavy hair', 'with medium curly hair', 'with short straight hair', 'with short wavy hair', 'with short curly hair', 'with a bob cut', 'with a pixie cut', 'with an undercut', 'with a ponytail', 'with a high ponytail', 'with a side ponytail', 'with a bun', 'with a messy bun', 'with a top knot', 'with braids', 'with a french braid', 'with box braids', 'with pigtails', 'with twin tails', 'with space buns', 'with bangs', 'with side swept bangs', 'with curtain bangs', 'with an updo', 'with loose waves', 'with hair down'
       ],
       haircolor: [
-        'blonde', 'platinum blonde', 'golden blonde', 'strawberry blonde',
-        'brunette', 'brown', 'light brown', 'dark brown', 'chestnut',
-        'black', 'jet black', 'raven',
-        'red', 'ginger', 'auburn', 'copper',
-        'gray', 'silver', 'white',
-        'pink', 'blue', 'purple', 'green', 'rainbow', 'ombre'
+        'blonde', 'platinum blonde', 'golden blonde', 'strawberry blonde', 'brunette', 'brown', 'light brown', 'dark brown', 'chestnut', 'black', 'jet black', 'raven', 'red', 'ginger', 'auburn', 'copper',  'gray', 'silver', 'white', 'pink', 'blue', 'purple', 'green', 'rainbow', 'ombre'
       ]
     };
 
