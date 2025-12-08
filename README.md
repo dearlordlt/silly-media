@@ -279,6 +279,20 @@ Request arrives (TTS or Image)
 - Docker with NVIDIA Container Toolkit
 - 50GB+ disk space for models
 
+## Web UI
+
+Open the HTML files directly in your browser (no server needed):
+
+- **[ui.html](ui.html)** - Image generation UI
+- **[ui-audio.html](ui-audio.html)** - Text-to-speech UI with actor management
+
+Features of the TTS UI:
+- Create and manage voice actors
+- Upload reference audio files via drag & drop
+- Test TTS with all settings (speed, temperature, language)
+- Audio playback with history
+- Download generated audio
+
 ## Documentation
 
 - [API Reference](docs/api.md) - Full endpoint documentation

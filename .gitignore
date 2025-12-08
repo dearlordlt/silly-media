@@ -49,3 +49,13 @@ htmlcov/
 
 # Generated images
 images/
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+
+# Data directory (actors, history, database)
+data/

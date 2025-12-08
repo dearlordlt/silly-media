@@ -131,11 +131,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Enable CORS for local UI
+# Enable CORS for local UI (including file:// origins which report as "null")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_origin_regex=r".*",  # Allow all origins including null (file://)
+    allow_credentials=False,  # Must be False when using allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )

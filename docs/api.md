@@ -432,6 +432,80 @@ List all audio files for an actor.
 ]
 ```
 
+### `DELETE /actors/{name}/audio/{file_id}`
+
+Delete a specific audio file from an actor.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Actor name |
+| `file_id` | string | Audio file ID |
+
+**Response**: 204 No Content
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 404 | Actor or audio file not found |
+
+---
+
+## TTS History
+
+Generated TTS audio is automatically saved to history for playback and download.
+
+### `GET /tts/history`
+
+Get TTS generation history, most recent first.
+
+**Query Parameters**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 50 | Maximum entries to return |
+
+**Response**
+```json
+{
+  "entries": [
+    {
+      "id": "abc123",
+      "actor_name": "Morgan",
+      "text": "Hello, welcome to Silly Media!",
+      "language": "en",
+      "duration_seconds": 2.5,
+      "created_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+### `GET /tts/history/{entry_id}/audio`
+
+Get the audio file for a TTS history entry.
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Raw WAV bytes
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 404 | History entry not found |
+
+### `DELETE /tts/history/{entry_id}`
+
+Delete a single TTS history entry.
+
+**Response**: 204 No Content
+
+### `DELETE /tts/history`
+
+Clear all TTS history.
+
+**Response**: 204 No Content
+
 ---
 
 ## Examples

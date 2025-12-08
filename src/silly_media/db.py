@@ -42,6 +42,19 @@ class ActorAudioFile:
     created_at: datetime
 
 
+@dataclass
+class TTSHistoryEntry:
+    """TTS generation history entry."""
+
+    id: str
+    actor_name: str
+    text: str
+    language: str
+    filename: str
+    duration_seconds: float | None
+    created_at: datetime
+
+
 async def init_db() -> None:
     """Initialize the database and create tables if they don't exist."""
     # Ensure directories exist
@@ -77,7 +90,24 @@ async def init_db() -> None:
             ON actor_audio_files(actor_id)
         """)
 
+        # TTS generation history
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tts_history (
+                id TEXT PRIMARY KEY,
+                actor_name TEXT NOT NULL,
+                text TEXT NOT NULL,
+                language TEXT DEFAULT 'en',
+                filename TEXT NOT NULL,
+                duration_seconds REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         await db.commit()
+
+    # Create history directory
+    history_dir = ACTORS_PATH.parent / "tts_history"
+    history_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Database initialized at {DB_PATH}")
 
@@ -285,6 +315,35 @@ async def delete_actor(actor_id: str) -> bool:
     return True
 
 
+async def delete_actor_audio_file(actor_id: str, file_id: str) -> bool:
+    """Delete a single audio file from an actor."""
+    # Get the file info first
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM actor_audio_files WHERE id = ? AND actor_id = ?",
+            (file_id, actor_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            filename = row["filename"]
+
+        # Delete from database
+        await db.execute(
+            "DELETE FROM actor_audio_files WHERE id = ?", (file_id,)
+        )
+        await db.commit()
+
+    # Delete the physical file
+    file_path = ACTORS_PATH / actor_id / filename
+    if file_path.exists():
+        file_path.unlink()
+
+    logger.info(f"Deleted audio file {file_id} ({filename}) from actor {actor_id}")
+    return True
+
+
 async def update_actor(
     actor_id: str,
     name: str | None = None,
@@ -320,3 +379,129 @@ async def update_actor(
         created_at=actor.created_at,
         updated_at=now,
     )
+
+
+# TTS History functions
+
+TTS_HISTORY_PATH = ACTORS_PATH.parent / "tts_history"
+
+
+async def add_tts_history(
+    actor_name: str,
+    text: str,
+    language: str,
+    audio_bytes: bytes,
+    duration_seconds: float | None = None,
+) -> TTSHistoryEntry:
+    """Add a TTS generation to history."""
+    entry_id = str(uuid.uuid4())[:8]
+    now = datetime.utcnow()
+    filename = f"tts_{entry_id}.wav"
+
+    # Save audio file
+    TTS_HISTORY_PATH.mkdir(parents=True, exist_ok=True)
+    file_path = TTS_HISTORY_PATH / filename
+    file_path.write_bytes(audio_bytes)
+
+    # Insert into database
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO tts_history
+                (id, actor_name, text, language, filename, duration_seconds, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (entry_id, actor_name, text, language, filename, duration_seconds, now),
+        )
+        await db.commit()
+
+    logger.info(f"Added TTS history entry: {entry_id}")
+
+    return TTSHistoryEntry(
+        id=entry_id,
+        actor_name=actor_name,
+        text=text,
+        language=language,
+        filename=filename,
+        duration_seconds=duration_seconds,
+        created_at=now,
+    )
+
+
+async def get_tts_history(limit: int = 50) -> list[TTSHistoryEntry]:
+    """Get TTS generation history, most recent first."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM tts_history ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [
+                TTSHistoryEntry(
+                    id=row["id"],
+                    actor_name=row["actor_name"],
+                    text=row["text"],
+                    language=row["language"],
+                    filename=row["filename"],
+                    duration_seconds=row["duration_seconds"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                )
+                for row in rows
+            ]
+
+
+async def get_tts_history_audio_path(entry_id: str) -> Path | None:
+    """Get the audio file path for a history entry."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT filename FROM tts_history WHERE id = ?", (entry_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return TTS_HISTORY_PATH / row["filename"]
+
+
+async def delete_tts_history_entry(entry_id: str) -> bool:
+    """Delete a TTS history entry."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT filename FROM tts_history WHERE id = ?", (entry_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            filename = row["filename"]
+
+        await db.execute("DELETE FROM tts_history WHERE id = ?", (entry_id,))
+        await db.commit()
+
+    # Delete the file
+    file_path = TTS_HISTORY_PATH / filename
+    if file_path.exists():
+        file_path.unlink()
+
+    logger.info(f"Deleted TTS history entry: {entry_id}")
+    return True
+
+
+async def clear_tts_history() -> int:
+    """Clear all TTS history. Returns number of entries deleted."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM tts_history") as cursor:
+            row = await cursor.fetchone()
+            count = row[0] if row else 0
+
+        await db.execute("DELETE FROM tts_history")
+        await db.commit()
+
+    # Delete all files
+    if TTS_HISTORY_PATH.exists():
+        for f in TTS_HISTORY_PATH.glob("tts_*.wav"):
+            f.unlink()
+
+    logger.info(f"Cleared TTS history: {count} entries")
+    return count

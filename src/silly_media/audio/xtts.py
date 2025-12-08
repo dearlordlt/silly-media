@@ -141,6 +141,51 @@ class XTTSv2Model(BaseAudioModel):
 
         return audio_bytes
 
+    def _split_text_for_streaming(self, text: str) -> list[str]:
+        """Split text into chunks suitable for XTTS streaming (max ~400 tokens).
+
+        Uses simple sentence splitting to avoid spacy dependency.
+        """
+        import re
+
+        # Split by sentence-ending punctuation
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+
+        # Merge short sentences, split long ones
+        chunks = []
+        current_chunk = ""
+        max_chars = 250  # Conservative limit (~200-300 chars usually < 400 tokens)
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            # If sentence itself is too long, split on commas/semicolons
+            if len(sentence) > max_chars:
+                sub_parts = re.split(r'(?<=[,;:])\s+', sentence)
+                for part in sub_parts:
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if len(current_chunk) + len(part) + 1 <= max_chars:
+                        current_chunk = f"{current_chunk} {part}".strip()
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        current_chunk = part
+            elif len(current_chunk) + len(sentence) + 1 <= max_chars:
+                current_chunk = f"{current_chunk} {sentence}".strip()
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sentence
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks if chunks else [text[:max_chars]]
+
     def synthesize_stream(
         self,
         request: "TTSRequest",
@@ -148,8 +193,8 @@ class XTTSv2Model(BaseAudioModel):
     ) -> Generator[bytes, None, None]:
         """Synthesize speech with streaming output.
 
-        Note: XTTS-v2 streaming requires access to lower-level API.
-        This implementation uses the model's inference_stream method.
+        Long texts are automatically split into chunks to avoid XTTS 400 token limit.
+        Uses simple sentence splitting (no spacy dependency).
         """
         if not self._loaded or self._tts is None:
             raise RuntimeError("Model not loaded")
@@ -157,40 +202,45 @@ class XTTSv2Model(BaseAudioModel):
         if not speaker_wav_paths:
             raise ValueError("At least one speaker reference audio file is required")
 
+        # Split text into manageable chunks for streaming
+        text_chunks = self._split_text_for_streaming(request.text)
+
         logger.info(
-            f"Streaming synthesis: {len(request.text)} chars, "
+            f"Streaming synthesis: {len(request.text)} chars in {len(text_chunks)} chunks, "
             f"lang={request.language}, refs={len(speaker_wav_paths)}"
         )
 
         # Access the underlying model for streaming
         model = self._tts.synthesizer.tts_model
 
-        # Get speaker conditioning from reference audio
+        # Get speaker conditioning from reference audio (once)
         gpt_cond_latent, speaker_embedding = model.get_conditioning_latents(
             audio_path=speaker_wav_paths
         )
 
-        # Stream audio chunks
-        chunks = model.inference_stream(
-            request.text,
-            request.language,
-            gpt_cond_latent,
-            speaker_embedding,
-            temperature=request.temperature,
-            speed=request.speed,
-            enable_text_splitting=request.split_sentences,
-        )
+        # Stream each text chunk
+        for i, text_chunk in enumerate(text_chunks):
+            logger.debug(f"Streaming chunk {i+1}/{len(text_chunks)}: {len(text_chunk)} chars")
 
-        for chunk in chunks:
-            # Convert chunk to WAV bytes using temp file (torchcodec backend can't write to BytesIO)
-            chunk_tensor = chunk.unsqueeze(0).cpu()
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp_path = Path(tmp.name)
+            chunks = model.inference_stream(
+                text_chunk,
+                request.language,
+                gpt_cond_latent,
+                speaker_embedding,
+                temperature=request.temperature,
+                speed=request.speed,
+                enable_text_splitting=False,
+            )
 
-            try:
-                torchaudio.save(str(tmp_path), chunk_tensor, self.sample_rate, format="wav")
-                yield tmp_path.read_bytes()
-            finally:
-                tmp_path.unlink(missing_ok=True)
+            for chunk in chunks:
+                chunk_tensor = chunk.unsqueeze(0).cpu()
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp_path = Path(tmp.name)
+
+                try:
+                    torchaudio.save(str(tmp_path), chunk_tensor, self.sample_rate, format="wav")
+                    yield tmp_path.read_bytes()
+                finally:
+                    tmp_path.unlink(missing_ok=True)
 
         logger.info("Streaming synthesis complete")

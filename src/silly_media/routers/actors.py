@@ -15,6 +15,7 @@ from ..db import (
     add_audio_to_actor,
     create_actor,
     delete_actor,
+    delete_actor_audio_file,
     get_actor_audio_count,
     get_actor_audio_files,
     get_actor_by_name,
@@ -188,3 +189,17 @@ async def list_actor_audio_files(name: str):
         )
         for f in audio_files
     ]
+
+
+@router.delete("/{name}/audio/{file_id}", status_code=204)
+async def delete_audio_file(name: str, file_id: str):
+    """Delete a specific audio file from an actor."""
+    actor = await get_actor_by_name(name)
+    if not actor:
+        raise HTTPException(status_code=404, detail=f"Actor '{name}' not found")
+
+    success = await delete_actor_audio_file(actor.id, file_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Audio file '{file_id}' not found")
+
+    logger.info(f"Deleted audio file {file_id} from actor {name}")

@@ -12,10 +12,20 @@ from ..audio.schemas import (
     LANGUAGE_NAMES,
     LanguageInfo,
     LanguagesResponse,
+    TTSHistoryEntryResponse,
+    TTSHistoryResponse,
     TTSLanguage,
     TTSRequest,
 )
-from ..db import get_actor_audio_paths, get_actor_by_name
+from ..db import (
+    add_tts_history,
+    clear_tts_history,
+    delete_tts_history_entry,
+    get_actor_audio_paths,
+    get_actor_by_name,
+    get_tts_history,
+    get_tts_history_audio_path,
+)
 from ..vram_manager import vram_manager
 
 logger = logging.getLogger(__name__)
@@ -59,6 +69,14 @@ async def generate_speech(request: TTSRequest):
                 request,
                 speaker_wav_paths=[str(p) for p in ref_paths],
             )
+
+        # Save to history
+        await add_tts_history(
+            actor_name=request.actor,
+            text=request.text,
+            language=request.language,
+            audio_bytes=audio_bytes,
+        )
 
         logger.info(
             f"Generated speech: actor={request.actor}, "
@@ -210,3 +228,53 @@ async def list_languages():
         for lang in TTSLanguage
     ]
     return LanguagesResponse(languages=languages)
+
+
+# History endpoints
+
+
+@router.get("/history", response_model=TTSHistoryResponse)
+async def list_tts_history(limit: int = 50):
+    """Get TTS generation history, most recent first."""
+    entries = await get_tts_history(limit=limit)
+    return TTSHistoryResponse(
+        entries=[
+            TTSHistoryEntryResponse(
+                id=e.id,
+                actor_name=e.actor_name,
+                text=e.text,
+                language=e.language,
+                duration_seconds=e.duration_seconds,
+                created_at=e.created_at,
+            )
+            for e in entries
+        ],
+        total=len(entries),
+    )
+
+
+@router.get("/history/{entry_id}/audio")
+async def get_history_audio(entry_id: str):
+    """Get the audio file for a TTS history entry."""
+    audio_path = await get_tts_history_audio_path(entry_id)
+    if not audio_path or not audio_path.exists():
+        raise HTTPException(status_code=404, detail="History entry not found")
+
+    audio_bytes = audio_path.read_bytes()
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
+@router.delete("/history/{entry_id}", status_code=204)
+async def delete_history_entry(entry_id: str):
+    """Delete a TTS history entry."""
+    success = await delete_tts_history_entry(entry_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="History entry not found")
+    logger.info(f"Deleted TTS history entry: {entry_id}")
+
+
+@router.delete("/history", status_code=204)
+async def clear_all_history():
+    """Clear all TTS history."""
+    count = await clear_tts_history()
+    logger.info(f"Cleared {count} TTS history entries")

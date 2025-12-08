@@ -131,6 +131,27 @@ class LanguagesResponse(BaseModel):
     languages: list[LanguageInfo]
 
 
+# TTS History schemas
+
+
+class TTSHistoryEntryResponse(BaseModel):
+    """TTS history entry response."""
+
+    id: str
+    actor_name: str
+    text: str
+    language: str
+    duration_seconds: float | None
+    created_at: datetime
+
+
+class TTSHistoryResponse(BaseModel):
+    """TTS history list response."""
+
+    entries: list[TTSHistoryEntryResponse]
+    total: int
+
+
 # Language display names
 LANGUAGE_NAMES = {
     "en": "English",
