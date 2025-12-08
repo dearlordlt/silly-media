@@ -161,6 +161,29 @@
       display: flex;
       gap: 8px;
     }
+    .debounce-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: rgba(0,0,0,0.3);
+      z-index: 10;
+    }
+    .debounce-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), #a78bfa);
+      border-radius: 0 2px 2px 0;
+      transition: none;
+    }
+    .debounce-bar-fill.animate {
+      animation: debounceProgress var(--debounce-duration, 1000ms) linear forwards;
+    }
+    @keyframes debounceProgress {
+      from { width: 0%; }
+      to { width: 100%; }
+    }
     .preview-prompt {
       position: absolute;
       bottom: 0;
@@ -686,6 +709,68 @@
     }
     .help-close:hover { color: var(--text); }
 
+    /* Settings modal */
+    .settings-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .settings-modal.open { display: flex; }
+    .settings-content {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 24px;
+      min-width: 300px;
+      max-width: 400px;
+      position: relative;
+    }
+    .settings-content h3 {
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--surface2);
+    }
+    .settings-row:last-child {
+      border-bottom: none;
+    }
+    .settings-row label {
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .settings-row select {
+      padding: 6px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+    .settings-icon {
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 1.2rem;
+      margin-left: 12px;
+      transition: color 0.2s;
+    }
+    .settings-icon:hover { color: var(--accent); }
+    .header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .header-row h1 { margin: 0; }
+
     /* Gallery folders */
     .gallery-folders {
       display: flex;
@@ -800,7 +885,10 @@
   <div class="container">
     <!-- Controls Panel -->
     <div class="panel controls">
-      <h1>Silly Media</h1>
+      <div class="header-row">
+        <h1>Silly Media</h1>
+        <span class="settings-icon" onclick="openSettings()" title="Settings">&#9881;</span>
+      </div>
 
       <label for="prompt">Prompt</label>
       <textarea id="prompt" placeholder="Describe the image you want to generate..."></textarea>
@@ -1079,6 +1167,25 @@ Results:
     </div>
   </div>
 
+  <!-- Settings Modal -->
+  <div class="settings-modal" id="settingsModal" onclick="closeSettings(event)">
+    <div class="settings-content" onclick="event.stopPropagation()">
+      <span class="help-close" onclick="closeSettings()">&times;</span>
+      <h3>Settings</h3>
+      <div class="settings-row">
+        <label>Batch Debounce</label>
+        <select id="settingDebounce" onchange="saveSettings()">
+          <option value="500">500ms</option>
+          <option value="1000" selected>1000ms</option>
+          <option value="2000">2000ms</option>
+          <option value="3000">3000ms</option>
+          <option value="5000">5000ms</option>
+          <option value="10000">10000ms</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
   <script>
     // IndexedDB for storing images
     const DB_NAME = 'sillyMediaGallery';
@@ -1108,6 +1215,7 @@ Results:
       loadHistory();
       loadNegHistory();
       loadBatchRandomize();
+      loadAppSettings();
       await loadGallery();
       setupEventListeners();
     }
@@ -1614,6 +1722,7 @@ Results:
       }
 
       container.innerHTML = `
+        <div class="debounce-bar" id="debounceBar" style="display:none"><div class="debounce-bar-fill" id="debounceBarFill"></div></div>
         <img src="${url}" alt="Generated image">
         ${promptHtml}
         <div class="preview-actions">
@@ -2304,6 +2413,60 @@ with open("image.png", "wb") as f:
       document.getElementById('helpModal').classList.remove('open');
     }
 
+    // Settings
+    const SETTINGS_STORAGE_KEY = 'sillyMediaAppSettings';
+
+    function openSettings() {
+      document.getElementById('settingsModal').classList.add('open');
+    }
+
+    function closeSettings(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('settingsModal').classList.remove('open');
+    }
+
+    function saveSettings() {
+      const settings = {
+        debounce: parseInt(document.getElementById('settingDebounce').value)
+      };
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    }
+
+    function loadAppSettings() {
+      const saved = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (saved) {
+        try {
+          const settings = JSON.parse(saved);
+          if (settings.debounce) {
+            document.getElementById('settingDebounce').value = settings.debounce;
+          }
+        } catch (e) {}
+      }
+    }
+
+    function getDebounceTime() {
+      return parseInt(document.getElementById('settingDebounce').value) || 1000;
+    }
+
+    function showDebounceBar(duration) {
+      const bar = document.getElementById('debounceBar');
+      const fill = document.getElementById('debounceBarFill');
+      if (!bar || !fill) return;
+
+      bar.style.display = 'block';
+      fill.classList.remove('animate');
+      fill.style.setProperty('--debounce-duration', duration + 'ms');
+
+      // Force reflow to restart animation
+      void fill.offsetWidth;
+      fill.classList.add('animate');
+    }
+
+    function hideDebounceBar() {
+      const bar = document.getElementById('debounceBar');
+      if (bar) bar.style.display = 'none';
+    }
+
     // Batch generation
     function validateBatchJson() {
       const textarea = document.getElementById('batchJson');
@@ -2664,7 +2827,10 @@ with open("image.png", "wb") as f:
 
           // Debounce between generations to let GPU breathe
           if (i < batchData.length - 1) {
-            await new Promise(r => setTimeout(r, 1000));
+            const debounceTime = getDebounceTime();
+            showDebounceBar(debounceTime);
+            await new Promise(r => setTimeout(r, debounceTime));
+            hideDebounceBar();
           }
 
         } catch (error) {
@@ -2673,6 +2839,7 @@ with open("image.png", "wb") as f:
           // Continue with next image instead of stopping
         }
       }
+      hideDebounceBar();
 
       btn.style.display = 'block';
       cancelBtn.style.display = 'none';
@@ -2783,7 +2950,10 @@ with open("image.png", "wb") as f:
 
           // Debounce between generations
           if (i < count - 1) {
-            await new Promise(r => setTimeout(r, 1000));
+            const debounceTime = getDebounceTime();
+            showDebounceBar(debounceTime);
+            await new Promise(r => setTimeout(r, debounceTime));
+            hideDebounceBar();
           }
 
         } catch (error) {
@@ -2791,6 +2961,7 @@ with open("image.png", "wb") as f:
           showStatus(`Error on image ${i + 1}: ${error.message}`, 'error');
         }
       }
+      hideDebounceBar();
 
       btn.style.display = 'block';
       cancelBtn.style.display = 'none';
