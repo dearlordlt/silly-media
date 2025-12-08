@@ -2257,60 +2257,79 @@ Results:
 
     // Highlight stored prompt by finding variable values within the already-resolved prompt
     function highlightStoredPrompt(prompt, variables, batchData = null, batchIndex = 0) {
-      let result = escapeHtml(prompt);
-
-      // Collect all variable values to highlight (from current item and referenced items)
-      const allValues = new Set();
-
-      // Add current variables
-      for (const value of Object.values(variables)) {
-        if (value && typeof value === 'string') {
-          allValues.add(value);
+      // Collect builtin values - track which variable name each value belongs to
+      const builtinValueToName = new Map();
+      for (const [name, values] of Object.entries(BUILTIN_VARS)) {
+        for (const value of values) {
+          builtinValueToName.set(value.toLowerCase(), name);
         }
       }
 
-      // Add values from all batch items (for relative references like {name+1})
+      // Collect JSON variable values
+      const jsonValues = new Set();
+      for (const value of Object.values(variables || {})) {
+        if (value && typeof value === 'string') {
+          jsonValues.add(value.toLowerCase());
+        }
+      }
       if (batchData) {
         for (const item of batchData) {
           for (const value of Object.values(item)) {
             if (value && typeof value === 'string') {
-              allValues.add(value);
+              jsonValues.add(value.toLowerCase());
             }
           }
         }
       }
 
-      // Sort by length descending so longer phrases match first
-      const sortedValues = [...allValues].sort((a, b) => b.length - a.length);
-
-      // Highlight each variable value found in the prompt (pink for JSON vars)
-      for (const value of sortedValues) {
-        const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(escaped, 'g');
-        result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
+      // Collect all values to match, sorted by length (longest first)
+      const allMatches = [];
+      for (const [valueLower, varName] of builtinValueToName) {
+        allMatches.push({ value: valueLower, varName, type: 'builtin' });
       }
+      for (const valueLower of jsonValues) {
+        if (!builtinValueToName.has(valueLower)) {
+          allMatches.push({ value: valueLower, varName: null, type: 'json' });
+        }
+      }
+      allMatches.sort((a, b) => b.value.length - a.value.length);
 
-      // Collect builtin values - track which variable name each value belongs to
-      const builtinValueToName = new Map();
-      for (const [name, values] of Object.entries(BUILTIN_VARS)) {
-        for (const value of values) {
-          builtinValueToName.set(value, name);
+      // Find all occurrences in the prompt
+      const promptLower = prompt.toLowerCase();
+      const highlights = []; // {start, end, type, varName}
+
+      for (const match of allMatches) {
+        let idx = 0;
+        while ((idx = promptLower.indexOf(match.value, idx)) !== -1) {
+          const end = idx + match.value.length;
+          // Check if this range overlaps with existing highlights
+          const overlaps = highlights.some(h => !(end <= h.start || idx >= h.end));
+          if (!overlaps) {
+            highlights.push({ start: idx, end, type: match.type, varName: match.varName });
+          }
+          idx++;
         }
       }
 
-      // Sort all builtin values by length descending
-      const allBuiltins = [...builtinValueToName.keys()].sort((a, b) => b.length - a.length);
+      // Sort by position
+      highlights.sort((a, b) => a.start - b.start);
 
-      // Highlight builtin values (green) - add background if variable is selected
-      for (const value of allBuiltins) {
-        const varName = builtinValueToName.get(value);
-        const isSelected = selectedVarHighlights.has(varName);
-        const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Only match if not already inside a span tag
-        const regex = new RegExp(`(?<!<span[^>]*>)(?<!">)${escaped}(?!</span>)`, 'gi');
-        const highlightClass = isSelected ? 'var-builtin var-highlight' : 'var-builtin';
-        result = result.replace(regex, `<span class="${highlightClass}">${escapeHtml(value)}</span>`);
+      // Build result string
+      let result = '';
+      let lastEnd = 0;
+      for (const h of highlights) {
+        result += escapeHtml(prompt.slice(lastEnd, h.start));
+        const text = escapeHtml(prompt.slice(h.start, h.end));
+        if (h.type === 'json') {
+          result += `<span class="var-json">${text}</span>`;
+        } else {
+          const isSelected = selectedVarHighlights.has(h.varName);
+          const cls = isSelected ? 'var-builtin var-highlight' : 'var-builtin';
+          result += `<span class="${cls}">${text}</span>`;
+        }
+        lastEnd = h.end;
       }
+      result += escapeHtml(prompt.slice(lastEnd));
 
       return result;
     }
