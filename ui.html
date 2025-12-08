@@ -1890,8 +1890,19 @@ with open("image.png", "wb") as f:
       }
     }
 
-    function interpolatePrompt(template, variables) {
-      return template.replace(/\{(\w+)\}/g, (match, key) => {
+    function interpolatePrompt(template, variables, batchData = null, currentIndex = 0) {
+      // Match {variable} or {variable+N} or {variable-N}
+      return template.replace(/\{(\w+)([+-]\d+)?\}/g, (match, key, offset) => {
+        if (offset && batchData) {
+          // Relative reference like {name+1} or {name-1}
+          const offsetNum = parseInt(offset, 10);
+          const total = batchData.length;
+          // Circular index: wrap around to beginning/end
+          const targetIndex = ((currentIndex + offsetNum) % total + total) % total;
+          const targetVars = batchData[targetIndex];
+          return targetVars?.hasOwnProperty(key) ? targetVars[key] : match;
+        }
+        // Regular reference like {name}
         return variables.hasOwnProperty(key) ? variables[key] : match;
       });
     }
@@ -1951,9 +1962,9 @@ with open("image.png", "wb") as f:
         }
 
         const variables = batchData[i];
-        const prompt = interpolatePrompt(promptTemplate, variables);
+        const prompt = interpolatePrompt(promptTemplate, variables, batchData, i);
         const negativeTemplate = document.getElementById('negativePrompt').value;
-        const negativePrompt = interpolatePrompt(negativeTemplate, variables);
+        const negativePrompt = interpolatePrompt(negativeTemplate, variables, batchData, i);
 
         progressText.textContent = `${i + 1} / ${total}`;
         progressFill.style.width = `${(i / total) * 100}%`;
