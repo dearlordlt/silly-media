@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Silly Media - Image Generator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -776,6 +777,7 @@
         <div class="gallery-header">
           <h2>Gallery (<span id="galleryCount">0</span>)</h2>
           <div>
+            <button class="btn-secondary btn-small" onclick="downloadZip()" id="downloadZipBtn">Download ZIP</button>
             <button class="btn-secondary btn-small" onclick="selectAll()" id="selectAllBtn">Select All</button>
             <button class="btn-danger btn-small" onclick="deleteSelected()" id="deleteSelectedBtn" style="display:none">Delete Selected</button>
             <button class="btn-danger btn-small" onclick="clearGallery()">Clear All</button>
@@ -951,7 +953,8 @@
         seed: document.getElementById('seed').value,
         apiUrl: document.getElementById('apiUrl').value,
         model: document.getElementById('model').value,
-        negativePrompt: document.getElementById('negativePrompt').value
+        negativePrompt: document.getElementById('negativePrompt').value,
+        batchJson: document.getElementById('batchJson').value
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     }
@@ -987,6 +990,10 @@
         if (s.apiUrl) document.getElementById('apiUrl').value = s.apiUrl;
         if (s.model) document.getElementById('model').value = s.model;
         if (s.negativePrompt) document.getElementById('negativePrompt').value = s.negativePrompt;
+        if (s.batchJson) {
+          document.getElementById('batchJson').value = s.batchJson;
+          validateBatchJson(); // Validate on load to show status
+        }
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -1132,8 +1139,11 @@
         el.addEventListener('change', saveSettings);
       });
 
-      // Batch JSON validation on input
-      document.getElementById('batchJson').addEventListener('input', validateBatchJson);
+      // Batch JSON validation and save on input
+      document.getElementById('batchJson').addEventListener('input', () => {
+        validateBatchJson();
+        saveSettings();
+      });
 
       // Keyboard shortcuts
       document.addEventListener('keydown', (e) => {
@@ -1702,6 +1712,87 @@
 
       link.click();
       showToast('Image downloaded');
+    }
+
+    async function downloadZip() {
+      // Get images for current folder
+      const allImages = await getAllImages();
+      let images = allImages;
+
+      if (currentFolder !== 'all') {
+        images = allImages.filter(img => img.folder === currentFolder);
+      }
+
+      if (images.length === 0) {
+        showToast('No images to download');
+        return;
+      }
+
+      const btn = document.getElementById('downloadZipBtn');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Creating ZIP...';
+
+      try {
+        const zip = new JSZip();
+        const usedNames = new Map(); // Track used filenames for uniqueness
+
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+
+          // Update progress
+          btn.textContent = `Zipping ${i + 1}/${images.length}...`;
+
+          // Determine extension from data URL
+          const ext = img.data.startsWith('data:image/png') ? 'png' :
+                      img.data.startsWith('data:image/jpeg') ? 'jpg' :
+                      img.data.startsWith('data:image/webp') ? 'webp' : 'png';
+
+          // Determine base filename
+          const name = img.settings?._variables?.name;
+          let baseName;
+          if (name) {
+            baseName = name.replace(/[<>:"/\\|?*]/g, '_').trim();
+          } else {
+            const timestamp = new Date(img.timestamp).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            baseName = `silly-media-${timestamp}`;
+          }
+
+          // Make filename unique
+          let filename = `${baseName}.${ext}`;
+          const count = usedNames.get(filename) || 0;
+          if (count > 0) {
+            filename = `${baseName}_${count}.${ext}`;
+          }
+          usedNames.set(`${baseName}.${ext}`, count + 1);
+
+          // Convert data URL to blob
+          const base64Data = img.data.split(',')[1];
+          zip.file(filename, base64Data, { base64: true });
+        }
+
+        btn.textContent = 'Generating ZIP...';
+
+        const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+          btn.textContent = `Compressing ${Math.round(metadata.percent)}%...`;
+        });
+
+        // Download the ZIP
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        const folderName = currentFolder === 'all' ? 'all-images' : currentFolder.replace(/[<>:"/\\|?*]/g, '_');
+        link.download = `${folderName}.zip`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+
+        showToast(`Downloaded ${images.length} images as ZIP`);
+      } catch (error) {
+        console.error('ZIP creation failed:', error);
+        showToast('Failed to create ZIP');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
     }
 
     // Copy functions
