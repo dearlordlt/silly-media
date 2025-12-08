@@ -245,6 +245,92 @@
       color: #4ade80;
       font-weight: 600;
     }
+    .preview-prompt .var-highlight {
+      background: rgba(255, 200, 50, 0.4);
+      border-radius: 3px;
+      padding: 1px 3px;
+      box-shadow: 0 0 4px rgba(255, 200, 50, 0.5);
+    }
+
+    /* Variable selector modal */
+    .var-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.8);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+    .var-modal.show { display: flex; }
+    .var-modal-content {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .var-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .var-modal-header h3 { margin: 0; color: var(--text); }
+    .var-modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.5rem;
+      cursor: pointer;
+    }
+    .var-modal-close:hover { color: var(--text); }
+    .var-group { margin-bottom: 16px; }
+    .var-group-title {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .var-group-title .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .var-group-title .dot.json { background: #ff6b9d; }
+    .var-group-title .dot.builtin { background: #4ade80; }
+    .var-group-title .dot.ref { background: #a78bfa; }
+    .var-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .var-chip {
+      padding: 4px 10px;
+      background: var(--bg);
+      border: 1px solid transparent;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .var-chip:hover { background: var(--surface2); }
+    .var-chip.selected {
+      border-color: var(--accent);
+      background: rgba(233, 69, 96, 0.2);
+    }
+    .var-chip .var-name { color: var(--text-dim); font-size: 0.7rem; }
+    .var-chip .var-value { color: var(--text); }
+    .var-modal-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+      justify-content: flex-end;
+    }
 
     /* Gallery */
     .gallery-header {
@@ -839,6 +925,17 @@
     }
     .header-row h1 { margin: 0; }
 
+    /* Backend status indicator */
+    .backend-status {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #666;
+      transition: background 0.3s;
+    }
+    .backend-status.online { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .backend-status.offline { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+
     /* Gallery folders */
     .gallery-folders {
       display: flex;
@@ -954,7 +1051,10 @@
     <!-- Controls Panel -->
     <div class="panel controls">
       <div class="header-row">
-        <h1>Silly Media</h1>
+        <div style="display:flex;align-items:center;gap:10px">
+          <h1>Silly Media</h1>
+          <div id="backendStatus" class="backend-status" title="Checking..."></div>
+        </div>
         <div style="display:flex;gap:6px;align-items:center">
           <span class="help-icon" onclick="showVariablesHelp()" title="Variables Help">?</span>
           <span class="settings-icon" onclick="openSettings()" title="Settings">&#9881;</span>
@@ -963,7 +1063,10 @@
 
       <div class="label-row">
         <label for="prompt">Prompt</label>
-        <button class="save-btn" onclick="saveCurrentPrompt()" title="Save to history">&#128190;</button>
+        <div style="display:flex;gap:4px">
+          <button class="save-btn" onclick="openVarModal()" title="Filter variables">&#128270;</button>
+          <button class="save-btn" onclick="saveCurrentPrompt()" title="Save to history">&#128190;</button>
+        </div>
       </div>
       <textarea id="prompt" placeholder="Describe the image you want to generate..."></textarea>
 
@@ -1265,6 +1368,21 @@ Results:
     </div>
   </div>
 
+  <!-- Variable Selector Modal -->
+  <div class="var-modal" id="varModal" onclick="closeVarModal(event)">
+    <div class="var-modal-content" onclick="event.stopPropagation()">
+      <div class="var-modal-header">
+        <h3>Highlight Variables</h3>
+        <button class="var-modal-close" onclick="closeVarModal()">&times;</button>
+      </div>
+      <div id="varModalBody"></div>
+      <div class="var-modal-actions">
+        <button class="btn-secondary btn-small" onclick="clearVarHighlights()">Clear All</button>
+        <button class="btn-secondary btn-small" onclick="closeVarModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings Modal -->
   <div class="settings-modal" id="settingsModal" onclick="closeSettings(event)">
     <div class="settings-content" onclick="event.stopPropagation()">
@@ -1317,8 +1435,36 @@ Results:
       loadBatchRandomize();
       loadAppSettings();
       loadCollapsibleStates();
+      loadVarHighlights();
       await loadGallery();
       setupEventListeners();
+      startBackendCheck();
+    }
+
+    // Backend status checking
+    let backendCheckInterval = null;
+
+    async function checkBackendStatus() {
+      const indicator = document.getElementById('backendStatus');
+      try {
+        const response = await fetch(`${getApiUrl()}/health`, { method: 'GET', signal: AbortSignal.timeout(3000) });
+        if (response.ok) {
+          indicator.classList.remove('offline');
+          indicator.classList.add('online');
+          indicator.title = 'Backend online';
+        } else {
+          throw new Error('Not OK');
+        }
+      } catch (e) {
+        indicator.classList.remove('online');
+        indicator.classList.add('offline');
+        indicator.title = 'Backend offline';
+      }
+    }
+
+    function startBackendCheck() {
+      checkBackendStatus();
+      backendCheckInterval = setInterval(checkBackendStatus, 5000);
     }
 
     function openDB() {
@@ -2044,14 +2190,20 @@ Results:
       }
     }
 
+    // Store current preview data for variable filtering
+    let currentPreviewData = null;
+
     function showPreview(url, id, prompt = null, template = null, variables = null, batchData = null, batchIndex = 0) {
       const container = document.getElementById('previewContainer');
       let promptHtml = '';
 
+      // Store data for variable modal
+      currentPreviewData = { prompt, template, variables: variables || {}, batchData, batchIndex };
+
       if (prompt) {
         // Use the already-resolved prompt with highlighting (don't regenerate random values!)
         // Always call highlightStoredPrompt to highlight builtin [] variables even without JSON variables
-        promptHtml = `<div class="preview-prompt">${highlightStoredPrompt(prompt, variables || {}, batchData, batchIndex)}</div>`;
+        promptHtml = `<div class="preview-prompt" id="previewPrompt">${highlightStoredPrompt(prompt, variables || {}, batchData, batchIndex)}</div>`;
       }
 
       container.innerHTML = `
@@ -2138,19 +2290,26 @@ Results:
         result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
       }
 
-      // Collect all builtin values and sort by length descending
-      const allBuiltins = [];
-      for (const values of Object.values(BUILTIN_VARS)) {
-        allBuiltins.push(...values);
+      // Collect builtin values - track which variable name each value belongs to
+      const builtinValueToName = new Map();
+      for (const [name, values] of Object.entries(BUILTIN_VARS)) {
+        for (const value of values) {
+          builtinValueToName.set(value, name);
+        }
       }
-      allBuiltins.sort((a, b) => b.length - a.length);
 
-      // Highlight builtin values (green) - skip if already wrapped in a span
+      // Sort all builtin values by length descending
+      const allBuiltins = [...builtinValueToName.keys()].sort((a, b) => b.length - a.length);
+
+      // Highlight builtin values (green) - add background if variable is selected
       for (const value of allBuiltins) {
+        const varName = builtinValueToName.get(value);
+        const isSelected = selectedVarHighlights.has(varName);
         const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         // Only match if not already inside a span tag
         const regex = new RegExp(`(?<!<span[^>]*>)(?<!">)${escaped}(?!</span>)`, 'gi');
-        result = result.replace(regex, `<span class="var-builtin">${escapeHtml(value)}</span>`);
+        const highlightClass = isSelected ? 'var-builtin var-highlight' : 'var-builtin';
+        result = result.replace(regex, `<span class="${highlightClass}">${escapeHtml(value)}</span>`);
       }
 
       return result;
@@ -2756,6 +2915,157 @@ with open("image.png", "wb") as f:
       document.getElementById('helpModal').classList.remove('open');
     }
 
+    // Variable filter modal
+    let selectedVarHighlights = new Set();
+
+    function parsePromptTemplate(template) {
+      const parsed = { json: [], builtin: [], ref: [] };
+
+      // Parse {variable} patterns
+      const jsonMatches = template.match(/\{(\w+)\}/g) || [];
+      for (const match of jsonMatches) {
+        const name = match.slice(1, -1);
+        if (!parsed.json.find(v => v.name === name)) {
+          parsed.json.push({ name, type: 'json' });
+        }
+      }
+
+      // Parse {variable+N} or {variable-N} patterns
+      const refMatches = template.match(/\{(\w+)([+-]\d+)\}/g) || [];
+      for (const match of refMatches) {
+        const name = match.slice(1, -1);
+        if (!parsed.ref.find(v => v.name === name)) {
+          parsed.ref.push({ name, type: 'ref' });
+        }
+      }
+
+      // Parse [builtin] patterns
+      const builtinMatches = template.match(/\[(\w+(?:-\w+)?)\]/g) || [];
+      for (const match of builtinMatches) {
+        const name = match.slice(1, -1);
+        // Check if it's a known builtin or a number range like [20-35]
+        if (BUILTIN_VARS[name] || /^\d+-\d+$/.test(name)) {
+          if (!parsed.builtin.find(v => v.name === name)) {
+            parsed.builtin.push({ name, type: 'builtin' });
+          }
+        }
+      }
+
+      return parsed;
+    }
+
+    function openVarModal() {
+      const modal = document.getElementById('varModal');
+      const body = document.getElementById('varModalBody');
+
+      const template = document.getElementById('prompt').value.trim();
+      if (!template) {
+        body.innerHTML = '<p style="color:var(--text-dim)">Enter a prompt first</p>';
+        modal.classList.add('show');
+        return;
+      }
+
+      const parsed = parsePromptTemplate(template);
+
+      let html = '';
+
+      if (parsed.json.length > 0) {
+        html += `<div class="var-group">
+          <div class="var-group-title"><span class="dot json"></span>JSON Variables</div>
+          <div class="var-list">
+            ${parsed.json.map(v => `
+              <div class="var-chip ${selectedVarHighlights.has(v.name) ? 'selected' : ''}"
+                   onclick="toggleVarHighlight('${v.name}', this)">
+                <span class="var-value">{${v.name}}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+      }
+
+      if (parsed.ref.length > 0) {
+        html += `<div class="var-group">
+          <div class="var-group-title"><span class="dot ref"></span>Relative References</div>
+          <div class="var-list">
+            ${parsed.ref.map(v => `
+              <div class="var-chip ${selectedVarHighlights.has(v.name) ? 'selected' : ''}"
+                   onclick="toggleVarHighlight('${v.name}', this)">
+                <span class="var-value">{${v.name}}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+      }
+
+      if (parsed.builtin.length > 0) {
+        html += `<div class="var-group">
+          <div class="var-group-title"><span class="dot builtin"></span>Built-in Variables</div>
+          <div class="var-list">
+            ${parsed.builtin.map(v => `
+              <div class="var-chip ${selectedVarHighlights.has(v.name) ? 'selected' : ''}"
+                   onclick="toggleVarHighlight('${v.name}', this)">
+                <span class="var-value">[${v.name}]</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+      }
+
+      if (!html) {
+        html = '<p style="color:var(--text-dim)">No variables found in prompt</p>';
+      }
+
+      body.innerHTML = html;
+      modal.classList.add('show');
+    }
+
+    function closeVarModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('varModal').classList.remove('show');
+    }
+
+    function toggleVarHighlight(varName, chip) {
+      if (selectedVarHighlights.has(varName)) {
+        selectedVarHighlights.delete(varName);
+        chip.classList.remove('selected');
+      } else {
+        selectedVarHighlights.add(varName);
+        chip.classList.add('selected');
+      }
+      // Save to localStorage
+      saveVarHighlights();
+      // Immediately update preview if visible
+      refreshPreviewPrompt();
+    }
+
+    function clearVarHighlights() {
+      selectedVarHighlights.clear();
+      document.querySelectorAll('#varModalBody .var-chip').forEach(c => c.classList.remove('selected'));
+      saveVarHighlights();
+      refreshPreviewPrompt();
+    }
+
+    function saveVarHighlights() {
+      localStorage.setItem('sillyMediaVarHighlights', JSON.stringify([...selectedVarHighlights]));
+    }
+
+    function loadVarHighlights() {
+      const saved = localStorage.getItem('sillyMediaVarHighlights');
+      if (saved) {
+        try {
+          const arr = JSON.parse(saved);
+          selectedVarHighlights = new Set(arr);
+        } catch (e) {}
+      }
+    }
+
+    function refreshPreviewPrompt() {
+      const promptEl = document.getElementById('previewPrompt');
+      if (!promptEl || !currentPreviewData) return;
+      const { prompt, variables, batchData, batchIndex } = currentPreviewData;
+      promptEl.innerHTML = highlightStoredPrompt(prompt, variables, batchData, batchIndex);
+    }
+
     // Settings
     const SETTINGS_STORAGE_KEY = 'sillyMediaAppSettings';
 
@@ -2878,9 +3188,9 @@ with open("image.png", "wb") as f:
       color: [
         'red', 'crimson', 'scarlet', 'burgundy', 'coral', 'orange', 'tangerine', 'peach', 'amber', 'rust', 'yellow', 'gold', 'lemon', 'mustard', 'cream', 'green', 'emerald', 'olive', 'mint', 'sage', 'forest green', 'lime', 'blue', 'navy', 'cobalt', 'sky blue', 'teal', 'turquoise', 'cyan', 'indigo', 'purple', 'violet', 'lavender', 'plum', 'magenta', 'fuchsia',  'pink', 'rose', 'blush', 'salmon', 'hot pink', 'brown', 'chocolate', 'tan', 'beige', 'caramel', 'copper', 'black', 'charcoal', 'onyx', 'ebony', 'white', 'ivory', 'pearl', 'snow', 'gray', 'silver', 'slate', 'ash'
       ],
-      size: ['small', 'medium', 'large'],
+      size: ['tiny', 'small', 'medium', 'large', 'huge'],
       pose: [
-        'standing', 'sitting', 'kneeling', 'lying down', 'crouching', 'walking', 'running', 'jumping', 'dancing', 'leaning', 'stretching', 'reaching', 'pointing', 'waving', 'crossing arms', 'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy-style pose', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated', 'enslaved', 'submissive', 'dominant', 'obedient', 'pleading', 'begging', 'teasing', 'taunting', 'humiliated', 'degraded', 'objectified', 'used', 'owned'
+        'standing', 'sitting', 'kneeling', 'lying down', 'crouching', 'walking', 'running', 'jumping', 'dancing', 'leaning', 'stretching', 'reaching', 'pointing', 'waving', 'crossing arms', 'hands on hips', 'bending over', 'squatting', 'lounging', 'spreading legs', 'touching herself', 'holding hair', 'biting lip', 'arching back', 'aiming', 'saluting', 'praying', 'meditating', 'tied up', 'bound wrists', 'hogtied', 'spread eagle', 'on all fours', 'doggy-style pose', 'whipped', 'suspended', 'leashed', 'collared', 'gagged', 'chastised', 'spanked', 'flogged', 'interrogated', 'enslaved', 'submissive', 'dominant', 'obedient', 'pleading', 'begging', 'teasing', 'taunting', 'urinating', 'yoga pose', 'masturbating', 'lay', 'drinking', 'eating', 'speaking', 'shouting'
       ],
       object: [
         'chair', 'stool', 'bench', 'sofa', 'armchair', 'throne', 'bed', 'mattress', 'pillow', 'blanket', 'table', 'desk', 'counter', 'bar', 'floor', 'carpet', 'rug', 'stairs', 'ladder', 'railing', 'balcony', 'window sill', 'doorway', 'wall', 'column', 'pillar','rock', 'tree stump', 'log', 'swing', 'hammock', 'car hood', 'motorcycle', 'bicycle', 'boat', 'pool edge', 'fountain', 'bathtub', 'shower', 'St. Andrew\'s cross', 'pillory', 'cage', 'stocks', 'cross', 'altar', 'dungeon bench', 'torture rack', 'whipping post', 'examination table', 'operating table', 'gynecological chair', 'spank bench', 'bondage table', 'humiliation stool', 'flogging bench', 'restraint bed', 'slave block', 'pillory stand', 'bondage frame', 'crop', 'paddle', 'butt-plug', 'dildo', 'vibrator', 'anal beads', 'nipple clamps', 'ball gag', 'blindfold', 'collar and leash', 'spreaders', 'chastity belt', 'shackles', 'manacles', 'chains', 'shibari-ropes'
@@ -2901,7 +3211,7 @@ with open("image.png", "wb") as f:
         'petite body', 'slender figure', 'athletic build', 'curvy figure', 'voluptuous body', 'muscular physique', 'toned body', 'lithe frame', 'willowy figure', 'buxom figure', 'hourglass figure', 'lean build', 'fit body', 'narrow waist', 'thick thighs', 'wide hips', 'slim waist'
       ],
       accessory: [
-        'glasses', 'sunglasses', 'hat', 'cap', 'beanie', 'headband', 'tiara', 'crown', 'earrings', 'hoop earrings', 'necklace', 'choker', 'pendant', 'collar', 'dog collar', 'bracelet', 'watch', 'rings', 'belt', 'scarf', 'bow', 'ribbon', 'tattoo', 'sleeve tattoo', 'piercings', 'gloves', 'fingerless gloves', 'mask', 'blindfold', 'gag', 'leash', 'cuffs', 'anklet', 'humiliating tattoo', 'slave brand', 'nipple clamps', 'collar and leash', 'spiked collar', 'bondage ropes', 'shackles', 'manacles', 'chains', 'dirt', 'bowine patterns', 'fishnet stockings', 'lace gloves', 'lace stockings', 'garter belt', 'corset', 'fetish harness', 'latex outfit', 'leather outfit', 'PVC outfit', 'bondage gear', 'fetish mask', 'eye patch', 'corset', 'fetish heels', 'thigh high boots', 'platform boots', 'stiletto heels', 'collared leash',  'cat ears', 'dog ears', 'rabbit ears', 'cow ears', 'cow bell', 'playboy bunny outfit', 'maid headband', 'nurse hat', 'schoolgirl bow', 'police hat', 'military cap', 'sailor hat', 'witch hat', 'maid headpiece', 'skimpy outfit', 'sexy costume', 'lacy lingerie', 'bikini', 'swimsuit', 'corset and garter belt', 'fishnet bodysuit', 'latex catsuit', 'leather harness', 'bondage outfit', 'fetish wear', 'dominatrix attire', 'submissive outfit', 'slave outfit', 'sexy uniform', 'roleplay costume', 'naughty outfit', 'erotic lacy lingerie', 'transparent clothing', 'see-through outfit', 'barely-there outfit', 'micro bikini', 'pasties', 'crotchless panties', 'open-cup bra', 'bondage hood', 'full-body harness', 'restraint system', 'nipple pasties', 'anal hook', 'spreaders', 'chastity device', 'shock collar', 'tattoo with word \'SLUT\'', 'tattoo with word \'WHORE\'', 'tattoo with word \'SLAVE\'', 'tattoo with word \'PROPERTY\'', 'branding mark', 'slave ankle bracelet', 'skimpy thong', 'lace thong', 'g-string', 'crotchless thong', 'bowtie collar', 'leather collar', 'spiked leash', 'bondage mittens', 'latex gloves', 'fetish stockings', 'fishnet gloves', 'lace garter', 'fetish wrist cuffs', 'bondage ankle cuffs', 'collared harness', 'thorn clothes', 'rags', 'geisha outfit', 'kimono', 'sari', 'hanbok', 'cheongsam', 'yukata', 'bikini armor', 'slave bikini', 'chainmail lingerie', 'leather bikini', 'latex lingerie', 'bondage lingerie', 'fetish lingerie', 'erotic costume', 'sexy armor', 'naughty nurse outfit', 'sexy schoolgirl outfit', 'sexy police outfit', 'sexy maid outfit', 'sexy military outfit', 'sexy sailor outfit', 'sexy witch outfit', 'slutty cow costume', 'prostitute outfit', 'nipple clamps', 'dirt', 'feather', 'gag', 'pencil skirt', 'appron', 'see-through babydoll', '\'slut\' choker', 'heart pasties under mesh top', 'bunny tail plug visible', 'cat ears with whisker chains', 'schoolgirl collar', 'maid apron over lingerie', 'cheer pom-pom nipple covers', 'nurse hat with stethoscope garter', 'devil horns and tail', 'angel wings with halo thong', 'pirate eyepatch on nipple', 'superhero cape over crotchless suit', '\'property\' name tag', 'leash handle on belt loop', 'jingle bell anklets', 'glow-in-dark arrow \'insert here\'', 'tassel earrings to breast level', 'micro bikini with \'free use\' tag', 'stockings with \'upskirt\' label', 'ninja mask with slit eye pasties', 'santa hat \'ho ho hoe\' bell', 'elf ears connected to nipple rings', 'reindeer antler headband with tail plug', 'gingerbread man cookie cutter garter', 'snowflake pasties under sheer sweater', 'candy cane striped thong visible', 'hot cocoa mug apron \'warm me up\'', 'fireplace stocking garter \'hang here\'', 'ornament ball earrings to breast chain', 'wrapping paper bow on crotch', 'gift tag \'open me\' on thigh', 'tinsel garland nipple wrap', 'poinsettia flower clit pin', 'icicle dangle labia jewelry', 'snowman carrot nose plug tail', 'jingle bell nipple bells', 'frosty scarf with \'melt me\' tag', 'polar bear ear headband collar', 'penguin flipper armbands \'waddle for daddy\'', 'eskimo parka hood over exposed pasties', 'igloo door flap micro skirt', 'aurora borealis glow stick harness', 'winter solstice \'dark slut\' choker', 'yule log garter with flame pasties', 'mistletoe branch hanging from navel', 'holly berry nipple studs', 'ivy vine thigh tattoo chain', 'druid robe slit to waist \'nature\'s whore\'', 'pagan horn crown \'fertility goddess\' tag', 'Wonder Woman costume'
+        'glasses', 'sunglasses', 'hat', 'cap', 'beanie', 'headband', 'tiara', 'crown', 'earrings', 'hoop earrings', 'necklace', 'choker', 'pendant', 'collar', 'dog collar', 'bracelet', 'watch', 'rings', 'belt', 'scarf', 'bow', 'ribbon', 'tattoo', 'sleeve tattoo', 'piercings', 'gloves', 'fingerless gloves', 'mask', 'blindfold', 'gag', 'leash', 'cuffs', 'anklet', 'humiliating tattoo', 'slave brand', 'nipple clamps', 'collar and leash', 'spiked collar', 'bondage ropes', 'shackles', 'manacles', 'chains', 'dirt', 'bowine patterns', 'fishnet stockings', 'lace gloves', 'lace stockings', 'garter belt', 'corset', 'fetish harness', 'latex outfit', 'leather outfit', 'PVC outfit', 'bondage gear', 'fetish mask', 'eye patch', 'corset', 'fetish heels', 'thigh high boots', 'platform boots', 'stiletto heels', 'collared leash',  'cat ears', 'dog ears', 'rabbit ears', 'cow ears', 'cow bell', 'playboy bunny outfit', 'maid headband', 'nurse hat', 'schoolgirl bow', 'police hat', 'military cap', 'sailor hat', 'witch hat', 'maid headpiece', 'skimpy outfit', 'sexy costume', 'lacy lingerie', 'bikini', 'swimsuit', 'corset and garter belt', 'fishnet bodysuit', 'latex catsuit', 'leather harness', 'bondage outfit', 'fetish wear', 'dominatrix attire', 'submissive outfit', 'slave outfit', 'sexy uniform', 'roleplay costume', 'naughty outfit', 'erotic lacy lingerie', 'transparent clothing', 'see-through outfit', 'barely-there outfit', 'micro bikini', 'pasties', 'crotchless panties', 'open-cup bra', 'bondage hood', 'full-body harness', 'restraint system', 'nipple pasties', 'anal hook', 'spreaders', 'chastity device', 'shock collar', 'tattoo with word \'SLUT\'', 'tattoo with word \'WHORE\'', 'tattoo with word \'SLAVE\'', 'tattoo with word \'PROPERTY\'', 'branding mark', 'slave ankle bracelet', 'skimpy thong', 'lace thong', 'g-string', 'crotchless thong', 'bowtie collar', 'leather collar', 'spiked leash', 'bondage mittens', 'latex gloves', 'fetish stockings', 'fishnet gloves', 'lace garter', 'fetish wrist cuffs', 'bondage ankle cuffs', 'collared harness', 'thorn clothes', 'rags', 'geisha outfit', 'kimono', 'sari', 'hanbok', 'cheongsam', 'yukata', 'bikini armor', 'slave bikini', 'chainmail lingerie', 'leather bikini', 'latex lingerie', 'bondage lingerie', 'fetish lingerie', 'erotic costume', 'sexy armor', 'naughty nurse outfit', 'sexy schoolgirl outfit', 'sexy police outfit', 'sexy maid outfit', 'sexy military outfit', 'sexy sailor outfit', 'sexy witch outfit', 'slutty cow costume', 'prostitute outfit', 'nipple clamps', 'dirt', 'feather', 'gag', 'pencil skirt', 'appron', 'see-through babydoll', '\'slut\' choker', 'heart pasties under mesh top', 'bunny tail plug visible', 'cat ears with whisker chains', 'schoolgirl collar', 'maid apron over lingerie', 'cheer pom-pom nipple covers', 'nurse hat with stethoscope garter', 'devil horns and tail', 'angel wings with halo thong', 'pirate eyepatch on nipple', 'superhero cape over crotchless suit', '\'property\' name tag', 'leash handle on belt loop', 'jingle bell anklets', 'glow-in-dark arrow \'insert here\'', 'tassel earrings to breast level', 'micro bikini with \'free use\' tag', 'stockings with \'upskirt\' label', 'ninja mask with slit eye pasties', 'santa hat \'ho ho hoe\' bell', 'elf ears connected to nipple rings', 'reindeer antler headband with tail plug', 'gingerbread man cookie cutter garter', 'snowflake pasties under sheer sweater', 'candy cane striped thong visible', 'hot cocoa mug apron \'warm me up\'', 'fireplace stocking garter \'hang here\'', 'ornament ball earrings to breast chain', 'wrapping paper bow on crotch', 'gift tag \'open me\' on thigh', 'tinsel garland nipple wrap', 'poinsettia flower clit pin', 'icicle dangle labia jewelry', 'snowman carrot nose plug tail', 'jingle bell nipple bells', 'frosty scarf with \'melt me\' tag', 'polar bear ear headband collar', 'penguin flipper armbands \'waddle for daddy\'', 'eskimo parka hood over exposed pasties', 'igloo door flap micro skirt', 'aurora borealis glow stick harness', 'winter solstice \'dark slut\' choker', 'yule log garter with flame pasties', 'mistletoe branch hanging from navel', 'holly berry nipple studs', 'ivy vine thigh tattoo chain', 'druid robe slit to waist \'nature\'s whore\'', 'pagan horn crown \'fertility goddess\' tag', 'Wonder Woman costume', 'clown makeup'
       ]
     };
 
