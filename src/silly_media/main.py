@@ -1,11 +1,13 @@
 """FastAPI application for image generation."""
 
+import asyncio
 import io
 import logging
 import signal
 import sys
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 
 from fastapi import FastAPI, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +16,44 @@ from fastapi.responses import Response
 from .config import settings
 from .models import ModelRegistry
 from .schemas import AspectRatio, ErrorResponse, GenerateRequest, HealthResponse
+
+
+@dataclass
+class GenerationProgress:
+    """Track progress of image generation."""
+    active: bool = False
+    step: int = 0
+    total_steps: int = 0
+    started_at: float = 0.0
+
+    def start(self, total_steps: int):
+        self.active = True
+        self.step = 0
+        self.total_steps = total_steps
+        self.started_at = time.time()
+
+    def update(self, step: int):
+        self.step = step
+
+    def finish(self):
+        self.active = False
+        self.step = 0
+        self.total_steps = 0
+
+    def to_dict(self):
+        if not self.active:
+            return {"active": False}
+        return {
+            "active": True,
+            "step": self.step,
+            "total_steps": self.total_steps,
+            "percent": round(self.step / self.total_steps * 100) if self.total_steps > 0 else 0,
+            "elapsed": round(time.time() - self.started_at, 1),
+        }
+
+
+# Global progress tracker
+progress = GenerationProgress()
 
 # Configure logging
 logging.basicConfig(
@@ -95,6 +135,12 @@ async def list_models():
     }
 
 
+@app.get("/progress")
+async def get_progress():
+    """Get current generation progress."""
+    return progress.to_dict()
+
+
 @app.get("/aspect-ratios")
 async def list_aspect_ratios():
     """List available aspect ratio presets."""
@@ -145,7 +191,22 @@ async def generate_image(
             f"size={request.width}x{request.height}"
         )
 
-        image = model_instance.generate(request)
+        # Create progress callback
+        def progress_callback(pipe, step, timestep, callback_kwargs):
+            progress.update(step + 1)  # +1 because step is 0-indexed
+            return callback_kwargs
+
+        # Start progress tracking
+        total_steps = request.num_inference_steps or model_instance.default_steps
+        progress.start(total_steps)
+
+        try:
+            # Run in thread pool so event loop stays free for /progress polling
+            image = await asyncio.to_thread(
+                model_instance.generate, request, progress_callback
+            )
+        finally:
+            progress.finish()
 
         # Convert to PNG bytes
         buffer = io.BytesIO()

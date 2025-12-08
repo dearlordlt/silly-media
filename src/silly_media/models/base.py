@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from PIL import Image
 
@@ -38,7 +38,7 @@ class BaseImageModel(ABC):
         pass
 
     @abstractmethod
-    def generate(self, request: "GenerateRequest") -> Image.Image:
+    def generate(self, request: "GenerateRequest", progress_callback: Callable | None = None) -> Image.Image:
         """Generate an image from the request."""
         pass
 

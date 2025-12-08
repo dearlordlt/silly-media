@@ -48,6 +48,32 @@ List available and loaded models.
 
 ---
 
+## Generation Progress
+
+### `GET /progress`
+
+Get the current generation progress (useful for polling during image generation).
+
+**Response (when generating)**
+```json
+{
+  "active": true,
+  "step": 5,
+  "total_steps": 9,
+  "percent": 56,
+  "elapsed": 2.3
+}
+```
+
+**Response (when idle)**
+```json
+{
+  "active": false
+}
+```
+
+---
+
 ## List Aspect Ratios
 
 ### `GET /aspect-ratios`

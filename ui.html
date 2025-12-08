@@ -133,6 +133,40 @@
     .status.success { display: block; background: #16a34a33; color: var(--success); }
     .status.loading { display: block; background: var(--surface2); color: var(--text-dim); }
 
+    /* Generation Progress (in preview container) */
+    .gen-progress-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: rgba(0,0,0,0.3);
+      z-index: 10;
+      display: none;
+    }
+    .gen-progress-bar.active { display: block; }
+    .gen-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #10b981, #34d399);
+      border-radius: 0 2px 2px 0;
+      transition: width 0.15s ease-out;
+    }
+    .gen-progress-text {
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.7rem;
+      color: white;
+      background: rgba(0,0,0,0.6);
+      padding: 2px 8px;
+      border-radius: 3px;
+      z-index: 11;
+      display: none;
+    }
+    .gen-progress-text.active { display: block; }
+
     /* Preview */
     .preview-container {
       background: var(--surface);
@@ -1113,6 +1147,8 @@
     <!-- Preview & Gallery -->
     <div>
       <div class="preview-container" id="previewContainer">
+        <div class="gen-progress-bar" id="genProgressBar"><div class="gen-progress-fill" id="genProgressFill"></div></div>
+        <div class="gen-progress-text" id="genProgressText">0 / 9</div>
         <div class="preview-placeholder">
           <p>Generated image will appear here</p>
         </div>
@@ -1906,6 +1942,49 @@ Results:
       return document.getElementById('model').value;
     }
 
+    // Progress polling (generation progress in preview container)
+    let progressInterval = null;
+
+    function startProgressPolling() {
+      const bar = document.getElementById('genProgressBar');
+      const fill = document.getElementById('genProgressFill');
+      const text = document.getElementById('genProgressText');
+
+      if (bar) bar.classList.add('active');
+      if (text) text.classList.add('active');
+      if (fill) fill.style.width = '0%';
+      if (text) text.textContent = 'Starting...';
+
+      progressInterval = setInterval(async () => {
+        try {
+          const response = await fetch(`${getApiUrl()}/progress`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.active) {
+              const percent = data.percent || 0;
+              const fill = document.getElementById('genProgressFill');
+              const text = document.getElementById('genProgressText');
+              if (fill) fill.style.width = `${percent}%`;
+              if (text) text.textContent = `${data.step} / ${data.total_steps}`;
+            }
+          }
+        } catch (e) {
+          // Ignore polling errors
+        }
+      }, 200);
+    }
+
+    function stopProgressPolling() {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+      const bar = document.getElementById('genProgressBar');
+      const text = document.getElementById('genProgressText');
+      if (bar) bar.classList.remove('active');
+      if (text) text.classList.remove('active');
+    }
+
     async function generate() {
       const promptTemplate = document.getElementById('prompt').value.trim();
       if (!promptTemplate) {
@@ -1917,6 +1996,7 @@ Results:
       btn.disabled = true;
       btn.textContent = 'Generating...';
       showStatus('Generating image...', 'loading');
+      startProgressPolling();
 
       // Interpolate random variables [location], [time], etc. for single generation
       const prompt = interpolatePrompt(promptTemplate, {});
@@ -1958,6 +2038,7 @@ Results:
       } catch (error) {
         showStatus(error.message, 'error');
       } finally {
+        stopProgressPolling();
         btn.disabled = false;
         btn.textContent = 'Generate';
       }
@@ -1974,6 +2055,8 @@ Results:
       }
 
       container.innerHTML = `
+        <div class="gen-progress-bar" id="genProgressBar"><div class="gen-progress-fill" id="genProgressFill"></div></div>
+        <div class="gen-progress-text" id="genProgressText">0 / 9</div>
         <div class="debounce-bar" id="debounceBar" style="display:none"><div class="debounce-bar-fill" id="debounceBarFill"></div></div>
         <img src="${url}" alt="Generated image">
         ${promptHtml}
@@ -2803,7 +2886,7 @@ with open("image.png", "wb") as f:
         'chair', 'stool', 'bench', 'sofa', 'armchair', 'throne', 'bed', 'mattress', 'pillow', 'blanket', 'table', 'desk', 'counter', 'bar', 'floor', 'carpet', 'rug', 'stairs', 'ladder', 'railing', 'balcony', 'window sill', 'doorway', 'wall', 'column', 'pillar','rock', 'tree stump', 'log', 'swing', 'hammock', 'car hood', 'motorcycle', 'bicycle', 'boat', 'pool edge', 'fountain', 'bathtub', 'shower', 'St. Andrew\'s cross', 'pillory', 'cage', 'stocks', 'cross', 'altar', 'dungeon bench', 'torture rack', 'whipping post', 'examination table', 'operating table', 'gynecological chair', 'spank bench', 'bondage table', 'humiliation stool', 'flogging bench', 'restraint bed', 'slave block', 'pillory stand', 'bondage frame', 'crop', 'paddle', 'butt-plug', 'dildo', 'vibrator', 'anal beads', 'nipple clamps', 'ball gag', 'blindfold', 'collar and leash', 'spreaders', 'chastity belt', 'shackles', 'manacles', 'chains', 'shibari-ropes'
       ],
       race: [
-        'caucasian', 'african', 'asian', 'latino', 'hispanic', 'middle eastern', 'indian', 'polynesian', 'native american', 'mediterranean', 'nordic', 'slavic', 'southeast asian', 'east asian', 'mixed race', 'biracial', 'black african', 'arab', 'persian', 'maori', 'pacific islander', 'caribbean', 'afro-latino'
+        'caucasian', 'african', 'asian', 'latino', 'hispanic', 'middle eastern', 'indian', 'polynesian', 'native american', 'mediterranean', 'nordic', 'slavic', 'southeast asian', 'east asian', 'mixed race', 'biracial', 'black african', 'arab', 'persian', 'maori', 'pacific islander', 'caribbean', 'afro-latino', 'italian', 'greek', 'spanish', 'portuguese', 'german', 'french', 'british', 'irish', 'scandinavian', 'dutch', 'belgian', 'swiss', 'nigerian', 'ethiopian', 'somali', 'kenyan', 'tanzanian', 'ghanaian', 'cameroonian', 'egyptian', 'turkish', 'kurdish', 'jewish', 'thai', 'vietnamese', 'filipino', 'malaysian', 'indonesian', 'korean', 'japanese', 'chinese', 'mongolian', 'pakistani', 'bangladeshi', 'sri lankan', 'afghan', 'mauritian', 'seychellois', 'fijian', 'brazilian', 'argentinian', 'chilean', 'colombian', 'peruvian', 'venezuelan'
       ],
       expression: [
         'smiling', 'laughing', 'grinning', 'giggling', 'serious', 'stern', 'stoic', 'neutral', 'sad', 'crying', 'tearful', 'melancholic', 'angry', 'furious', 'annoyed', 'frowning', 'surprised', 'shocked', 'amazed', 'wide-eyed', 'seductive', 'flirty', 'sultry', 'playful', 'thoughtful', 'pensive', 'contemplative', 'dreamy', 'scared', 'terrified', 'worried', 'anxious', 'disgusted', 'confused', 'skeptical', 'bored', 'curious', 'determined', 'relaxed', 'content', 'excited', 'nervous', 'shy', 'proud', 'embarrassed', 'teasing', 'mischievous', 'smeared lipstick', 'running-makeup', 'smudged-makeup', 'dilated-pupils', 'biting-lip', 'tongue out', 'blushing', 'wide-smile', 'raised-eyebrow', 'humiliated', 'submissive', 'obedient', 'eager', 'desperate', 'pleading', 'yearning', 'aroused', 'lustful', 'devilish-grin', 'hypnotized', 'enslaved', 'mind controlled', 'brainwashed', 'broken', 'degraded', 'objectified', 'used', 'owned', 'slutty', 'whorish', 'prostitute', 'street whore', 'relaxed', 'dumb', 'embarrased', 'begging', 'defeated', 'pathetic', 'shy'
@@ -3008,11 +3091,17 @@ with open("image.png", "wb") as f:
         const url = `${getApiUrl()}/generate/${getModel()}`;
 
         try {
+          // Start generation progress polling
+          startProgressPolling();
+
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
           });
+
+          // Stop generation progress
+          stopProgressPolling();
 
           if (!response.ok) {
             const error = await response.json();
@@ -3041,6 +3130,7 @@ with open("image.png", "wb") as f:
           }
 
         } catch (error) {
+          stopProgressPolling();
           console.error(`Failed to generate image ${i + 1}:`, error);
           showStatus(`Error on image ${i + 1}: ${error.message}`, 'error');
           // Continue with next image instead of stopping
@@ -3131,11 +3221,17 @@ with open("image.png", "wb") as f:
         const url = `${getApiUrl()}/generate/${getModel()}`;
 
         try {
+          // Start generation progress polling
+          startProgressPolling();
+
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings)
           });
+
+          // Stop generation progress
+          stopProgressPolling();
 
           if (!response.ok) {
             const error = await response.json();
@@ -3164,6 +3260,7 @@ with open("image.png", "wb") as f:
           }
 
         } catch (error) {
+          stopProgressPolling();
           console.error(`Failed to generate image ${i + 1}:`, error);
           showStatus(`Error on image ${i + 1}: ${error.message}`, 'error');
         }

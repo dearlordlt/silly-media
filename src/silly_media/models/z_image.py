@@ -1,7 +1,7 @@
 """Z-Image-Turbo model implementation."""
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import torch
 from PIL import Image
@@ -71,7 +71,7 @@ class ZImageTurboModel(BaseImageModel):
         self._loaded = False
         logger.info(f"{self.model_id} unloaded")
 
-    def generate(self, request: "GenerateRequest") -> Image.Image:
+    def generate(self, request: "GenerateRequest", progress_callback: Callable | None = None) -> Image.Image:
         """Generate an image from the request."""
         if not self._loaded or self._pipe is None:
             raise RuntimeError("Model not loaded")
@@ -97,6 +97,7 @@ class ZImageTurboModel(BaseImageModel):
             width=request.width,
             height=request.height,
             generator=generator,
+            callback_on_step_end=progress_callback,
         )
 
         return result.images[0]
