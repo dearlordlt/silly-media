@@ -662,15 +662,14 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
+      width: 20px;
+      height: 20px;
       background: var(--accent);
       color: white;
       border-radius: 50%;
-      font-size: 0.7rem;
+      font-size: 0.75rem;
       font-weight: bold;
       cursor: pointer;
-      margin-left: 4px;
     }
     .help-icon:hover { filter: brightness(1.2); }
 
@@ -794,8 +793,7 @@
     .settings-icon {
       cursor: pointer;
       color: var(--text-dim);
-      font-size: 1.2rem;
-      margin-left: 12px;
+      font-size: 1.7rem;
       transition: color 0.2s;
     }
     .settings-icon:hover { color: var(--accent); }
@@ -923,7 +921,10 @@
     <div class="panel controls">
       <div class="header-row">
         <h1>Silly Media</h1>
-        <span class="settings-icon" onclick="openSettings()" title="Settings">&#9881;</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="help-icon" onclick="showVariablesHelp()" title="Variables Help">?</span>
+          <span class="settings-icon" onclick="openSettings()" title="Settings">&#9881;</span>
+        </div>
       </div>
 
       <div class="label-row">
@@ -1044,7 +1045,7 @@
       <!-- Simple Batch -->
       <div class="batch-section">
         <div class="collapsible-header" onclick="toggleCollapsible('simpleBatchSection')">
-          <label style="margin:0;cursor:pointer">Simple Batch <span class="help-icon" onclick="event.stopPropagation(); showVariablesHelp()">?</span></label>
+          <label style="margin:0;cursor:pointer">Simple Batch</label>
           <span id="simpleBatchSection-icon">+</span>
         </div>
         <div id="simpleBatchSection" class="collapsible-content">
@@ -1067,7 +1068,7 @@
       <!-- JSON Batch -->
       <div class="batch-section">
         <div class="collapsible-header" onclick="toggleCollapsible('jsonBatchSection')">
-          <label style="margin:0;cursor:pointer">JSON Batch <span class="help-icon" onclick="event.stopPropagation(); showVariablesHelp()">?</span></label>
+          <label style="margin:0;cursor:pointer">JSON Batch</label>
           <span id="jsonBatchSection-icon">+</span>
         </div>
         <div id="jsonBatchSection" class="collapsible-content">
@@ -1118,18 +1119,23 @@
       </div>
 
       <div class="panel">
-        <div class="gallery-header">
-          <h2>Gallery (<span id="galleryCount">0</span>)</h2>
-          <div>
-            <button class="btn-secondary btn-small" onclick="downloadZip()" id="downloadZipBtn">Download ZIP</button>
-            <button class="btn-secondary btn-small" onclick="selectAll()" id="selectAllBtn">Select All</button>
-            <button class="btn-danger btn-small" onclick="deleteSelected()" id="deleteSelectedBtn" style="display:none">Delete Selected</button>
-            <button class="btn-danger btn-small" onclick="clearGallery()">Clear All</button>
+        <div class="gallery-header collapsible-header" onclick="toggleCollapsible('gallerySection')" style="border-bottom:none;margin-bottom:0">
+          <h2 style="cursor:pointer">Gallery (<span id="galleryCount">0</span>)</h2>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div onclick="event.stopPropagation()" style="display:flex;gap:4px">
+              <button class="btn-secondary btn-small" onclick="downloadZip()" id="downloadZipBtn">Download ZIP</button>
+              <button class="btn-secondary btn-small" onclick="selectAll()" id="selectAllBtn">Select All</button>
+              <button class="btn-danger btn-small" onclick="deleteSelected()" id="deleteSelectedBtn" style="display:none">Delete Selected</button>
+              <button class="btn-danger btn-small" onclick="clearGallery()">Clear All</button>
+            </div>
+            <span id="gallerySection-icon">+</span>
           </div>
         </div>
-        <div id="galleryFolders" class="gallery-folders"></div>
-        <div id="gallery" class="gallery-grid"></div>
-        <div id="galleryPagination"></div>
+        <div id="gallerySection" class="collapsible-content">
+          <div id="galleryFolders" class="gallery-folders"></div>
+          <div id="gallery" class="gallery-grid"></div>
+          <div id="galleryPagination"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1202,6 +1208,7 @@ Results:
         <tr><td><code>[hairstyle]</code></td><td>with long wavy hair, with a ponytail, with bangs, etc.</td></tr>
         <tr><td><code>[haircolor]</code></td><td>blonde, brunette, red, black, pink, etc.</td></tr>
         <tr><td><code>[hairstyle-color]</code></td><td>combines both: with long wavy blonde hair, with a red ponytail</td></tr>
+        <tr><td><code>[bodytype]</code></td><td>petite body, slender figure, athletic build, hourglass figure, etc.</td></tr>
       </table>
 
       <h4>Number Ranges <code>[N-M]</code></h4>
@@ -1213,11 +1220,11 @@ Results:
       <pre>"{name} [hairstyle-color], [pose] in [location], [expression]"
 → "Alice with a blonde ponytail, sitting in coffee shop, laughing"
 
-"[race] woman [hairstyle-color], [expression], wearing [color] dress"
-→ "nordic woman with long wavy red hair, seductive, wearing blue dress"
+"[bodytype] [race] woman [hairstyle-color], [expression]"
+→ "curvy asian woman with long wavy red hair, seductive"
 
-"{name} [hairstyle-color], [pose] on [object], [mood] [lighting]"
-→ "Alice with a messy brunette bun, leaning on railing, romantic golden hour glow"</pre>
+"{name} [hairstyle-color], [bodytype] body, [pose] on [object]"
+→ "Alice with a messy brunette bun, athletic body, leaning on railing"</pre>
     </div>
   </div>
 
@@ -1272,6 +1279,7 @@ Results:
       loadJsonHistory();
       loadBatchRandomize();
       loadAppSettings();
+      loadCollapsibleStates();
       await loadGallery();
       setupEventListeners();
     }
@@ -1829,6 +1837,39 @@ Results:
       const icon = document.getElementById(id + '-icon');
       const isOpen = content.classList.toggle('open');
       icon.textContent = isOpen ? '−' : '+';
+      saveCollapsibleStates();
+    }
+
+    function saveCollapsibleStates() {
+      const ids = ['negativeSection', 'advancedSection', 'historySection', 'negHistorySection',
+                   'simpleBatchSection', 'jsonBatchSection', 'jsonHistorySection', 'gallerySection'];
+      const states = {};
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) states[id] = el.classList.contains('open');
+      });
+      localStorage.setItem('collapsibleStates', JSON.stringify(states));
+    }
+
+    function loadCollapsibleStates() {
+      const saved = localStorage.getItem('collapsibleStates');
+      if (!saved) return;
+      try {
+        const states = JSON.parse(saved);
+        Object.entries(states).forEach(([id, isOpen]) => {
+          const content = document.getElementById(id);
+          const icon = document.getElementById(id + '-icon');
+          if (content && icon) {
+            if (isOpen) {
+              content.classList.add('open');
+              icon.textContent = '−';
+            } else {
+              content.classList.remove('open');
+              icon.textContent = '+';
+            }
+          }
+        });
+      } catch (e) {}
     }
 
     function getSettings() {
@@ -2003,21 +2044,29 @@ Results:
         }
       }
 
+      // Sort by length descending so longer phrases match first
+      const sortedValues = [...allValues].sort((a, b) => b.length - a.length);
+
       // Highlight each variable value found in the prompt (pink for JSON vars)
-      for (const value of allValues) {
+      for (const value of sortedValues) {
         const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, 'g');
+        const regex = new RegExp(escaped, 'g');
         result = result.replace(regex, `<span class="var-json">${escapeHtml(value)}</span>`);
       }
 
-      // Try to identify builtin values (location, time, etc.) - they're harder to detect
-      // but we can highlight known patterns
-      for (const [category, values] of Object.entries(BUILTIN_VARS)) {
-        for (const value of values) {
-          const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, 'gi');
-          result = result.replace(regex, `<span class="var-builtin">${escapeHtml(value)}</span>`);
-        }
+      // Collect all builtin values and sort by length descending
+      const allBuiltins = [];
+      for (const values of Object.values(BUILTIN_VARS)) {
+        allBuiltins.push(...values);
+      }
+      allBuiltins.sort((a, b) => b.length - a.length);
+
+      // Highlight builtin values (green) - skip if already wrapped in a span
+      for (const value of allBuiltins) {
+        const escaped = escapeHtml(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Only match if not already inside a span tag
+        const regex = new RegExp(`(?<!<span[^>]*>)(?<!">)${escaped}(?!</span>)`, 'gi');
+        result = result.replace(regex, `<span class="var-builtin">${escapeHtml(value)}</span>`);
       }
 
       return result;
@@ -2728,7 +2777,7 @@ with open("image.png", "wb") as f:
     // Built-in random variables
     const BUILTIN_VARS = {
       location: [
-        'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace', 'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage', 'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall', 'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness', 'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub', 'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden', 'slave market', 'strip club', 'brothel', 'back alley', 'arena', 'carnival', 'slum district', 'industrial factory', 'abandoned warehouse', 'school', 'university campus', 'hospital room', 'laboratory', 'labor camp', 'landfill site', 'junkyard', 'construction site', 'docks', 'ship deck', 'train yard', 'airport hangar', 'BDSM dungeon', 'torture chamber', 'prison cell', 'execution ground'
+        'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace', 'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage', 'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall', 'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness', 'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub', 'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden', 'slave-market', 'strip-club', 'brothel', 'back alley', 'arena', 'carnival', 'slum district', 'industrial factory', 'abandoned warehouse', 'school', 'university campus', 'hospital room', 'laboratory', 'labor camp', 'landfill site', 'junkyard', 'construction site', 'docks', 'ship deck', 'train yard', 'airport hangar', 'BDSM dungeon', 'torture chamber', 'prison cell', 'execution ground', 'street-market', 'bazaar', 'temple courtyard', 'monastery garden', 'ruined city', 'apocalyptic wasteland', 'old ruins', 'grocery store', 'shopping mall', 'office building', 'skyscraper rooftop', 'concert stage', 'theater auditorium', 'opera house', 'ballroom', 'wine cellar', 'dining hall', 'kitchenette', 'pantry', 'laundry room', 'changing room', 'locker room', 'gymnasium', 'spa room', 'sauna', 'steam room', 'hot tub area', 'porn studio', 'fetish club', 'dark room', 'playroom', 'interrogation room', 'medieval dungeon', 'enchanted forest', 'magical academy', 'futuristic cityscape', 'cyberpunk alleyway', 'steampunk workshop'
       ],
       time: [
         'at dawn', 'at sunrise', 'in the early morning', 'in the morning light', 'at midday', 'in the afternoon', 'in the golden hour', 'at sunset', 'at dusk', 'at twilight', 'in the evening', 'at night', 'at midnight', 'under moonlight', 'during blue hour', 'in the fog', 'during a thunderstorm', 'in the rain', 'during snowfall'
@@ -2763,6 +2812,9 @@ with open("image.png", "wb") as f:
       ],
       haircolor: [
         'blonde', 'platinum blonde', 'golden blonde', 'strawberry blonde', 'brunette', 'brown', 'light brown', 'dark brown', 'chestnut', 'black', 'jet black', 'raven', 'red', 'ginger', 'auburn', 'copper',  'gray', 'silver', 'white', 'pink', 'blue', 'purple', 'green', 'rainbow', 'ombre'
+      ],
+      bodytype: [
+        'petite body', 'slender figure', 'athletic build', 'curvy figure', 'voluptuous body', 'muscular physique', 'toned body', 'lithe frame', 'willowy figure', 'buxom figure', 'hourglass figure', 'lean build', 'fit body', 'narrow waist', 'thick thighs', 'wide hips', 'slim waist'
       ]
     };
 
