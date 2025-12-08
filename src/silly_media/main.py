@@ -1,4 +1,4 @@
-"""FastAPI application for image generation."""
+"""FastAPI application for image and audio generation."""
 
 import asyncio
 import io
@@ -15,7 +15,8 @@ from fastapi.responses import Response
 
 from .config import settings
 from .models import ModelRegistry
-from .schemas import AspectRatio, ErrorResponse, GenerateRequest, HealthResponse
+from .schemas import AspectRatio, ErrorResponse, GenerateRequest
+from .vram_manager import ModelType, vram_manager
 
 
 @dataclass
@@ -66,7 +67,7 @@ logger = logging.getLogger(__name__)
 def handle_shutdown(signum, frame):
     """Handle shutdown signals gracefully."""
     logger.info("Shutdown signal received, unloading models...")
-    ModelRegistry.unload_all()
+    vram_manager.shutdown()
     sys.exit(0)
 
 
@@ -77,16 +78,40 @@ async def lifespan(app: FastAPI):
     signal.signal(signal.SIGTERM, handle_shutdown)
     signal.signal(signal.SIGINT, handle_shutdown)
 
-    # Configure idle timeout
-    ModelRegistry.set_idle_timeout(settings.model_idle_timeout)
+    # Initialize database
+    from .db import init_db
+
+    await init_db()
+    logger.info("Database initialized")
+
+    # Configure VRAMManager idle timeout
+    vram_manager.set_idle_timeout(settings.model_idle_timeout)
+
+    # Register image models with VRAMManager
+    for name in ModelRegistry.get_available_models():
+        model = ModelRegistry.get_model(name)
+        vram_manager.register(
+            name,
+            ModelType.IMAGE,
+            model,
+            estimated_vram_gb=22.0,  # Default estimate for image models
+        )
+    logger.info(f"Registered image models: {ModelRegistry.get_available_models()}")
+
+    # Register XTTS-v2 audio model
+    from .audio.xtts import XTTSv2Model
+
+    xtts = XTTSv2Model()
+    vram_manager.register("xtts-v2", ModelType.AUDIO, xtts, estimated_vram_gb=2.0)
+    logger.info("Registered audio model: xtts-v2")
 
     # Optionally preload the default model
     if settings.model_preload:
         logger.info(f"Preloading default model: {settings.default_model}")
         try:
-            ModelRegistry.load_model(settings.default_model)
-            # Start idle timer after preload (we're now in async context)
-            ModelRegistry.touch()
+            async with vram_manager.acquire_gpu(settings.default_model):
+                pass  # Just load it
+            logger.info(f"Preloaded model: {settings.default_model}")
         except Exception as e:
             logger.error(f"Failed to preload model: {e}")
     else:
@@ -95,14 +120,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
-    logger.info("Shutting down, unloading models...")
-    ModelRegistry.unload_all()
+    logger.info("Shutting down...")
+    vram_manager.shutdown()
 
 
 app = FastAPI(
     title="Silly Media API",
-    description="Multi-model text-to-image generation API",
-    version="0.1.0",
+    description="Multi-model text-to-image and text-to-speech generation API",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -115,23 +140,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include routers (imported here after app is created)
+from .routers import actors_router, tts_router  # noqa: E402
 
-@app.get("/health", response_model=HealthResponse)
+app.include_router(actors_router)
+app.include_router(tts_router)
+
+
+@app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return HealthResponse(
-        status="healthy",
-        models_loaded=ModelRegistry.get_loaded_models(),
-        available_models=ModelRegistry.get_available_models(),
-    )
+    return {
+        "status": "healthy",
+        "models_loaded": vram_manager.get_loaded_models(),
+        "available_image_models": vram_manager.get_available_models(ModelType.IMAGE),
+        "available_audio_models": vram_manager.get_available_models(ModelType.AUDIO),
+    }
 
 
 @app.get("/models")
 async def list_models():
     """List available models."""
     return {
-        "available": ModelRegistry.get_available_models(),
-        "loaded": ModelRegistry.get_loaded_models(),
+        "image": {
+            "available": vram_manager.get_available_models(ModelType.IMAGE),
+            "loaded": [
+                m for m in vram_manager.get_loaded_models()
+                if vram_manager.get_model_info(m) and
+                vram_manager.get_model_info(m).model_type == ModelType.IMAGE
+            ],
+        },
+        "audio": {
+            "available": vram_manager.get_available_models(ModelType.AUDIO),
+            "loaded": [
+                m for m in vram_manager.get_loaded_models()
+                if vram_manager.get_model_info(m) and
+                vram_manager.get_model_info(m).model_type == ModelType.AUDIO
+            ],
+        },
     }
 
 
@@ -144,7 +190,7 @@ async def get_progress():
 @app.get("/aspect-ratios")
 async def list_aspect_ratios():
     """List available aspect ratio presets."""
-    from .schemas import ASPECT_RATIO_MAP, calculate_dimensions
+    from .schemas import calculate_dimensions
 
     return {
         ratio.value: {
@@ -169,57 +215,49 @@ async def generate_image(
     request: GenerateRequest = ...,
 ):
     """Generate an image using the specified model."""
-    # Validate model exists
-    if model not in ModelRegistry.get_available_models():
+    # Validate model exists (check image models only)
+    available_image_models = vram_manager.get_available_models(ModelType.IMAGE)
+    if model not in available_image_models:
         raise HTTPException(
             status_code=404,
-            detail=f"Model '{model}' not found. Available: {ModelRegistry.get_available_models()}",
+            detail=f"Model '{model}' not found. Available: {available_image_models}",
         )
 
-    # Load model if needed
-    try:
-        model_instance = ModelRegistry.load_model(model)
-    except Exception as e:
-        logger.exception(f"Failed to load model {model}")
-        raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
-
-    # Generate image
+    # Generate image using VRAMManager for GPU coordination
     start_time = time.time()
     try:
-        logger.info(
-            f"Generation request: model={model}, prompt={request.prompt[:50]}..., "
-            f"size={request.width}x{request.height}"
-        )
-
-        # Create progress callback
-        def progress_callback(pipe, step, timestep, callback_kwargs):
-            progress.update(step + 1)  # +1 because step is 0-indexed
-            return callback_kwargs
-
-        # Start progress tracking
-        total_steps = request.num_inference_steps or model_instance.default_steps
-        progress.start(total_steps)
-
-        try:
-            # Run in thread pool so event loop stays free for /progress polling
-            image = await asyncio.to_thread(
-                model_instance.generate, request, progress_callback
+        async with vram_manager.acquire_gpu(model) as model_instance:
+            logger.info(
+                f"Generation request: model={model}, prompt={request.prompt[:50]}..., "
+                f"size={request.width}x{request.height}"
             )
-        finally:
-            progress.finish()
 
-        # Convert to PNG bytes
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        buffer.seek(0)
+            # Create progress callback
+            def progress_callback(pipe, step, timestep, callback_kwargs):
+                progress.update(step + 1)  # +1 because step is 0-indexed
+                return callback_kwargs
 
-        elapsed = time.time() - start_time
-        logger.info(f"Generation completed in {elapsed:.2f}s")
+            # Start progress tracking
+            total_steps = request.num_inference_steps or model_instance.default_steps
+            progress.start(total_steps)
 
-        # Start/reset the idle timer now that we're in an async context
-        ModelRegistry.touch()
+            try:
+                # Run in thread pool so event loop stays free for /progress polling
+                image = await asyncio.to_thread(
+                    model_instance.generate, request, progress_callback
+                )
+            finally:
+                progress.finish()
 
-        return Response(content=buffer.getvalue(), media_type="image/png")
+            # Convert to PNG bytes
+            buffer = io.BytesIO()
+            image.save(buffer, format="PNG")
+            buffer.seek(0)
+
+            elapsed = time.time() - start_time
+            logger.info(f"Generation completed in {elapsed:.2f}s")
+
+            return Response(content=buffer.getvalue(), media_type="image/png")
 
     except Exception as e:
         logger.exception("Generation failed")

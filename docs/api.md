@@ -4,18 +4,36 @@ Base URL: `http://localhost:4201`
 
 ---
 
-## Available Models
+## Overview
+
+Silly Media provides two main capabilities:
+- **Image Generation**: Text-to-image using diffusion models
+- **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
+
+The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model type (image or audio) can be active at a time.
+
+---
+
+## Models
+
+### Image Models
 
 | Model | ID | Steps | Speed | Notes |
 |-------|-----|-------|-------|-------|
 | Z-Image Turbo | `z-image-turbo` | 9 | Fast | Default, bilingual text rendering |
 | Ovis Image 7B | `ovis-image-7b` | 50 | Slower | Requires custom diffusers fork |
 
-**Note:** Only one model can be loaded at a time (auto-unloads others to fit in VRAM).
+### Audio Models
+
+| Model | ID | VRAM | Notes |
+|-------|-----|------|-------|
+| XTTS v2 | `xtts-v2` | ~2GB | 17 languages, zero-shot voice cloning |
+
+**Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 ---
 
-## Health Check
+## Health & Status
 
 ### `GET /health`
 
@@ -26,33 +44,32 @@ Check API and model status.
 {
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
-  "available_models": ["z-image-turbo"]
+  "available_image_models": ["z-image-turbo", "ovis-image-7b"],
+  "available_audio_models": ["xtts-v2"]
 }
 ```
 
----
-
-## List Models
-
 ### `GET /models`
 
-List available and loaded models.
+List available and loaded models by type.
 
 **Response**
 ```json
 {
-  "available": ["z-image-turbo"],
-  "loaded": ["z-image-turbo"]
+  "image": {
+    "available": ["z-image-turbo", "ovis-image-7b"],
+    "loaded": ["z-image-turbo"]
+  },
+  "audio": {
+    "available": ["xtts-v2"],
+    "loaded": []
+  }
 }
 ```
 
----
-
-## Generation Progress
-
 ### `GET /progress`
 
-Get the current generation progress (useful for polling during image generation).
+Get the current image generation progress (useful for polling).
 
 **Response (when generating)**
 ```json
@@ -74,7 +91,7 @@ Get the current generation progress (useful for polling during image generation)
 
 ---
 
-## List Aspect Ratios
+## Image Generation
 
 ### `GET /aspect-ratios`
 
@@ -89,10 +106,6 @@ List available aspect ratio presets with calculated dimensions.
 }
 ```
 
----
-
-## Generate Image
-
 ### `POST /generate/{model}`
 
 Generate an image using the specified model.
@@ -100,7 +113,7 @@ Generate an image using the specified model.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model name (e.g., `z-image-turbo`) |
+| `model` | string | Model ID (e.g., `z-image-turbo`) |
 
 **Request Body**
 ```json
@@ -189,9 +202,243 @@ Omit all sizing options for 1024×1024:
 
 ---
 
+## Text-to-Speech (TTS)
+
+TTS uses **actors** - named voice profiles created from reference audio. The system uses zero-shot voice cloning (no training required).
+
+### Supported Languages
+
+| Code | Language |
+|------|----------|
+| `en` | English |
+| `es` | Spanish |
+| `fr` | French |
+| `de` | German |
+| `it` | Italian |
+| `pt` | Portuguese |
+| `pl` | Polish |
+| `tr` | Turkish |
+| `ru` | Russian |
+| `nl` | Dutch |
+| `cs` | Czech |
+| `ar` | Arabic |
+| `zh-cn` | Chinese |
+| `ja` | Japanese |
+| `hu` | Hungarian |
+| `ko` | Korean |
+| `hi` | Hindi |
+
+### `GET /tts/languages`
+
+List supported TTS languages.
+
+**Response**
+```json
+{
+  "languages": [
+    {"code": "en", "name": "English"},
+    {"code": "es", "name": "Spanish"},
+    ...
+  ]
+}
+```
+
+### `POST /tts/generate`
+
+Generate speech from text using a stored actor's voice (batch mode).
+
+**Request Body**
+```json
+{
+  "text": "Hello, this is a test.",
+  "actor": "My Actor",
+  "language": "en",
+  "temperature": 0.65,
+  "speed": 1.0,
+  "split_sentences": true
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `text` | string | Yes | - | Text to synthesize (1-10000 chars) |
+| `actor` | string | Yes | - | Actor name for voice |
+| `language` | string | No | `en` | Output language code |
+| `temperature` | float | No | `0.65` | Sampling temperature (0.0-1.0) |
+| `speed` | float | No | `1.0` | Playback speed (0.5-2.0) |
+| `split_sentences` | bool | No | `true` | Split text into sentences |
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Raw WAV bytes (24kHz, 16-bit, mono)
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request |
+| 404 | Actor not found |
+| 500 | Generation failed |
+
+### `POST /tts/stream`
+
+Generate speech with streaming output (lower time-to-first-audio).
+
+Same request body as `/tts/generate`.
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Streaming WAV chunks
+
+### `POST /tts/generate-with-audio`
+
+One-shot TTS with uploaded reference audio (no stored actor required).
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `text` | string | Yes | Text to synthesize |
+| `language` | string | No | Output language (default: `en`) |
+| `reference_audio` | file(s) | Yes | Reference audio file(s) for voice |
+| `temperature` | float | No | Sampling temperature (default: 0.65) |
+| `speed` | float | No | Playback speed (default: 1.0) |
+| `split_sentences` | bool | No | Split text (default: true) |
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Raw WAV bytes
+
+---
+
+## Actor Management
+
+Actors are named voice profiles with stored reference audio for voice cloning.
+
+### `GET /actors`
+
+List all actors.
+
+**Response**
+```json
+{
+  "actors": [
+    {
+      "id": "abc123",
+      "name": "My Actor",
+      "language": "en",
+      "description": "A warm friendly voice",
+      "audio_count": 2,
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+### `POST /actors`
+
+Create a new actor from uploaded audio files.
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Actor display name (unique) |
+| `language` | string | No | Primary language (default: `en`) |
+| `description` | string | No | Actor description |
+| `audio_files` | file(s) | Yes | Reference audio (WAV, MP3, etc.) |
+
+**Tips for reference audio:**
+- Minimum 6 seconds recommended for best quality
+- Clean audio with minimal background noise
+- Multiple clips improve voice consistency
+- Supported formats: WAV, MP3, FLAC, OGG
+
+**Response** (201 Created)
+```json
+{
+  "id": "abc123",
+  "name": "My Actor",
+  "language": "en",
+  "description": "A warm friendly voice",
+  "audio_count": 1,
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | No audio files provided |
+| 409 | Actor name already exists |
+
+### `GET /actors/{name}`
+
+Get actor details by name.
+
+**Response**
+```json
+{
+  "id": "abc123",
+  "name": "My Actor",
+  "language": "en",
+  "description": "A warm friendly voice",
+  "audio_count": 2,
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### `DELETE /actors/{name}`
+
+Delete an actor and all associated audio files.
+
+**Response**: 204 No Content
+
+### `POST /actors/{name}/audio`
+
+Add additional audio file to an existing actor.
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `audio_file` | file | Yes | Audio file to add |
+
+**Response** (201 Created)
+```json
+{
+  "id": "file123",
+  "filename": "reference_01.wav",
+  "original_name": "my_recording.wav",
+  "duration_seconds": 8.5,
+  "created_at": "2024-01-15T10:35:00Z"
+}
+```
+
+### `GET /actors/{name}/audio`
+
+List all audio files for an actor.
+
+**Response**
+```json
+[
+  {
+    "id": "file123",
+    "filename": "reference_00.wav",
+    "original_name": "my_recording.wav",
+    "duration_seconds": 8.5,
+    "created_at": "2024-01-15T10:30:00Z"
+  }
+]
+```
+
+---
+
 ## Examples
 
-### Basic Generation (Z-Image Turbo)
+### Image Generation
+
+#### Basic Generation (Z-Image Turbo)
 
 ```bash
 curl -X POST http://localhost:4201/generate/z-image-turbo \
@@ -200,7 +447,7 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
   -o image.png
 ```
 
-### With Aspect Ratio
+#### With Aspect Ratio
 
 ```bash
 curl -X POST http://localhost:4201/generate/z-image-turbo \
@@ -212,20 +459,39 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
   -o landscape.png
 ```
 
-### Full Parameters
+### TTS Generation
+
+#### Create an Actor
 
 ```bash
-curl -X POST http://localhost:4201/generate/z-image-turbo \
+curl -X POST http://localhost:4201/actors \
+  -F "name=Morgan" \
+  -F "language=en" \
+  -F "description=Deep authoritative voice" \
+  -F "audio_files=@voice_sample.wav"
+```
+
+#### Generate Speech
+
+```bash
+curl -X POST http://localhost:4201/tts/generate \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "a red panda eating bamboo, detailed fur, forest background",
-    "negative_prompt": "blurry, low quality",
-    "num_inference_steps": 9,
-    "seed": 42,
-    "width": 1024,
-    "height": 1024
+    "text": "Hello, welcome to Silly Media!",
+    "actor": "Morgan",
+    "language": "en"
   }' \
-  -o image.png
+  -o speech.wav
+```
+
+#### One-Shot TTS (No Actor)
+
+```bash
+curl -X POST http://localhost:4201/tts/generate-with-audio \
+  -F "text=Hello, this is a test." \
+  -F "language=en" \
+  -F "reference_audio=@voice_sample.wav" \
+  -o speech.wav
 ```
 
 ### Python Client
@@ -233,6 +499,7 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
 ```python
 import requests
 
+# Image generation
 response = requests.post(
     "http://localhost:4201/generate/z-image-turbo",
     json={
@@ -241,9 +508,29 @@ response = requests.post(
         "seed": 42,
     },
 )
-
 with open("image.png", "wb") as f:
     f.write(response.content)
+
+# TTS generation
+response = requests.post(
+    "http://localhost:4201/tts/generate",
+    json={
+        "text": "Hello, welcome to Silly Media!",
+        "actor": "Morgan",
+        "language": "en",
+    },
+)
+with open("speech.wav", "wb") as f:
+    f.write(response.content)
+
+# Create actor
+with open("voice_sample.wav", "rb") as f:
+    response = requests.post(
+        "http://localhost:4201/actors",
+        data={"name": "Morgan", "language": "en"},
+        files={"audio_files": f},
+    )
+print(response.json())
 ```
 
 ---

@@ -5,6 +5,7 @@ services:
       - "4201:4201"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
+      - ./data:/app/data
     env_file:
       - .env
     environment:
@@ -34,6 +35,7 @@ services:
     volumes:
       - huggingface-cache:/root/.cache/huggingface
       - ./src:/app/src:ro
+      - ./data:/app/data
     env_file:
       - .env
     environment:

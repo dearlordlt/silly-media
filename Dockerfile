@@ -3,12 +3,17 @@ FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Python 3.10 and dependencies
+# Install Python 3.10, FFmpeg (for torchcodec/torchaudio), and other dependencies
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3.10-venv \
     python3-pip \
     git \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv

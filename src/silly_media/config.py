@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     model_idle_timeout: int = 300  # Seconds before unloading idle model (0 = never)
     default_model: str = "z-image-turbo"  # Model to preload/use by default
 
+    # Database and storage settings
+    db_path: str = "./data/db/silly_media.db"
+    actors_storage_path: str = "./data/actors"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
