@@ -839,6 +839,9 @@
       setupEventListeners();
       loadHistory();
       loadSettings();
+
+      // Check backend status every 10 seconds
+      setInterval(checkBackendStatus, 10000);
     });
 
     // Settings persistence
