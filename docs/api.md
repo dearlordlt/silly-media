@@ -28,9 +28,14 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Model | ID | VRAM | Notes |
 |-------|-----|------|-------|
 | XTTS v2 | `xtts-v2` | ~2GB | 17 languages, zero-shot voice cloning |
+| Maya TTS | `maya` | ~16GB | Voice description (no reference audio), English only, emotion tags |
 | Demucs | `demucs` | ~2GB | Vocal separation (used for YouTube extraction) |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
+
+**Model comparison:**
+- **XTTS v2**: Clone any voice from reference audio, multi-language support
+- **Maya TTS**: Describe the voice you want in natural language (no audio needed), supports emotion tags like `<laugh>`, `<whisper>`, etc.
 
 ---
 
@@ -583,6 +588,222 @@ Clear all TTS history.
 
 ---
 
+## Maya TTS
+
+Maya TTS uses natural language voice descriptions instead of reference audio. Describe the voice you want (age, gender, tone, accent, emotion) and Maya generates speech matching that description.
+
+### Features
+
+- **No reference audio needed** - describe the voice in natural language
+- **Emotion tags** - insert expressive sounds inline in text
+- **Voice presets** - save voice descriptions as reusable "Maya Actors"
+- **English only** - Maya currently supports English
+
+### `GET /tts/models`
+
+List available TTS models with their capabilities.
+
+**Response**
+```json
+{
+  "models": [
+    {
+      "id": "xtts-v2",
+      "name": "XTTS v2",
+      "description": "Voice cloning from reference audio. Supports 17 languages.",
+      "voice_control": "reference_audio",
+      "languages": ["en", "es", "fr", ...],
+      "vram_gb": 2.0,
+      "supports_streaming": true
+    },
+    {
+      "id": "maya",
+      "name": "Maya TTS",
+      "description": "Voice description with natural language. English only. Supports emotion tags.",
+      "voice_control": "voice_description",
+      "languages": ["en"],
+      "vram_gb": 16.0,
+      "supports_streaming": true,
+      "emotion_tags": ["<laugh>", "<sigh>", "<whisper>", ...]
+    }
+  ],
+  "default": "xtts-v2"
+}
+```
+
+### `POST /tts/maya/generate`
+
+Generate speech using Maya TTS with a voice description.
+
+**Request Body**
+```json
+{
+  "text": "Hello! <laugh> That's hilarious!",
+  "voice_description": "A young woman with a warm, friendly tone and slight British accent",
+  "temperature": 0.7,
+  "speed": 1.0
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `text` | string | Yes | - | Text to synthesize (1-10000 chars), can include emotion tags |
+| `voice_description` | string | Yes | - | Natural language description of the voice (1-500 chars) |
+| `temperature` | float | No | `0.7` | Sampling temperature (0.0-1.0) |
+| `speed` | float | No | `1.0` | Playback speed (0.5-2.0) |
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Raw WAV bytes (24kHz, 16-bit, mono)
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request |
+| 500 | Generation failed |
+
+### `POST /tts/maya/stream`
+
+Generate speech with Maya using streaming output.
+
+Same request body as `/tts/maya/generate`.
+
+**Response**
+- Content-Type: `audio/wav`
+- Body: Streaming WAV chunks
+
+### `GET /tts/maya/emotion-tags`
+
+List available emotion tags for Maya TTS.
+
+**Response**
+```json
+{
+  "tags": [
+    "<laugh>",
+    "<laugh_harder>",
+    "<sigh>",
+    "<chuckle>",
+    "<gasp>",
+    "<angry>",
+    "<excited>",
+    "<whisper>",
+    "<cry>",
+    "<scream>",
+    "<sing>",
+    "<snort>",
+    "<exhale>",
+    "<gulp>",
+    "<giggle>",
+    "<sarcastic>",
+    "<curious>"
+  ],
+  "usage": "Insert tags inline in text, e.g., 'Hello! <laugh> That was funny!'"
+}
+```
+
+**Usage example:**
+```
+Hello everyone! <excited> I'm so happy to be here! <laugh> This is going to be fun.
+<whisper> But between you and me... <gasp> I can't believe it worked!
+```
+
+---
+
+## Maya Actors (Voice Presets)
+
+Maya Actors are saved voice descriptions that can be reused. Unlike XTTS actors (which store reference audio), Maya actors store voice description text.
+
+### `GET /tts/maya/actors`
+
+List all saved Maya actors.
+
+**Response**
+```json
+{
+  "actors": [
+    {
+      "id": "abc123",
+      "name": "Friendly Sarah",
+      "voice_description": "A young woman with a warm, friendly tone",
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+### `POST /tts/maya/actors`
+
+Create a new Maya actor (save a voice description preset).
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Actor name (unique) |
+| `voice_description` | string | Yes | Voice description for Maya |
+
+**Response** (201 Created)
+```json
+{
+  "id": "abc123",
+  "name": "Friendly Sarah",
+  "voice_description": "A young woman with a warm, friendly tone",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Actor name already exists |
+
+### `GET /tts/maya/actors/{actor_id}`
+
+Get a specific Maya actor by ID.
+
+**Response**
+```json
+{
+  "id": "abc123",
+  "name": "Friendly Sarah",
+  "voice_description": "A young woman with a warm, friendly tone",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+### `PUT /tts/maya/actors/{actor_id}`
+
+Update a Maya actor.
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | No | New actor name |
+| `voice_description` | string | No | New voice description |
+
+**Response**
+```json
+{
+  "id": "abc123",
+  "name": "Updated Name",
+  "voice_description": "Updated voice description",
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T11:00:00Z"
+}
+```
+
+### `DELETE /tts/maya/actors/{actor_id}`
+
+Delete a Maya actor.
+
+**Response**: 204 No Content
+
+---
+
 ## Examples
 
 ### Image Generation
@@ -658,6 +879,40 @@ curl -X POST http://localhost:4201/tts/generate-with-audio \
   -o speech.wav
 ```
 
+### Maya TTS Generation
+
+#### Generate with Voice Description
+
+```bash
+curl -X POST http://localhost:4201/tts/maya/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Hello! <laugh> This is amazing!",
+    "voice_description": "A young woman with a warm, friendly tone and slight British accent"
+  }' \
+  -o speech.wav
+```
+
+#### With Emotion Tags
+
+```bash
+curl -X POST http://localhost:4201/tts/maya/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "<excited> Oh my goodness! <gasp> I cannot believe this worked! <laugh> This is incredible!",
+    "voice_description": "An enthusiastic young man with an American accent"
+  }' \
+  -o excited_speech.wav
+```
+
+#### Save a Maya Actor (Voice Preset)
+
+```bash
+curl -X POST http://localhost:4201/tts/maya/actors \
+  -F "name=Narrator Bob" \
+  -F "voice_description=A deep, authoritative male voice with a calm, measured pace"
+```
+
 ### Python Client
 
 ```python
@@ -695,6 +950,31 @@ with open("voice_sample.wav", "rb") as f:
         files={"audio_files": f},
     )
 print(response.json())
+
+# Maya TTS generation
+response = requests.post(
+    "http://localhost:4201/tts/maya/generate",
+    json={
+        "text": "Hello! <laugh> This is Maya TTS speaking.",
+        "voice_description": "A friendly young woman with a warm tone",
+    },
+)
+with open("maya_speech.wav", "wb") as f:
+    f.write(response.content)
+
+# Create Maya actor (voice preset)
+response = requests.post(
+    "http://localhost:4201/tts/maya/actors",
+    data={
+        "name": "Narrator",
+        "voice_description": "A deep, authoritative male voice",
+    },
+)
+print(response.json())
+
+# List Maya emotion tags
+response = requests.get("http://localhost:4201/tts/maya/emotion-tags")
+print(response.json()["tags"])
 ```
 
 ---
