@@ -26,13 +26,13 @@
       padding: 20px;
     }
     .container {
-      max-width: 1400px;
+      max-width: 1600px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: 420px 1fr;
+      grid-template-columns: 520px 1fr;
       gap: 20px;
     }
-    @media (max-width: 1000px) {
+    @media (max-width: 1100px) {
       .container { grid-template-columns: 1fr; }
     }
 
@@ -62,7 +62,22 @@
       border-radius: var(--radius);
       padding: 20px;
     }
-    .controls { position: sticky; top: 20px; }
+    .controls {
+      position: sticky;
+      top: 20px;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 120px);
+    }
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .tab-content.active {
+      display: flex;
+    }
 
     /* Form elements */
     label {
@@ -178,17 +193,16 @@
       background: var(--surface2);
       color: var(--text);
     }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
 
     /* Actor list */
     .actor-list {
       display: flex;
       flex-direction: column;
       gap: 8px;
-      max-height: 300px;
+      flex: 1;
       overflow-y: auto;
       margin-bottom: 12px;
+      min-height: 200px;
     }
     .actor-item {
       display: flex;
@@ -485,6 +499,17 @@
     }
     .char-count.warning { color: var(--warning); }
     .char-count.error { color: #dc2626; }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--surface2);
+    }
   </style>
 </head>
 <body>
@@ -583,7 +608,11 @@
 
       <!-- Actors Tab -->
       <div class="tab-content" id="tab-actors">
-        <h3>Your Actors</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <h3 style="margin-bottom: 0;">Your Actors</h3>
+          <span id="actorCount" style="font-size: 0.8rem; color: var(--text-dim);"></span>
+        </div>
+        <input type="text" id="actorSearch" placeholder="Search actors..." style="margin-bottom: 12px;">
         <div class="actor-list" id="actorList">
           <div class="empty-state">
             <div class="empty-state-icon">🎭</div>
@@ -620,12 +649,21 @@
 
       <!-- History -->
       <div class="history-section">
-        <h2>History</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="margin-bottom: 0;">History</h2>
+          <span id="historyCount" style="font-size: 0.8rem; color: var(--text-dim);"></span>
+        </div>
+        <input type="text" id="historySearch" placeholder="Search history..." style="margin-bottom: 12px;">
         <div class="history-list" id="historyList">
           <div class="empty-state">
             <div class="empty-state-icon">📜</div>
             <div>No history yet</div>
           </div>
+        </div>
+        <div class="pagination" id="historyPagination" style="display: none;">
+          <button class="btn-secondary btn-small" id="prevPageBtn" onclick="changePage(-1)">← Prev</button>
+          <span id="pageInfo" style="font-size: 0.85rem; color: var(--text-dim);"></span>
+          <button class="btn-secondary btn-small" id="nextPageBtn" onclick="changePage(1)">Next →</button>
         </div>
       </div>
     </div>
@@ -666,15 +704,45 @@
       <label for="actorDescription">Description (optional)</label>
       <input type="text" id="actorDescription" placeholder="e.g., Deep narrator voice">
 
-      <label>Reference Audio</label>
-      <div class="upload-zone" id="uploadZone">
-        <input type="file" id="audioFiles" accept="audio/*" multiple>
-        <div class="upload-icon">🎤</div>
-        <div class="upload-text">Drop audio files here or click to browse</div>
-        <div class="upload-hint">WAV, MP3, FLAC, OGG - Min 6 seconds recommended</div>
+      <!-- Source tabs -->
+      <label>Audio Source</label>
+      <div class="tabs" style="margin-bottom: 12px;">
+        <button class="tab active" data-source="upload" onclick="switchSourceTab('upload')">Upload Files</button>
+        <button class="tab" data-source="youtube" onclick="switchSourceTab('youtube')">YouTube URL</button>
       </div>
 
-      <div class="file-list" id="fileList"></div>
+      <!-- Upload source -->
+      <div id="sourceUpload" class="source-content">
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="audioFiles" accept="audio/*" multiple>
+          <div class="upload-icon">🎤</div>
+          <div class="upload-text">Drop audio files here or click to browse</div>
+          <div class="upload-hint">WAV, MP3, FLAC, OGG - Min 6 seconds recommended</div>
+        </div>
+        <div class="file-list" id="fileList"></div>
+      </div>
+
+      <!-- YouTube source -->
+      <div id="sourceYoutube" class="source-content" style="display: none;">
+        <input type="text" id="youtubeUrl" placeholder="https://youtube.com/watch?v=..." style="margin-bottom: 8px;">
+        <div id="youtubeValidation" style="font-size: 0.8rem; margin-bottom: 12px; min-height: 20px;"></div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="separateVocals" checked style="margin: 0; width: 16px; height: 16px;">
+            <span>Remove background music (recommended)</span>
+          </label>
+        </div>
+
+        <div class="range-group">
+          <div class="range-header">
+            <label for="maxDuration">Max Duration</label>
+            <span class="range-value" id="maxDurationValue">30s</span>
+          </div>
+          <input type="range" id="maxDuration" min="10" max="120" step="5" value="30">
+          <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 4px;">30-60s recommended for best quality</div>
+        </div>
+      </div>
 
       <div class="btn-group">
         <button class="btn-secondary" onclick="hideCreateActorModal()">Cancel</button>
@@ -735,6 +803,12 @@
     let history = [];
     let uploadedFiles = [];
     let currentActorForDetails = null;
+
+    // Pagination state
+    const ITEMS_PER_PAGE = 10;
+    let currentPage = 1;
+    let historySearchTerm = '';
+    let actorSearchTerm = '';
 
     // Elements
     const actorSelect = document.getElementById('actorSelect');
@@ -821,10 +895,10 @@
     }
 
     function setupEventListeners() {
-      // Tabs
-      document.querySelectorAll('.tab').forEach(tab => {
+      // Main tabs (Generate/Actors) - only those with data-tab attribute in the controls panel
+      document.querySelectorAll('.controls > .tabs > .tab[data-tab]').forEach(tab => {
         tab.addEventListener('click', () => {
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.controls > .tabs > .tab').forEach(t => t.classList.remove('active'));
           document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
           tab.classList.add('active');
           document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
@@ -877,6 +951,21 @@
           splitSentences.parentElement.style.opacity = '1';
         }
         saveSettings();
+      });
+
+      // Actor search
+      const actorSearch = document.getElementById('actorSearch');
+      actorSearch.addEventListener('input', () => {
+        actorSearchTerm = actorSearch.value.toLowerCase().trim();
+        renderActorList();
+      });
+
+      // History search
+      const historySearch = document.getElementById('historySearch');
+      historySearch.addEventListener('input', () => {
+        historySearchTerm = historySearch.value.toLowerCase().trim();
+        currentPage = 1; // Reset to first page on search
+        renderHistory();
       });
 
       // File upload
@@ -950,7 +1039,26 @@
       }
     }
 
+    function getFilteredActors() {
+      if (!actorSearchTerm) return actors;
+      return actors.filter(actor =>
+        actor.name.toLowerCase().includes(actorSearchTerm) ||
+        actor.language.toLowerCase().includes(actorSearchTerm) ||
+        (actor.description && actor.description.toLowerCase().includes(actorSearchTerm))
+      );
+    }
+
     function renderActorList() {
+      const actorCountEl = document.getElementById('actorCount');
+      const filtered = getFilteredActors();
+
+      // Update count display
+      if (actorSearchTerm && filtered.length !== actors.length) {
+        actorCountEl.textContent = `${filtered.length} of ${actors.length}`;
+      } else {
+        actorCountEl.textContent = `${actors.length} actor${actors.length !== 1 ? 's' : ''}`;
+      }
+
       if (actors.length === 0) {
         actorList.innerHTML = `
           <div class="empty-state">
@@ -961,15 +1069,25 @@
         return;
       }
 
-      actorList.innerHTML = actors.map(actor => `
-        <div class="actor-item" onclick="showActorDetails('${actor.name}')">
+      if (filtered.length === 0) {
+        actorList.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <div>No matching actors</div>
+          </div>
+        `;
+        return;
+      }
+
+      actorList.innerHTML = filtered.map(actor => `
+        <div class="actor-item" onclick="showActorDetails('${escapeHtml(actor.name)}')">
           <div class="actor-avatar">${actor.name.charAt(0).toUpperCase()}</div>
           <div class="actor-info">
-            <div class="actor-name">${actor.name}</div>
-            <div class="actor-meta">${actor.language.toUpperCase()} • ${actor.audio_count} audio file${actor.audio_count !== 1 ? 's' : ''}</div>
+            <div class="actor-name">${escapeHtml(actor.name)}</div>
+            <div class="actor-meta">${actor.language.toUpperCase()} • ${actor.audio_count} audio file${actor.audio_count !== 1 ? 's' : ''}${actor.description ? ' • ' + escapeHtml(actor.description) : ''}</div>
           </div>
           <div class="actor-actions">
-            <button class="btn-icon" onclick="event.stopPropagation(); selectActor('${actor.name}')" title="Use this actor">✓</button>
+            <button class="btn-icon" onclick="event.stopPropagation(); selectActor('${escapeHtml(actor.name)}')" title="Use this actor">✓</button>
           </div>
         </div>
       `).join('');
@@ -978,23 +1096,85 @@
     function selectActor(name) {
       selectedActorName = name;
       actorSelect.value = name;
-      document.querySelector('[data-tab="generate"]').click();
+      switchToGenerateTab();
+    }
+
+    function switchToGenerateTab() {
+      // Switch to Generate tab programmatically
+      document.querySelectorAll('.controls > .tabs > .tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelector('.controls > .tabs > .tab[data-tab="generate"]').classList.add('active');
+      document.getElementById('tab-generate').classList.add('active');
     }
 
     // Create Actor Modal
+    let currentSourceTab = 'upload';
+
     function showCreateActorModal() {
       document.getElementById('createActorModal').classList.add('show');
       document.getElementById('actorName').value = '';
       document.getElementById('actorDescription').value = '';
       document.getElementById('actorLanguage').value = 'en';
+      document.getElementById('youtubeUrl').value = '';
+      document.getElementById('youtubeValidation').innerHTML = '';
+      document.getElementById('maxDuration').value = '30';
+      document.getElementById('maxDurationValue').textContent = '30s';
+      document.getElementById('separateVocals').checked = true;
       uploadedFiles = [];
       renderFileList();
+      switchSourceTab('upload');
       document.getElementById('modalStatus').className = 'status';
     }
 
     function hideCreateActorModal() {
       document.getElementById('createActorModal').classList.remove('show');
     }
+
+    function switchSourceTab(tab) {
+      currentSourceTab = tab;
+      document.querySelectorAll('#createActorModal .tab[data-source]').forEach(t => {
+        t.classList.toggle('active', t.dataset.source === tab);
+      });
+      document.getElementById('sourceUpload').style.display = tab === 'upload' ? 'block' : 'none';
+      document.getElementById('sourceYoutube').style.display = tab === 'youtube' ? 'block' : 'none';
+    }
+
+    // YouTube URL validation
+    function isValidYoutubeUrl(url) {
+      const patterns = [
+        /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/,
+        /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]{11})/,
+        /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/,
+      ];
+      return patterns.some(p => p.test(url));
+    }
+
+    // Setup YouTube URL validation on input
+    document.addEventListener('DOMContentLoaded', () => {
+      const youtubeInput = document.getElementById('youtubeUrl');
+      const validation = document.getElementById('youtubeValidation');
+      const maxDuration = document.getElementById('maxDuration');
+      const maxDurationValue = document.getElementById('maxDurationValue');
+
+      if (youtubeInput) {
+        youtubeInput.addEventListener('input', () => {
+          const url = youtubeInput.value.trim();
+          if (!url) {
+            validation.innerHTML = '';
+          } else if (isValidYoutubeUrl(url)) {
+            validation.innerHTML = '<span style="color: var(--success);">Valid YouTube URL</span>';
+          } else {
+            validation.innerHTML = '<span style="color: #dc2626;">Invalid YouTube URL</span>';
+          }
+        });
+      }
+
+      if (maxDuration) {
+        maxDuration.addEventListener('input', () => {
+          maxDurationValue.textContent = maxDuration.value + 's';
+        });
+      }
+    });
 
     function handleFiles(files) {
       for (const file of files) {
@@ -1044,30 +1224,71 @@
         return;
       }
 
-      if (uploadedFiles.length === 0) {
-        modalStatus.textContent = 'Please upload at least one audio file';
-        modalStatus.className = 'status error';
-        return;
-      }
-
       const createBtn = document.getElementById('createActorBtn');
       createBtn.disabled = true;
-      modalStatus.textContent = 'Creating actor...';
-      modalStatus.className = 'status loading';
 
       try {
-        const formData = new FormData();
-        formData.append('name', name);
-        formData.append('language', language);
-        formData.append('description', description);
-        uploadedFiles.forEach(file => {
-          formData.append('audio_files', file);
-        });
+        let res;
 
-        const res = await fetch(`${API_BASE}/actors`, {
-          method: 'POST',
-          body: formData
-        });
+        if (currentSourceTab === 'youtube') {
+          // YouTube mode
+          const youtubeUrl = document.getElementById('youtubeUrl').value.trim();
+          if (!youtubeUrl) {
+            modalStatus.textContent = 'Please enter a YouTube URL';
+            modalStatus.className = 'status error';
+            createBtn.disabled = false;
+            return;
+          }
+          if (!isValidYoutubeUrl(youtubeUrl)) {
+            modalStatus.textContent = 'Invalid YouTube URL';
+            modalStatus.className = 'status error';
+            createBtn.disabled = false;
+            return;
+          }
+
+          const maxDuration = parseFloat(document.getElementById('maxDuration').value);
+          const separateVocals = document.getElementById('separateVocals').checked;
+
+          modalStatus.textContent = 'Extracting voice from YouTube... This may take a minute.';
+          modalStatus.className = 'status loading';
+
+          res = await fetch(`${API_BASE}/actors/from-youtube`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name,
+              youtube_url: youtubeUrl,
+              language,
+              description,
+              max_duration: maxDuration,
+              separate_vocals: separateVocals
+            })
+          });
+        } else {
+          // Upload mode
+          if (uploadedFiles.length === 0) {
+            modalStatus.textContent = 'Please upload at least one audio file';
+            modalStatus.className = 'status error';
+            createBtn.disabled = false;
+            return;
+          }
+
+          modalStatus.textContent = 'Creating actor...';
+          modalStatus.className = 'status loading';
+
+          const formData = new FormData();
+          formData.append('name', name);
+          formData.append('language', language);
+          formData.append('description', description);
+          uploadedFiles.forEach(file => {
+            formData.append('audio_files', file);
+          });
+
+          res = await fetch(`${API_BASE}/actors`, {
+            method: 'POST',
+            body: formData
+          });
+        }
 
         if (!res.ok) {
           const err = await res.json();
@@ -1080,9 +1301,12 @@
         await loadActors();
         selectedActorName = name;
         actorSelect.value = name;
+        saveSettings();
 
         setTimeout(() => {
           hideCreateActorModal();
+          // Switch to Generate tab so user can immediately use the new actor
+          switchToGenerateTab();
         }, 1000);
 
       } catch (e) {
@@ -1114,7 +1338,8 @@
             <span class="file-icon">🎵</span>
             <span class="file-name">${f.original_name || f.filename}</span>
             <span class="file-size">${f.duration_seconds ? f.duration_seconds.toFixed(1) + 's' : ''}</span>
-            <button class="file-remove" onclick="deleteAudioFile('${name}', '${f.id}')" title="Delete this audio file">&times;</button>
+            <button class="file-remove" onclick="downloadAudioFile('${name}', '${f.id}')" title="Download" style="color: var(--text-dim);">⬇</button>
+            <button class="file-remove" onclick="deleteAudioFile('${name}', '${f.id}')" title="Delete">&times;</button>
           </div>
         `).join('') || '<div style="color: var(--text-dim);">No audio files</div>';
       } catch (e) {
@@ -1193,6 +1418,17 @@
         modalStatus.textContent = e.message;
         modalStatus.className = 'status error';
       }
+    }
+
+    function downloadAudioFile(actorName, fileId) {
+      // Trigger download via hidden link
+      const url = `${API_BASE}/actors/${encodeURIComponent(actorName)}/audio/${fileId}/download`;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = '';  // Let server set filename
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
     async function deleteAudioFile(actorName, fileId) {
@@ -1315,7 +1551,8 @@
     // History - now persisted in backend database
     async function loadHistory() {
       try {
-        const res = await fetch(`${API_BASE}/tts/history?limit=50`);
+        // Fetch more entries to support pagination (200 should be plenty)
+        const res = await fetch(`${API_BASE}/tts/history?limit=200`);
         if (!res.ok) throw new Error('Failed to load history');
         const data = await res.json();
         history = data.entries.map(entry => ({
@@ -1328,6 +1565,8 @@
           url: null,
           blob: null
         }));
+        // Reset to page 1 when reloading history
+        currentPage = 1;
         renderHistory();
       } catch (e) {
         console.error('Failed to load history:', e);
@@ -1335,30 +1574,88 @@
       }
     }
 
+    function getFilteredHistory() {
+      if (!historySearchTerm) return history;
+      return history.filter(item =>
+        item.text.toLowerCase().includes(historySearchTerm) ||
+        item.actor.toLowerCase().includes(historySearchTerm)
+      );
+    }
+
     function renderHistory() {
-      if (history.length === 0) {
+      const historyCount = document.getElementById('historyCount');
+      const pagination = document.getElementById('historyPagination');
+      const pageInfo = document.getElementById('pageInfo');
+      const prevBtn = document.getElementById('prevPageBtn');
+      const nextBtn = document.getElementById('nextPageBtn');
+
+      const filtered = getFilteredHistory();
+      const totalItems = filtered.length;
+      const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
+
+      // Update count display
+      if (historySearchTerm && totalItems !== history.length) {
+        historyCount.textContent = `${totalItems} of ${history.length} entries`;
+      } else {
+        historyCount.textContent = `${history.length} entries`;
+      }
+
+      if (totalItems === 0) {
         historyList.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">📜</div>
-            <div>No history yet</div>
+            <div>${historySearchTerm ? 'No matching entries' : 'No history yet'}</div>
           </div>
         `;
+        pagination.style.display = 'none';
         return;
       }
 
-      historyList.innerHTML = history.map((item, i) => `
-        <div class="history-item" onclick="playFromHistory(${i})">
-          <button class="history-play" onclick="event.stopPropagation(); playFromHistory(${i})">▶</button>
+      // Ensure current page is valid
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+
+      // Get items for current page
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems);
+      const pageItems = filtered.slice(startIndex, endIndex);
+
+      historyList.innerHTML = pageItems.map((item) => {
+        // Find original index in history array for actions
+        const originalIndex = history.findIndex(h => h.id === item.id);
+        return `
+        <div class="history-item" onclick="playFromHistory(${originalIndex})">
+          <button class="history-play" onclick="event.stopPropagation(); playFromHistory(${originalIndex})">▶</button>
           <div class="history-info">
             <div class="history-text">${escapeHtml(item.text.substring(0, 60))}${item.text.length > 60 ? '...' : ''}</div>
             <div class="history-meta">${item.actor} • ${formatTime(item.timestamp)}</div>
           </div>
           <div class="history-actions">
-            <button class="history-download" onclick="event.stopPropagation(); downloadFromHistory(${i})" title="Download">⬇</button>
-            <button class="history-delete" onclick="event.stopPropagation(); deleteHistoryEntry(${i})" title="Delete">🗑</button>
+            <button class="history-download" onclick="event.stopPropagation(); downloadFromHistory(${originalIndex})" title="Download">⬇</button>
+            <button class="history-delete" onclick="event.stopPropagation(); deleteHistoryEntry(${originalIndex})" title="Delete">🗑</button>
           </div>
         </div>
-      `).join('');
+      `}).join('');
+
+      // Show/hide pagination
+      if (totalPages > 1) {
+        pagination.style.display = 'flex';
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+        prevBtn.disabled = currentPage <= 1;
+        nextBtn.disabled = currentPage >= totalPages;
+      } else {
+        pagination.style.display = 'none';
+      }
+    }
+
+    function changePage(delta) {
+      const filtered = getFilteredHistory();
+      const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+      const newPage = currentPage + delta;
+      if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        renderHistory();
+      }
     }
 
     async function playFromHistory(index) {

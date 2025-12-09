@@ -20,6 +20,9 @@ dependencies = [
     "torchcodec>=0.1.0",
     "python-multipart>=0.0.6",
     "aiosqlite>=0.19.0",
+    # YouTube voice extraction
+    "yt-dlp>=2024.0.0",
+    "demucs>=4.0.0",
 ]
 
 [project.optional-dependencies]

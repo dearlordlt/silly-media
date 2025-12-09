@@ -105,6 +105,13 @@ async def lifespan(app: FastAPI):
     vram_manager.register("xtts-v2", ModelType.AUDIO, xtts, estimated_vram_gb=2.0)
     logger.info("Registered audio model: xtts-v2")
 
+    # Register Demucs model for vocal separation (YouTube voice extraction)
+    from .audio.demucs_model import DemucsModel
+
+    demucs = DemucsModel()
+    vram_manager.register("demucs", ModelType.AUDIO, demucs, estimated_vram_gb=2.0)
+    logger.info("Registered audio model: demucs (vocal separation)")
+
     # Optionally preload the default model
     if settings.model_preload:
         logger.info(f"Preloading default model: {settings.default_model}")
