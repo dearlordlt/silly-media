@@ -54,11 +54,11 @@ async def list_all_actors():
 @router.post("", response_model=ActorResponse, status_code=201)
 async def create_new_actor(
     name: Annotated[str, Form(description="Actor display name")],
-    language: Annotated[TTSLanguage, Form(description="Primary language")] = TTSLanguage.EN,
-    description: Annotated[str, Form(description="Actor description")] = "",
     audio_files: Annotated[
         list[UploadFile], File(description="Reference audio file(s)")
-    ] = ...,
+    ],
+    language: Annotated[TTSLanguage, Form(description="Primary language")] = TTSLanguage.EN,
+    description: Annotated[str, Form(description="Actor description")] = "",
 ):
     """Create a new actor from uploaded audio files.
 
