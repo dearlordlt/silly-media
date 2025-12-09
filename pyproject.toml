@@ -23,6 +23,9 @@ dependencies = [
     # YouTube voice extraction
     "yt-dlp>=2024.0.0",
     "demucs>=4.0.0",
+    # Maya TTS
+    "snac",
+    "scipy>=1.10.0",
 ]
 
 [project.optional-dependencies]

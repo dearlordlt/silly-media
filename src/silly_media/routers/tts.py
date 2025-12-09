@@ -12,19 +12,27 @@ from ..audio.schemas import (
     LANGUAGE_NAMES,
     LanguageInfo,
     LanguagesResponse,
+    MAYA_EMOTION_TAGS,
+    MayaTTSRequest,
     TTSHistoryEntryResponse,
     TTSHistoryResponse,
     TTSLanguage,
+    TTSModel,
     TTSRequest,
 )
 from ..db import (
     add_tts_history,
     clear_tts_history,
+    create_maya_actor,
+    delete_maya_actor,
     delete_tts_history_entry,
     get_actor_audio_paths,
     get_actor_by_name,
+    get_maya_actor,
     get_tts_history,
     get_tts_history_audio_path,
+    list_maya_actors,
+    update_maya_actor,
 )
 from ..vram_manager import vram_manager
 
@@ -218,6 +226,227 @@ async def generate_speech_with_audio(
                 os.unlink(path)
             except Exception:
                 pass
+
+
+# Maya TTS endpoints
+
+
+@router.post(
+    "/maya/generate",
+    responses={
+        200: {"content": {"audio/wav": {}}, "description": "Generated audio"},
+        400: {"description": "Invalid request"},
+        500: {"description": "Generation failed"},
+    },
+)
+async def generate_speech_maya(request: MayaTTSRequest):
+    """Generate speech using Maya TTS with voice description.
+
+    Maya uses natural language voice descriptions instead of reference audio.
+    Example voice_description: "A young woman with a warm, friendly tone"
+
+    Supports inline emotion tags in text:
+    [laugh] [chuckle] [sigh] [gasp] [cough] [clear throat]
+    [sniffle] [groan] [yawn] [whisper] [shout]
+
+    Example: "Hello! [laugh] That's so funny!"
+    """
+    try:
+        # Acquire GPU and generate with Maya
+        async with vram_manager.acquire_gpu("maya") as model:
+            audio_bytes = model.synthesize_maya(
+                text=request.text,
+                voice_description=request.voice_description,
+                temperature=request.temperature,
+                speed=request.speed,
+            )
+
+        # Save to history (use voice description as "actor name")
+        voice_short = request.voice_description[:50] + "..." if len(request.voice_description) > 50 else request.voice_description
+        await add_tts_history(
+            actor_name=f"[Maya] {voice_short}",
+            text=request.text,
+            language="en",  # Maya is English only
+            audio_bytes=audio_bytes,
+        )
+
+        logger.info(
+            f"Generated Maya speech: voice='{request.voice_description[:30]}...', "
+            f"text_len={len(request.text)}, audio_size={len(audio_bytes)}"
+        )
+
+        return Response(content=audio_bytes, media_type="audio/wav")
+
+    except Exception as e:
+        logger.exception("Maya TTS generation failed")
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+
+
+@router.post(
+    "/maya/stream",
+    responses={
+        200: {"content": {"audio/wav": {}}, "description": "Streaming audio"},
+        400: {"description": "Invalid request"},
+        500: {"description": "Generation failed"},
+    },
+)
+async def stream_speech_maya(request: MayaTTSRequest):
+    """Generate speech with Maya using streaming output.
+
+    Returns audio chunks as they are generated.
+    Note: Maya generates complete audio then streams, unlike XTTS's native streaming.
+    """
+    async def generate_chunks():
+        """Generator for streaming audio chunks."""
+        try:
+            async with vram_manager.acquire_gpu("maya") as model:
+                for chunk in model.synthesize_stream(request, []):
+                    yield chunk
+        except Exception:
+            logger.exception("Maya TTS streaming failed")
+            raise
+
+    logger.info(
+        f"Streaming Maya speech: voice='{request.voice_description[:30]}...', "
+        f"text_len={len(request.text)}"
+    )
+
+    return StreamingResponse(
+        generate_chunks(),
+        media_type="audio/wav",
+    )
+
+
+@router.get("/maya/emotion-tags")
+async def list_maya_emotion_tags():
+    """List available emotion tags for Maya TTS.
+
+    These tags can be inserted inline in text to add expressiveness.
+    Example: "Hello! <laugh> That's amazing!"
+    """
+    return {
+        "tags": MAYA_EMOTION_TAGS,
+        "usage": "Insert tags inline in text, e.g., 'Hello! <laugh> That was funny!'",
+    }
+
+
+# Maya Actors (voice description presets)
+
+
+@router.get("/maya/actors")
+async def get_maya_actors():
+    """List all saved Maya actors (voice description presets)."""
+    actors = await list_maya_actors()
+    return {
+        "actors": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "voice_description": a.voice_description,
+                "created_at": a.created_at.isoformat(),
+                "updated_at": a.updated_at.isoformat(),
+            }
+            for a in actors
+        ],
+        "total": len(actors),
+    }
+
+
+@router.post("/maya/actors")
+async def create_maya_actor_endpoint(
+    name: str = Form(..., description="Actor name"),
+    voice_description: str = Form(..., description="Voice description for Maya"),
+):
+    """Create a new Maya actor (save a voice description preset)."""
+    try:
+        actor = await create_maya_actor(name=name, voice_description=voice_description)
+        return {
+            "id": actor.id,
+            "name": actor.name,
+            "voice_description": actor.voice_description,
+            "created_at": actor.created_at.isoformat(),
+            "updated_at": actor.updated_at.isoformat(),
+        }
+    except Exception as e:
+        if "UNIQUE constraint failed" in str(e):
+            raise HTTPException(status_code=400, detail=f"Actor '{name}' already exists")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/maya/actors/{actor_id}")
+async def get_maya_actor_endpoint(actor_id: str):
+    """Get a specific Maya actor by ID."""
+    actor = await get_maya_actor(actor_id)
+    if not actor:
+        raise HTTPException(status_code=404, detail="Maya actor not found")
+    return {
+        "id": actor.id,
+        "name": actor.name,
+        "voice_description": actor.voice_description,
+        "created_at": actor.created_at.isoformat(),
+        "updated_at": actor.updated_at.isoformat(),
+    }
+
+
+@router.put("/maya/actors/{actor_id}")
+async def update_maya_actor_endpoint(
+    actor_id: str,
+    name: str | None = Form(None, description="New actor name"),
+    voice_description: str | None = Form(None, description="New voice description"),
+):
+    """Update a Maya actor."""
+    actor = await update_maya_actor(
+        actor_id=actor_id,
+        name=name,
+        voice_description=voice_description,
+    )
+    if not actor:
+        raise HTTPException(status_code=404, detail="Maya actor not found")
+    return {
+        "id": actor.id,
+        "name": actor.name,
+        "voice_description": actor.voice_description,
+        "created_at": actor.created_at.isoformat(),
+        "updated_at": actor.updated_at.isoformat(),
+    }
+
+
+@router.delete("/maya/actors/{actor_id}", status_code=204)
+async def delete_maya_actor_endpoint(actor_id: str):
+    """Delete a Maya actor."""
+    success = await delete_maya_actor(actor_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Maya actor not found")
+    logger.info(f"Deleted Maya actor: {actor_id}")
+
+
+@router.get("/models")
+async def list_tts_models():
+    """List available TTS models with their capabilities."""
+    return {
+        "models": [
+            {
+                "id": TTSModel.XTTS_V2.value,
+                "name": "XTTS v2",
+                "description": "Voice cloning from reference audio. Supports 17 languages.",
+                "voice_control": "reference_audio",
+                "languages": list(TTSLanguage),
+                "vram_gb": 2.0,
+                "supports_streaming": True,
+            },
+            {
+                "id": TTSModel.MAYA.value,
+                "name": "Maya TTS",
+                "description": "Voice description with natural language. English only. Supports emotion tags.",
+                "voice_control": "voice_description",
+                "languages": ["en"],
+                "vram_gb": 16.0,
+                "supports_streaming": True,
+                "emotion_tags": MAYA_EMOTION_TAGS,
+            },
+        ],
+        "default": TTSModel.XTTS_V2.value,
+    }
 
 
 @router.get("/languages", response_model=LanguagesResponse)

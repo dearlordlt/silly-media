@@ -7,6 +7,13 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 
+class TTSModel(str, Enum):
+    """Available TTS models."""
+
+    XTTS_V2 = "xtts-v2"
+    MAYA = "maya"
+
+
 class TTSLanguage(str, Enum):
     """Supported TTS languages."""
 
@@ -74,6 +81,56 @@ class TTSRequestWithAudio(BaseModel):
     split_sentences: Annotated[
         bool, Field(default=True, description="Split text into sentences for processing")
     ] = True
+
+
+class MayaTTSRequest(BaseModel):
+    """Request schema for Maya TTS generation.
+
+    Maya uses natural language voice descriptions instead of reference audio.
+    Supports inline emotion tags: [laugh], [sigh], [whisper], [shout], etc.
+    """
+
+    text: Annotated[
+        str, Field(min_length=1, max_length=10000, description="Text to synthesize (can include emotion tags)")
+    ]
+    voice_description: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=500,
+            description="Natural language description of the voice (e.g., 'A young woman with a warm, friendly tone')",
+        ),
+    ]
+
+    # Generation parameters
+    temperature: Annotated[
+        float, Field(default=0.7, ge=0.0, le=1.0, description="Sampling temperature")
+    ] = 0.7
+    speed: Annotated[
+        float, Field(default=1.0, ge=0.5, le=2.0, description="Playback speed")
+    ] = 1.0
+
+
+# Maya emotion tags reference (complete list)
+MAYA_EMOTION_TAGS = [
+    "<laugh>",
+    "<laugh_harder>",
+    "<sigh>",
+    "<chuckle>",
+    "<gasp>",
+    "<angry>",
+    "<excited>",
+    "<whisper>",
+    "<cry>",
+    "<scream>",
+    "<sing>",
+    "<snort>",
+    "<exhale>",
+    "<gulp>",
+    "<giggle>",
+    "<sarcastic>",
+    "<curious>",
+]
 
 
 # Actor schemas

@@ -112,6 +112,13 @@ async def lifespan(app: FastAPI):
     vram_manager.register("demucs", ModelType.AUDIO, demucs, estimated_vram_gb=2.0)
     logger.info("Registered audio model: demucs (vocal separation)")
 
+    # Register Maya TTS model (voice description-based synthesis)
+    from .audio.maya import MayaModel
+
+    maya = MayaModel()
+    vram_manager.register("maya", ModelType.AUDIO, maya, estimated_vram_gb=16.0)
+    logger.info("Registered audio model: maya (voice description TTS)")
+
     # Optionally preload the default model
     if settings.model_preload:
         logger.info(f"Preloading default model: {settings.default_model}")

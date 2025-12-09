@@ -537,16 +537,67 @@
 
       <!-- Generate Tab -->
       <div class="tab-content active" id="tab-generate">
-        <label for="actorSelect">Voice Actor</label>
-        <select id="actorSelect">
-          <option value="">Select an actor...</option>
+        <!-- TTS Model Selection -->
+        <label for="modelSelect">TTS Model</label>
+        <select id="modelSelect">
+          <option value="xtts-v2">XTTS v2 (Voice Cloning)</option>
+          <option value="maya">Maya (Voice Description)</option>
         </select>
+
+        <!-- XTTS Controls (shown when xtts-v2 selected) -->
+        <div id="xttsControls">
+          <label for="actorSelect">Voice Actor</label>
+          <select id="actorSelect">
+            <option value="">Select an actor...</option>
+          </select>
+        </div>
+
+        <!-- Maya Controls (shown when maya selected) -->
+        <div id="mayaControls" style="display: none;">
+          <label for="mayaActorSelect">Saved Voice Presets</label>
+          <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+            <select id="mayaActorSelect" style="flex: 1; margin-bottom: 0;">
+              <option value="">-- Custom Voice --</option>
+            </select>
+            <button class="btn-secondary btn-small" onclick="saveMayaActor()" title="Save current voice as preset">💾</button>
+            <button class="btn-secondary btn-small" id="editMayaActorBtn" onclick="editMayaActor()" title="Edit selected preset" style="display: none;">✏️</button>
+            <button class="btn-secondary btn-small" id="deleteMayaActorBtn" onclick="confirmDeleteMayaActor()" title="Delete selected preset" style="display: none;">🗑️</button>
+          </div>
+
+          <label for="voiceDescription">Voice Description</label>
+          <textarea id="voiceDescription" placeholder="Describe the voice you want, e.g., 'A young woman with a warm, friendly tone' or 'An elderly British gentleman with a deep, authoritative voice'" style="min-height: 80px;"></textarea>
+          <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: -8px; margin-bottom: 12px;">
+            Describe voice characteristics: age, gender, tone, accent, emotion
+          </div>
+
+          <label>Emotion Tags (click to insert)</label>
+          <div id="emotionTags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;">
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;laugh&gt;')">&lt;laugh&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;laugh_harder&gt;')">&lt;laugh_harder&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;chuckle&gt;')">&lt;chuckle&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;giggle&gt;')">&lt;giggle&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;sigh&gt;')">&lt;sigh&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;gasp&gt;')">&lt;gasp&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;whisper&gt;')">&lt;whisper&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;scream&gt;')">&lt;scream&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;cry&gt;')">&lt;cry&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;angry&gt;')">&lt;angry&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;excited&gt;')">&lt;excited&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;sarcastic&gt;')">&lt;sarcastic&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;curious&gt;')">&lt;curious&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;sing&gt;')">&lt;sing&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;snort&gt;')">&lt;snort&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;exhale&gt;')">&lt;exhale&gt;</button>
+            <button class="btn-small btn-secondary" onclick="insertEmotionTag('&lt;gulp&gt;')">&lt;gulp&gt;</button>
+          </div>
+        </div>
 
         <label for="textInput">Text to Speak</label>
         <textarea id="textInput" placeholder="Enter the text you want to convert to speech..."></textarea>
         <div class="char-count"><span id="charCount">0</span> / 10,000</div>
 
-        <div class="row">
+        <!-- Language selector (hidden for Maya which is English only) -->
+        <div class="row" id="languageRow">
           <div>
             <label for="languageSelect">Language</label>
             <select id="languageSelect">
@@ -798,11 +849,14 @@
 
     // State
     let actors = [];
+    let mayaActors = [];
     let selectedActorName = '';
+    let selectedMayaActorId = '';
     let currentAudio = null;
     let history = [];
     let uploadedFiles = [];
     let currentActorForDetails = null;
+    let selectedModel = 'xtts-v2';
 
     // Pagination state
     const ITEMS_PER_PAGE = 10;
@@ -811,7 +865,13 @@
     let actorSearchTerm = '';
 
     // Elements
+    const modelSelect = document.getElementById('modelSelect');
     const actorSelect = document.getElementById('actorSelect');
+    const mayaActorSelect = document.getElementById('mayaActorSelect');
+    const xttsControls = document.getElementById('xttsControls');
+    const mayaControls = document.getElementById('mayaControls');
+    const voiceDescription = document.getElementById('voiceDescription');
+    const languageRow = document.getElementById('languageRow');
     const textInput = document.getElementById('textInput');
     const charCount = document.getElementById('charCount');
     const languageSelect = document.getElementById('languageSelect');
@@ -835,6 +895,7 @@
     // Initialize
     document.addEventListener('DOMContentLoaded', () => {
       loadActors();
+      loadMayaActors();
       checkBackendStatus();
       setupEventListeners();
       loadHistory();
@@ -847,7 +908,10 @@
     // Settings persistence
     function saveSettings() {
       const settings = {
+        model: modelSelect.value,
         actor: actorSelect.value,
+        mayaActor: mayaActorSelect.value,
+        voiceDescription: voiceDescription.value,
         text: textInput.value,
         language: languageSelect.value,
         speed: speedRange.value,
@@ -864,6 +928,15 @@
         if (!saved) return;
         const settings = JSON.parse(saved);
 
+        // Restore model selection
+        if (settings.model) {
+          modelSelect.value = settings.model;
+          selectedModel = settings.model;
+          updateModelUI();
+        }
+        if (settings.voiceDescription) {
+          voiceDescription.value = settings.voiceDescription;
+        }
         if (settings.text) textInput.value = settings.text;
         if (settings.language) languageSelect.value = settings.language;
         if (settings.speed) {
@@ -890,6 +963,10 @@
         if (settings.actor) {
           selectedActorName = settings.actor;
         }
+        // Maya actor will be restored after maya actors load
+        if (settings.mayaActor) {
+          selectedMayaActorId = settings.mayaActor;
+        }
         // Update char count
         charCount.textContent = textInput.value.length.toLocaleString();
       } catch (e) {
@@ -897,7 +974,81 @@
       }
     }
 
+    // Model switching
+    function updateModelUI() {
+      const isMaya = selectedModel === 'maya';
+
+      // Show/hide relevant controls
+      xttsControls.style.display = isMaya ? 'none' : 'block';
+      mayaControls.style.display = isMaya ? 'block' : 'none';
+      languageRow.style.display = isMaya ? 'none' : 'flex';  // Maya is English only
+
+      // Update split sentences (Maya doesn't use it the same way)
+      if (isMaya) {
+        splitSentences.checked = false;
+        splitSentences.disabled = true;
+        splitSentences.parentElement.style.opacity = '0.5';
+      } else if (!useStreaming.checked) {
+        splitSentences.disabled = false;
+        splitSentences.parentElement.style.opacity = '1';
+      }
+    }
+
+    // Insert emotion tag at cursor position in text input
+    function insertEmotionTag(tag) {
+      const start = textInput.selectionStart;
+      const end = textInput.selectionEnd;
+      const text = textInput.value;
+
+      // Insert tag at cursor position (or add space if needed)
+      const before = text.substring(0, start);
+      const after = text.substring(end);
+      const needsSpaceBefore = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n');
+      const needsSpaceAfter = after.length > 0 && !after.startsWith(' ') && !after.startsWith('\n');
+
+      textInput.value = before + (needsSpaceBefore ? ' ' : '') + tag + (needsSpaceAfter ? ' ' : '') + after;
+
+      // Update cursor position
+      const newPos = start + tag.length + (needsSpaceBefore ? 1 : 0) + (needsSpaceAfter ? 1 : 0);
+      textInput.setSelectionRange(newPos, newPos);
+      textInput.focus();
+
+      // Update char count
+      charCount.textContent = textInput.value.length.toLocaleString();
+      saveSettings();
+    }
+
     function setupEventListeners() {
+      // Model selection
+      modelSelect.addEventListener('change', () => {
+        selectedModel = modelSelect.value;
+        updateModelUI();
+        saveSettings();
+      });
+
+      // Voice description
+      voiceDescription.addEventListener('input', saveSettings);
+
+      // Maya actor select - populate voice description when selecting a preset
+      mayaActorSelect.addEventListener('change', () => {
+        selectedMayaActorId = mayaActorSelect.value;
+        if (selectedMayaActorId) {
+          const selectedOption = mayaActorSelect.options[mayaActorSelect.selectedIndex];
+          const description = selectedOption.dataset.voiceDescription;
+          if (description) {
+            voiceDescription.value = description;
+          }
+          // Show edit/delete buttons
+          document.getElementById('editMayaActorBtn').style.display = 'inline-block';
+          document.getElementById('deleteMayaActorBtn').style.display = 'inline-block';
+        } else {
+          // Hide edit/delete buttons for custom voice
+          document.getElementById('editMayaActorBtn').style.display = 'none';
+          document.getElementById('deleteMayaActorBtn').style.display = 'none';
+        }
+        saveSettings();
+      });
+
       // Main tabs (Generate/Actors) - only those with data-tab attribute in the controls panel
       document.querySelectorAll('.controls > .tabs > .tab[data-tab]').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -1010,7 +1161,15 @@
         statusDot.classList.remove('loading');
         statusDot.classList.add('connected');
         const audioModels = data.available_audio_models || [];
-        statusText.textContent = audioModels.includes('xtts-v2') ? 'XTTS-v2 available' : 'Connected';
+
+        // Show available models
+        const models = [];
+        if (audioModels.includes('xtts-v2')) models.push('XTTS');
+        if (audioModels.includes('maya')) models.push('Maya');
+
+        statusText.textContent = models.length > 0
+          ? `${models.join(' + ')} available`
+          : 'Connected';
       } catch (e) {
         statusDot.classList.remove('connected');
         statusText.textContent = 'Disconnected';
@@ -1026,6 +1185,157 @@
         renderActorList();
       } catch (e) {
         console.error('Failed to load actors:', e);
+      }
+    }
+
+    // Maya Actors (voice description presets)
+    async function loadMayaActors() {
+      try {
+        const res = await fetch(`${API_BASE}/tts/maya/actors`);
+        const data = await res.json();
+        mayaActors = data.actors || [];
+        renderMayaActorSelect();
+      } catch (e) {
+        console.error('Failed to load Maya actors:', e);
+      }
+    }
+
+    function renderMayaActorSelect() {
+      mayaActorSelect.innerHTML = '<option value="">-- Custom Voice --</option>';
+      mayaActors.forEach(actor => {
+        const opt = document.createElement('option');
+        opt.value = actor.id;
+        opt.textContent = actor.name;
+        opt.dataset.voiceDescription = actor.voice_description;
+        mayaActorSelect.appendChild(opt);
+      });
+      if (selectedMayaActorId) {
+        mayaActorSelect.value = selectedMayaActorId;
+      }
+    }
+
+    async function saveMayaActor() {
+      const description = voiceDescription.value.trim();
+      if (!description) {
+        status.textContent = 'Please enter a voice description first';
+        status.className = 'status error';
+        return;
+      }
+
+      const name = prompt('Enter a name for this voice preset:', '');
+      if (!name || !name.trim()) return;
+
+      try {
+        const formData = new FormData();
+        formData.append('name', name.trim());
+        formData.append('voice_description', description);
+
+        const res = await fetch(`${API_BASE}/tts/maya/actors`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to save');
+        }
+
+        const actor = await res.json();
+        status.textContent = `Voice preset "${name}" saved!`;
+        status.className = 'status success';
+
+        // Reload and select the new actor
+        await loadMayaActors();
+        selectedMayaActorId = actor.id;
+        mayaActorSelect.value = actor.id;
+        saveSettings();
+
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = 'status error';
+      }
+    }
+
+    async function confirmDeleteMayaActor() {
+      if (!selectedMayaActorId) return;
+
+      const selectedOption = mayaActorSelect.options[mayaActorSelect.selectedIndex];
+      const actorName = selectedOption.textContent;
+
+      if (!confirm(`Delete voice preset "${actorName}"?`)) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/tts/maya/actors/${selectedMayaActorId}`, {
+          method: 'DELETE'
+        });
+
+        if (!res.ok) throw new Error('Failed to delete');
+
+        status.textContent = `Voice preset "${actorName}" deleted`;
+        status.className = 'status success';
+
+        // Reset selection and reload
+        selectedMayaActorId = '';
+        voiceDescription.value = '';
+        document.getElementById('editMayaActorBtn').style.display = 'none';
+        document.getElementById('deleteMayaActorBtn').style.display = 'none';
+        await loadMayaActors();
+        saveSettings();
+
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = 'status error';
+      }
+    }
+
+    async function editMayaActor() {
+      if (!selectedMayaActorId) return;
+
+      const selectedOption = mayaActorSelect.options[mayaActorSelect.selectedIndex];
+      const currentName = selectedOption.textContent;
+      const currentDescription = voiceDescription.value.trim();
+
+      // Prompt for new name (can cancel to keep same)
+      const newName = prompt('Enter new name (or cancel to keep current):', currentName);
+
+      // If user cancelled name prompt, still allow description update
+      const finalName = (newName === null) ? null : (newName.trim() || null);
+
+      if (!currentDescription) {
+        status.textContent = 'Voice description cannot be empty';
+        status.className = 'status error';
+        return;
+      }
+
+      try {
+        const formData = new FormData();
+        if (finalName) {
+          formData.append('name', finalName);
+        }
+        formData.append('voice_description', currentDescription);
+
+        const res = await fetch(`${API_BASE}/tts/maya/actors/${selectedMayaActorId}`, {
+          method: 'PUT',
+          body: formData
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Failed to update');
+        }
+
+        const actor = await res.json();
+        status.textContent = `Voice preset "${actor.name}" updated!`;
+        status.className = 'status success';
+
+        // Reload to reflect changes
+        await loadMayaActors();
+        mayaActorSelect.value = selectedMayaActorId;
+        saveSettings();
+
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = 'status error';
       }
     }
 
@@ -1465,11 +1775,18 @@
 
     // Generate Speech
     async function generateSpeech() {
-      const actor = actorSelect.value;
       const text = textInput.value.trim();
+      const isMaya = selectedModel === 'maya';
 
-      if (!actor) {
+      // Validation
+      if (!isMaya && !actorSelect.value) {
         status.textContent = 'Please select an actor';
+        status.className = 'status error';
+        return;
+      }
+
+      if (isMaya && !voiceDescription.value.trim()) {
+        status.textContent = 'Please enter a voice description';
         status.className = 'status error';
         return;
       }
@@ -1488,26 +1805,45 @@
 
       generateBtn.disabled = true;
       const streaming = useStreaming.checked;
-      status.textContent = streaming ? 'Streaming speech...' : 'Generating speech...';
+      const modelName = isMaya ? 'Maya' : 'XTTS';
+      status.textContent = streaming ? `Streaming ${modelName} speech...` : `Generating ${modelName} speech...`;
       status.className = 'status loading';
       statusDot.classList.add('loading');
 
       const startTime = Date.now();
-      const endpoint = streaming ? '/tts/stream' : '/tts/generate';
 
       try {
-        const res = await fetch(`${API_BASE}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text,
-            actor,
-            language: languageSelect.value,
-            speed: parseFloat(speedRange.value),
-            temperature: parseFloat(tempRange.value),
-            split_sentences: splitSentences.checked
-          })
-        });
+        let res;
+
+        if (isMaya) {
+          // Maya endpoint
+          const endpoint = streaming ? '/tts/maya/stream' : '/tts/maya/generate';
+          res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              voice_description: voiceDescription.value.trim(),
+              speed: parseFloat(speedRange.value),
+              temperature: parseFloat(tempRange.value)
+            })
+          });
+        } else {
+          // XTTS endpoint
+          const endpoint = streaming ? '/tts/stream' : '/tts/generate';
+          res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              actor: actorSelect.value,
+              language: languageSelect.value,
+              speed: parseFloat(speedRange.value),
+              temperature: parseFloat(tempRange.value),
+              split_sentences: splitSentences.checked
+            })
+          });
+        }
 
         if (!res.ok) {
           const err = await res.json();
@@ -1518,13 +1854,18 @@
         const url = URL.createObjectURL(blob);
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
+        // For display
+        const voiceLabel = isMaya
+          ? `Maya: ${voiceDescription.value.trim().substring(0, 30)}...`
+          : actorSelect.value;
+
         // Update player
-        currentAudio = { url, blob, text, actor, elapsed };
+        currentAudio = { url, blob, text, actor: voiceLabel, elapsed };
         audioPlayer.src = url;
         audioPlaceholder.style.display = 'none';
         audioPlayerWrapper.style.display = 'block';
         audioInfo.innerHTML = `
-          <span>Actor: ${actor}</span>
+          <span>${isMaya ? 'Voice' : 'Actor'}: ${voiceLabel}</span>
           <span>Size: ${formatFileSize(blob.size)}</span>
           <span>Generated in ${elapsed}s</span>
         `;

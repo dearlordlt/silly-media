@@ -55,6 +55,17 @@ class TTSHistoryEntry:
     created_at: datetime
 
 
+@dataclass
+class MayaActor:
+    """Maya TTS actor - voice description preset."""
+
+    id: str
+    name: str
+    voice_description: str
+    created_at: datetime
+    updated_at: datetime
+
+
 async def init_db() -> None:
     """Initialize the database and create tables if they don't exist."""
     # Ensure directories exist
@@ -100,6 +111,17 @@ async def init_db() -> None:
                 filename TEXT NOT NULL,
                 duration_seconds REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Maya TTS actors (voice description presets)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS maya_actors (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                voice_description TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -505,3 +527,140 @@ async def clear_tts_history() -> int:
 
     logger.info(f"Cleared TTS history: {count} entries")
     return count
+
+
+# Maya Actor functions
+
+
+async def create_maya_actor(name: str, voice_description: str) -> MayaActor:
+    """Create a new Maya actor (voice description preset)."""
+    actor_id = str(uuid.uuid4())[:8]
+    now = datetime.utcnow()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO maya_actors (id, name, voice_description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (actor_id, name, voice_description, now, now),
+        )
+        await db.commit()
+
+    logger.info(f"Created Maya actor: {name} ({actor_id})")
+
+    return MayaActor(
+        id=actor_id,
+        name=name,
+        voice_description=voice_description,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def get_maya_actor(actor_id: str) -> MayaActor | None:
+    """Get a Maya actor by ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM maya_actors WHERE id = ?", (actor_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return MayaActor(
+                id=row["id"],
+                name=row["name"],
+                voice_description=row["voice_description"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+
+
+async def get_maya_actor_by_name(name: str) -> MayaActor | None:
+    """Get a Maya actor by name (case-insensitive)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM maya_actors WHERE LOWER(name) = LOWER(?)", (name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return MayaActor(
+                id=row["id"],
+                name=row["name"],
+                voice_description=row["voice_description"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+
+
+async def list_maya_actors() -> list[MayaActor]:
+    """List all Maya actors."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM maya_actors ORDER BY name") as cursor:
+            rows = await cursor.fetchall()
+            return [
+                MayaActor(
+                    id=row["id"],
+                    name=row["name"],
+                    voice_description=row["voice_description"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    updated_at=datetime.fromisoformat(row["updated_at"]),
+                )
+                for row in rows
+            ]
+
+
+async def update_maya_actor(
+    actor_id: str,
+    name: str | None = None,
+    voice_description: str | None = None,
+) -> MayaActor | None:
+    """Update a Maya actor."""
+    actor = await get_maya_actor(actor_id)
+    if actor is None:
+        return None
+
+    now = datetime.utcnow()
+    new_name = name if name is not None else actor.name
+    new_voice_description = (
+        voice_description if voice_description is not None else actor.voice_description
+    )
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE maya_actors
+            SET name = ?, voice_description = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (new_name, new_voice_description, now, actor_id),
+        )
+        await db.commit()
+
+    logger.info(f"Updated Maya actor: {new_name} ({actor_id})")
+
+    return MayaActor(
+        id=actor_id,
+        name=new_name,
+        voice_description=new_voice_description,
+        created_at=actor.created_at,
+        updated_at=now,
+    )
+
+
+async def delete_maya_actor(actor_id: str) -> bool:
+    """Delete a Maya actor."""
+    actor = await get_maya_actor(actor_id)
+    if actor is None:
+        return False
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM maya_actors WHERE id = ?", (actor_id,))
+        await db.commit()
+
+    logger.info(f"Deleted Maya actor: {actor.name} ({actor_id})")
+    return True

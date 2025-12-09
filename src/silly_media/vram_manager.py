@@ -61,6 +61,8 @@ class VRAMManager:
         "z-image-turbo": 22.0,
         "ovis-image-7b": 20.0,
         "xtts-v2": 2.0,
+        "demucs": 2.0,
+        "maya": 16.0,
     }
 
     def __new__(cls) -> "VRAMManager":
