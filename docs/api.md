@@ -28,6 +28,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Model | ID | VRAM | Notes |
 |-------|-----|------|-------|
 | XTTS v2 | `xtts-v2` | ~2GB | 17 languages, zero-shot voice cloning |
+| Demucs | `demucs` | ~2GB | Vocal separation (used for YouTube extraction) |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
@@ -395,6 +396,60 @@ Delete an actor and all associated audio files.
 
 **Response**: 204 No Content
 
+### `POST /actors/from-youtube`
+
+Create a new actor from a YouTube video URL.
+
+Downloads audio from YouTube, optionally separates vocals using Demucs, trims silence using voice activity detection, and saves as actor reference. Useful for creating voice actors from interviews, podcasts, etc.
+
+**Request Body**
+```json
+{
+  "name": "string, required",
+  "youtube_url": "string, required",
+  "language": "string, optional (default: en)",
+  "description": "string, optional",
+  "max_duration": "float, optional (default: 30.0)",
+  "separate_vocals": "bool, optional (default: true)"
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | Yes | - | Actor display name (must be unique) |
+| `youtube_url` | string | Yes | - | YouTube video URL |
+| `language` | string | No | `en` | Primary language code |
+| `description` | string | No | `""` | Actor description |
+| `max_duration` | float | No | `30.0` | Max duration of extracted audio (seconds) |
+| `separate_vocals` | bool | No | `true` | Remove background music using Demucs |
+
+**Supported YouTube URL formats:**
+- `https://youtube.com/watch?v=VIDEO_ID`
+- `https://youtu.be/VIDEO_ID`
+- `https://youtube.com/shorts/VIDEO_ID`
+
+**Response** (201 Created)
+```json
+{
+  "id": "abc123",
+  "name": "My Actor",
+  "language": "en",
+  "description": "Voice from interview",
+  "audio_count": 1,
+  "created_at": "2024-01-15T10:30:00Z",
+  "updated_at": "2024-01-15T10:30:00Z"
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid YouTube URL |
+| 409 | Actor name already exists |
+| 500 | Failed to extract voice from YouTube |
+
+---
+
 ### `POST /actors/{name}/audio`
 
 Add additional audio file to an existing actor.
@@ -431,6 +486,26 @@ List all audio files for an actor.
   }
 ]
 ```
+
+### `GET /actors/{name}/audio/{file_id}/download`
+
+Download a specific audio file from an actor.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Actor name |
+| `file_id` | string | Audio file ID |
+
+**Response**
+- Content-Type: `audio/wav`
+- Content-Disposition: attachment with original filename
+- Body: Raw WAV bytes
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 404 | Actor or audio file not found |
 
 ### `DELETE /actors/{name}/audio/{file_id}`
 
@@ -543,6 +618,21 @@ curl -X POST http://localhost:4201/actors \
   -F "language=en" \
   -F "description=Deep authoritative voice" \
   -F "audio_files=@voice_sample.wav"
+```
+
+#### Create an Actor from YouTube
+
+```bash
+curl -X POST http://localhost:4201/actors/from-youtube \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Interviewer",
+    "youtube_url": "https://youtube.com/watch?v=VIDEO_ID",
+    "language": "en",
+    "description": "Voice from podcast interview",
+    "max_duration": 30,
+    "separate_vocals": true
+  }'
 ```
 
 #### Generate Speech
