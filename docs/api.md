@@ -6,11 +6,12 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides two main capabilities:
+Silly Media provides three main capabilities:
 - **Image Generation**: Text-to-image using diffusion models
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
+- **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
 
-The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model type (image or audio) can be active at a time.
+The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model type (image, audio, or video) can be active at a time.
 
 ---
 
@@ -30,6 +31,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | XTTS v2 | `xtts-v2` | ~2GB | 17 languages, zero-shot voice cloning |
 | Maya TTS | `maya` | ~16GB | Voice description (no reference audio), English only, emotion tags |
 | Demucs | `demucs` | ~2GB | Vocal separation (used for YouTube extraction) |
+
+### Video Models
+
+| Model | ID | VRAM | Notes |
+|-------|-----|------|-------|
+| HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | T2V and I2V, 480p/720p, ~60-90s generation |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
@@ -51,7 +58,8 @@ Check API and model status.
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
   "available_image_models": ["z-image-turbo", "ovis-image-7b"],
-  "available_audio_models": ["xtts-v2"]
+  "available_audio_models": ["xtts-v2", "maya", "demucs"],
+  "available_video_models": ["hunyuan-video"]
 }
 ```
 
@@ -67,7 +75,11 @@ List available and loaded models by type.
     "loaded": ["z-image-turbo"]
   },
   "audio": {
-    "available": ["xtts-v2"],
+    "available": ["xtts-v2", "maya", "demucs"],
+    "loaded": []
+  },
+  "video": {
+    "available": ["hunyuan-video"],
     "loaded": []
   }
 }
@@ -804,6 +816,252 @@ Delete a Maya actor.
 
 ---
 
+## Video Generation
+
+Video generation supports two modes:
+- **Text-to-Video (T2V)**: Generate video from a text prompt
+- **Image-to-Video (I2V)**: Animate a reference image based on a text prompt
+
+Generation is **asynchronous** - you start a job and poll for completion (~60-90 seconds on RTX 4090).
+
+### Video Parameters
+
+| Parameter | Type | Default | Range | Description |
+|-----------|------|---------|-------|-------------|
+| `prompt` | string | required | 1-2000 chars | Text description of video |
+| `resolution` | enum | `"480p"` | `480p`, `720p` | Output resolution |
+| `aspect_ratio` | enum | `"16:9"` | `16:9`, `9:16`, `1:1` | Video aspect ratio |
+| `num_frames` | int | `61` | 25-121 | Number of frames (~1-5s at 24fps) |
+| `num_inference_steps` | int | `50` | 8-100 | Quality steps |
+| `guidance_scale` | float | `6.0` | 1.0-15.0 | Prompt adherence |
+| `seed` | int | `-1` | -1 or 0+ | Random seed (-1 = random) |
+| `fps` | int | `24` | 12-30 | Output video FPS |
+
+**I2V-specific parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `image` | string | Yes | Base64 encoded reference image (PNG/JPG) |
+
+**Note:** For I2V, input images are automatically resized to match the target resolution (shorter side scaled to 480 or 720).
+
+### `GET /video/models`
+
+List available video generation models.
+
+**Response**
+```json
+{
+  "models": [
+    {
+      "id": "hunyuan-video",
+      "name": "HunyuanVideo 1.5",
+      "loaded": false,
+      "supports_t2v": true,
+      "supports_i2v": true,
+      "estimated_vram_gb": 16.0
+    }
+  ]
+}
+```
+
+### `POST /video/t2v/{model}`
+
+Start text-to-video generation.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model ID (e.g., `hunyuan-video`) |
+
+**Request Body**
+```json
+{
+  "prompt": "A red panda eating bamboo in a bamboo forest",
+  "resolution": "480p",
+  "aspect_ratio": "16:9",
+  "num_frames": 61,
+  "num_inference_steps": 50,
+  "guidance_scale": 6.0,
+  "seed": -1,
+  "fps": 24
+}
+```
+
+**Response**
+```json
+{
+  "job_id": "abc12345",
+  "status": "queued",
+  "estimated_time_seconds": 75.0
+}
+```
+
+### `POST /video/i2v/{model}`
+
+Start image-to-video generation.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model ID (e.g., `hunyuan-video`) |
+
+**Request Body**
+```json
+{
+  "prompt": "The panda starts eating the bamboo, moving its head slowly",
+  "image": "base64_encoded_image_data...",
+  "resolution": "480p",
+  "aspect_ratio": "16:9",
+  "num_frames": 61,
+  "num_inference_steps": 50,
+  "guidance_scale": 6.0,
+  "seed": -1,
+  "fps": 24
+}
+```
+
+**Response**
+```json
+{
+  "job_id": "abc12345",
+  "status": "queued",
+  "estimated_time_seconds": 75.0
+}
+```
+
+### `GET /video/status/{job_id}`
+
+Get video generation job status. Poll this endpoint to track progress.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | string | Job ID from generation request |
+
+**Response (processing)**
+```json
+{
+  "job_id": "abc12345",
+  "status": "processing",
+  "progress": 0.56,
+  "current_step": 28,
+  "total_steps": 50,
+  "elapsed_seconds": 45.2,
+  "video_url": null,
+  "thumbnail_url": null,
+  "error": null
+}
+```
+
+**Response (completed)**
+```json
+{
+  "job_id": "abc12345",
+  "status": "completed",
+  "progress": 1.0,
+  "current_step": 50,
+  "total_steps": 50,
+  "elapsed_seconds": 78.5,
+  "video_url": "/video/download/abc12345",
+  "thumbnail_url": "/video/thumbnail/abc12345",
+  "error": null
+}
+```
+
+**Response (failed)**
+```json
+{
+  "job_id": "abc12345",
+  "status": "failed",
+  "progress": 0.32,
+  "error": "CUDA out of memory"
+}
+```
+
+**Status values:**
+| Status | Description |
+|--------|-------------|
+| `queued` | Job is waiting to start |
+| `processing` | Currently generating |
+| `completed` | Video ready for download |
+| `failed` | Generation failed (see `error`) |
+
+### `GET /video/download/{job_id}`
+
+Download completed video as MP4.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | string | Job ID |
+
+**Response**
+- Content-Type: `video/mp4`
+- Body: Raw MP4 video bytes
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 404 | Video not found |
+
+### `GET /video/thumbnail/{job_id}`
+
+Get video thumbnail (first frame as JPEG).
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | string | Job ID |
+
+**Response**
+- Content-Type: `image/jpeg`
+- Body: JPEG image bytes
+
+### `DELETE /video/{job_id}`
+
+Delete a video and its associated files.
+
+**Response**
+```json
+{
+  "status": "deleted",
+  "job_id": "abc12345"
+}
+```
+
+### `GET /video/history`
+
+Get list of generated videos.
+
+**Query Parameters**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | int | 50 | Maximum entries to return |
+| `offset` | int | 0 | Number of entries to skip |
+
+**Response**
+```json
+{
+  "videos": [
+    {
+      "id": "abc12345",
+      "prompt": "A red panda eating bamboo",
+      "model": "hunyuan-video",
+      "resolution": "480p",
+      "aspect_ratio": "16:9",
+      "num_frames": 61,
+      "duration_seconds": 2.54,
+      "created_at": "2024-01-15T10:30:00Z",
+      "thumbnail_url": "/video/thumbnail/abc12345"
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
 ## Examples
 
 ### Image Generation
@@ -975,6 +1233,74 @@ print(response.json())
 # List Maya emotion tags
 response = requests.get("http://localhost:4201/tts/maya/emotion-tags")
 print(response.json()["tags"])
+
+# Video generation (T2V)
+response = requests.post(
+    "http://localhost:4201/video/t2v/hunyuan-video",
+    json={
+        "prompt": "A red panda eating bamboo in a bamboo forest",
+        "resolution": "480p",
+        "num_frames": 61,
+    },
+)
+job_id = response.json()["job_id"]
+print(f"Started job: {job_id}")
+
+# Poll for completion
+import time
+while True:
+    status = requests.get(f"http://localhost:4201/video/status/{job_id}").json()
+    print(f"Progress: {status['progress']*100:.0f}%")
+    if status["status"] == "completed":
+        break
+    elif status["status"] == "failed":
+        print(f"Error: {status['error']}")
+        break
+    time.sleep(5)
+
+# Download video
+if status["status"] == "completed":
+    response = requests.get(f"http://localhost:4201/video/download/{job_id}")
+    with open("video.mp4", "wb") as f:
+        f.write(response.content)
+```
+
+### Video Generation (curl)
+
+#### Text-to-Video
+
+```bash
+# Start T2V generation
+curl -X POST http://localhost:4201/video/t2v/hunyuan-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A red panda eating bamboo in a bamboo forest",
+    "resolution": "480p",
+    "num_frames": 61
+  }'
+
+# Check status (replace JOB_ID with actual job ID)
+curl http://localhost:4201/video/status/JOB_ID
+
+# Download when complete
+curl http://localhost:4201/video/download/JOB_ID -o video.mp4
+```
+
+#### Image-to-Video
+
+```bash
+# Encode image to base64
+IMAGE_B64=$(base64 -w 0 input_image.png)
+
+# Start I2V generation
+curl -X POST http://localhost:4201/video/i2v/hunyuan-video \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"prompt\": \"The panda starts eating, head moving slowly\",
+    \"image\": \"$IMAGE_B64\",
+    \"resolution\": \"480p\",
+    \"num_frames\": 61
+  }"
 ```
 
 ---

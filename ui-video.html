@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Silly Media - Video Generation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface2: #0f3460;
+      --accent: #e94560;
+      --accent2: #533483;
+      --text: #eee;
+      --text-dim: #888;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --radius: 8px;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 520px 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 1100px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    /* Header */
+    .header {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    h1 { font-size: 1.5rem; color: var(--accent); }
+    .header-links a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-left: 16px;
+    }
+    .header-links a:hover { color: var(--text); }
+
+    h2 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text-dim); }
+    h3 { font-size: 0.95rem; margin-bottom: 8px; color: var(--text); }
+
+    /* Panel styles */
+    .panel {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .controls {
+      position: sticky;
+      top: 20px;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 120px);
+      overflow-y: auto;
+    }
+
+    /* Form elements */
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    textarea, input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    textarea { resize: vertical; min-height: 100px; font-family: inherit; }
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    input[type="range"] {
+      padding: 0;
+      margin-bottom: 4px;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    /* Grid layouts */
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+    .row-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+
+    /* Buttons */
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+    }
+    .btn-secondary:hover { background: var(--accent2); }
+    .btn-small {
+      padding: 6px 10px;
+      font-size: 0.8rem;
+    }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+
+    /* Generate button */
+    #generateBtn {
+      width: 100%;
+      padding: 14px;
+      font-size: 1rem;
+      margin-top: 8px;
+    }
+
+    /* Status */
+    .status {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      display: none;
+    }
+    .status.error { display: block; background: #dc262633; color: #fca5a5; }
+    .status.success { display: block; background: #16a34a33; color: var(--success); }
+    .status.loading { display: block; background: var(--surface2); color: var(--text-dim); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      background: var(--bg);
+      padding: 4px;
+      border-radius: var(--radius);
+    }
+    .tab {
+      flex: 1;
+      padding: 10px;
+      background: transparent;
+      color: var(--text-dim);
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: all 0.2s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      background: var(--surface2);
+      color: var(--text);
+    }
+
+    /* File upload */
+    .upload-zone {
+      border: 2px dashed var(--surface2);
+      border-radius: var(--radius);
+      padding: 30px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 12px;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(233, 69, 96, 0.1);
+    }
+    .upload-zone input { display: none; }
+    .upload-icon { font-size: 2rem; margin-bottom: 8px; }
+    .upload-text { color: var(--text-dim); font-size: 0.9rem; }
+    .upload-hint { color: var(--text-dim); font-size: 0.75rem; margin-top: 4px; }
+
+    /* Image preview */
+    .image-preview {
+      position: relative;
+      margin-bottom: 12px;
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .image-preview img {
+      width: 100%;
+      display: block;
+      border-radius: var(--radius);
+    }
+    .image-preview .clear-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .image-preview .clear-btn:hover { background: var(--accent); }
+
+    /* Range with value */
+    .range-group {
+      margin-bottom: 12px;
+    }
+    .range-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .range-value {
+      font-size: 0.85rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    /* Backend status indicator */
+    .backend-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }
+    .status-dot.connected { background: var(--success); }
+    .status-dot.loading { background: var(--warning); animation: pulse 1s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Video player section */
+    .video-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .video-player-container {
+      background: #000;
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .video-player-container video {
+      width: 100%;
+      max-height: 60vh;
+      display: block;
+    }
+    .video-placeholder {
+      color: var(--text-dim);
+      padding: 60px 20px;
+      text-align: center;
+      background: var(--bg);
+      border-radius: var(--radius);
+    }
+    .video-info {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+    }
+    .video-actions {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    /* Progress section */
+    .progress-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .progress-bar {
+      height: 12px;
+      background: var(--bg);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      transition: width 0.3s ease;
+      border-radius: 6px;
+    }
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+    .progress-status {
+      text-align: center;
+      margin-bottom: 12px;
+      font-size: 0.9rem;
+    }
+    .progress-status.queued { color: var(--warning); }
+    .progress-status.processing { color: var(--accent); }
+    .progress-status.completed { color: var(--success); }
+    .progress-status.failed { color: #dc2626; }
+
+    /* History */
+    .history-section {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .history-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .history-card {
+      background: var(--bg);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+    .history-card:hover { border-color: var(--surface2); }
+    .history-card.playing { border-color: var(--accent); }
+    .history-card .thumbnail {
+      aspect-ratio: 16/9;
+      background-size: cover;
+      background-position: center;
+      background-color: var(--surface2);
+      position: relative;
+    }
+    .history-card .thumbnail .play-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.3);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .history-card:hover .play-overlay { opacity: 1; }
+    .play-overlay span {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+    }
+    .history-card .card-info {
+      padding: 10px;
+    }
+    .history-card .card-prompt {
+      font-size: 0.85rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .history-card .card-meta {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .history-card .delete-btn {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 2px;
+      font-size: 0.9rem;
+    }
+    .history-card .delete-btn:hover { color: #dc2626; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-dim);
+    }
+    .empty-state-icon { font-size: 2rem; margin-bottom: 8px; }
+
+    /* Pagination */
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--surface2);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--accent2); }
+
+    /* Duration display */
+    .duration-display {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: -8px;
+      margin-bottom: 12px;
+    }
+
+    /* Seed input group */
+    .seed-group {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .seed-group input {
+      flex: 1;
+      margin-bottom: 0;
+    }
+    .seed-group button {
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Silly Media - Video Generation</h1>
+      <div class="header-links">
+        <span class="backend-status">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Connecting...</span>
+        </span>
+        <a href="ui.html">🖼️ Images</a>
+        <a href="ui-audio.html">🔊 Audio</a>
+        <a href="http://localhost:4201/docs" target="_blank">API Docs</a>
+      </div>
+    </div>
+
+    <!-- Left Panel - Controls -->
+    <div class="panel controls">
+      <!-- Mode Tabs -->
+      <div class="tabs">
+        <button class="tab active" data-mode="t2v">Text to Video</button>
+        <button class="tab" data-mode="i2v">Image to Video</button>
+      </div>
+
+      <!-- Model Selection -->
+      <label for="modelSelect">Video Model</label>
+      <select id="modelSelect">
+        <option value="hunyuan-video">HunyuanVideo 1.5</option>
+      </select>
+
+      <!-- Image Upload (I2V only) -->
+      <div id="imageSection" style="display: none;">
+        <label>Reference Image</label>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="imageInput" accept="image/*">
+          <div class="upload-icon">🖼️</div>
+          <div class="upload-text">Drop image here or click to browse</div>
+          <div class="upload-hint">PNG, JPG - Will be resized automatically</div>
+        </div>
+        <div class="image-preview" id="imagePreview" style="display: none;">
+          <img id="previewImage" alt="Preview">
+          <button class="clear-btn" onclick="clearImage()">&times;</button>
+        </div>
+      </div>
+
+      <!-- Prompt -->
+      <label for="promptInput">Prompt</label>
+      <textarea id="promptInput" placeholder="Describe the video you want to generate..."></textarea>
+
+      <!-- Resolution & Aspect Ratio -->
+      <div class="row">
+        <div>
+          <label for="resolutionSelect">Resolution</label>
+          <select id="resolutionSelect">
+            <option value="480p">480p (faster)</option>
+            <option value="720p">720p (higher quality)</option>
+          </select>
+        </div>
+        <div>
+          <label for="aspectRatioSelect">Aspect Ratio</label>
+          <select id="aspectRatioSelect">
+            <option value="16:9">16:9 (Landscape)</option>
+            <option value="9:16">9:16 (Portrait)</option>
+            <option value="1:1">1:1 (Square)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Frames -->
+      <div class="range-group">
+        <div class="range-header">
+          <label for="framesRange">Frames</label>
+          <span class="range-value" id="framesValue">61</span>
+        </div>
+        <input type="range" id="framesRange" min="25" max="121" step="4" value="61">
+        <div class="duration-display" id="durationDisplay">~2.5 seconds at 24fps</div>
+      </div>
+
+      <!-- Inference Steps -->
+      <div class="range-group">
+        <div class="range-header">
+          <label for="stepsRange">Inference Steps</label>
+          <span class="range-value" id="stepsValue">50</span>
+        </div>
+        <input type="range" id="stepsRange" min="8" max="100" step="1" value="50">
+      </div>
+
+      <!-- Guidance Scale -->
+      <div class="range-group">
+        <div class="range-header">
+          <label for="guidanceRange">Guidance Scale</label>
+          <span class="range-value" id="guidanceValue">6.0</span>
+        </div>
+        <input type="range" id="guidanceRange" min="1.0" max="15.0" step="0.5" value="6.0">
+      </div>
+
+      <!-- FPS -->
+      <div class="range-group">
+        <div class="range-header">
+          <label for="fpsRange">FPS</label>
+          <span class="range-value" id="fpsValue">24</span>
+        </div>
+        <input type="range" id="fpsRange" min="12" max="30" step="1" value="24">
+      </div>
+
+      <!-- Seed -->
+      <label for="seedInput">Seed</label>
+      <div class="seed-group">
+        <input type="number" id="seedInput" value="-1" min="-1">
+        <button class="btn-secondary btn-small" onclick="randomizeSeed()">Random</button>
+      </div>
+
+      <!-- Generate Button -->
+      <button id="generateBtn" class="btn-primary">Generate Video</button>
+
+      <div id="status" class="status"></div>
+    </div>
+
+    <!-- Right Panel - Output -->
+    <div class="right-panel">
+      <!-- Progress Section (shown during generation) -->
+      <div class="progress-section" id="progressSection" style="display: none;">
+        <h2>Generation Progress</h2>
+        <div class="progress-status" id="progressStatus">Queued...</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        </div>
+        <div class="progress-info">
+          <span id="progressPercent">0%</span>
+          <span id="progressSteps">Step 0 / 50</span>
+          <span id="progressTime">0:00</span>
+        </div>
+      </div>
+
+      <!-- Video Player -->
+      <div class="video-section">
+        <h2>Generated Video</h2>
+        <div id="videoPlaceholder" class="video-placeholder">
+          <div style="font-size: 2rem; margin-bottom: 8px;">🎬</div>
+          <div>Generated video will appear here</div>
+        </div>
+        <div id="videoPlayerWrapper" style="display: none;">
+          <div class="video-player-container">
+            <video id="videoPlayer" controls></video>
+          </div>
+          <div class="video-info" id="videoInfo"></div>
+          <div class="video-actions">
+            <button class="btn-secondary btn-small" onclick="downloadVideo()">Download MP4</button>
+            <button class="btn-secondary btn-small" onclick="copyVideoInfo()">Copy Info</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="history-section">
+        <div class="history-header">
+          <h2 style="margin-bottom: 0;">History</h2>
+          <span id="historyCount" style="font-size: 0.8rem; color: var(--text-dim);"></span>
+        </div>
+        <div class="history-grid" id="historyGrid">
+          <div class="empty-state">
+            <div class="empty-state-icon">🎬</div>
+            <div>No videos yet</div>
+          </div>
+        </div>
+        <div class="pagination" id="historyPagination" style="display: none;">
+          <button class="btn-secondary btn-small" id="prevPageBtn" onclick="changePage(-1)">Prev</button>
+          <span id="pageInfo" style="font-size: 0.85rem; color: var(--text-dim);"></span>
+          <button class="btn-secondary btn-small" id="nextPageBtn" onclick="changePage(1)">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Always use localhost:4201 for API (works with file://, Live Server, etc.)
+    const API_BASE = 'http://localhost:4201';
+
+    // State
+    let currentMode = 't2v';
+    let selectedModel = 'hunyuan-video';
+    let uploadedImage = null; // Base64 encoded
+    let currentJobId = null;
+    let pollInterval = null;
+    let currentVideo = null;
+    let history = [];
+
+    // Pagination
+    const ITEMS_PER_PAGE = 8;
+    let currentPage = 1;
+
+    // Elements
+    const modelSelect = document.getElementById('modelSelect');
+    const promptInput = document.getElementById('promptInput');
+    const resolutionSelect = document.getElementById('resolutionSelect');
+    const aspectRatioSelect = document.getElementById('aspectRatioSelect');
+    const framesRange = document.getElementById('framesRange');
+    const framesValue = document.getElementById('framesValue');
+    const durationDisplay = document.getElementById('durationDisplay');
+    const stepsRange = document.getElementById('stepsRange');
+    const stepsValue = document.getElementById('stepsValue');
+    const guidanceRange = document.getElementById('guidanceRange');
+    const guidanceValue = document.getElementById('guidanceValue');
+    const fpsRange = document.getElementById('fpsRange');
+    const fpsValue = document.getElementById('fpsValue');
+    const seedInput = document.getElementById('seedInput');
+    const generateBtn = document.getElementById('generateBtn');
+    const status = document.getElementById('status');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const imageSection = document.getElementById('imageSection');
+    const uploadZone = document.getElementById('uploadZone');
+    const imageInput = document.getElementById('imageInput');
+    const imagePreview = document.getElementById('imagePreview');
+    const previewImage = document.getElementById('previewImage');
+    const progressSection = document.getElementById('progressSection');
+    const progressStatus = document.getElementById('progressStatus');
+    const progressFill = document.getElementById('progressFill');
+    const progressPercent = document.getElementById('progressPercent');
+    const progressSteps = document.getElementById('progressSteps');
+    const progressTime = document.getElementById('progressTime');
+    const videoPlaceholder = document.getElementById('videoPlaceholder');
+    const videoPlayerWrapper = document.getElementById('videoPlayerWrapper');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const videoInfo = document.getElementById('videoInfo');
+    const historyGrid = document.getElementById('historyGrid');
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      checkBackendStatus();
+      loadModels();
+      loadHistory();
+      loadSettings();
+      setupEventListeners();
+
+      // Check backend status every 10 seconds
+      setInterval(checkBackendStatus, 10000);
+    });
+
+    // Settings persistence
+    function saveSettings() {
+      const settings = {
+        mode: currentMode,
+        model: modelSelect.value,
+        prompt: promptInput.value,
+        resolution: resolutionSelect.value,
+        aspectRatio: aspectRatioSelect.value,
+        frames: framesRange.value,
+        steps: stepsRange.value,
+        guidance: guidanceRange.value,
+        fps: fpsRange.value,
+        seed: seedInput.value
+      };
+      localStorage.setItem('video_settings', JSON.stringify(settings));
+    }
+
+    function loadSettings() {
+      try {
+        const saved = localStorage.getItem('video_settings');
+        if (!saved) return;
+        const settings = JSON.parse(saved);
+
+        if (settings.mode) {
+          currentMode = settings.mode;
+          updateModeUI();
+        }
+        if (settings.model) modelSelect.value = settings.model;
+        if (settings.prompt) promptInput.value = settings.prompt;
+        if (settings.resolution) resolutionSelect.value = settings.resolution;
+        if (settings.aspectRatio) aspectRatioSelect.value = settings.aspectRatio;
+        if (settings.frames) {
+          framesRange.value = settings.frames;
+          framesValue.textContent = settings.frames;
+          updateDurationDisplay();
+        }
+        if (settings.steps) {
+          stepsRange.value = settings.steps;
+          stepsValue.textContent = settings.steps;
+        }
+        if (settings.guidance) {
+          guidanceRange.value = settings.guidance;
+          guidanceValue.textContent = settings.guidance;
+        }
+        if (settings.fps) {
+          fpsRange.value = settings.fps;
+          fpsValue.textContent = settings.fps;
+          updateDurationDisplay();
+        }
+        if (settings.seed) seedInput.value = settings.seed;
+      } catch (e) {
+        console.error('Failed to load settings:', e);
+      }
+    }
+
+    function setupEventListeners() {
+      // Mode tabs
+      document.querySelectorAll('.tab[data-mode]').forEach(tab => {
+        tab.addEventListener('click', () => {
+          currentMode = tab.dataset.mode;
+          updateModeUI();
+          saveSettings();
+        });
+      });
+
+      // Model select
+      modelSelect.addEventListener('change', () => {
+        selectedModel = modelSelect.value;
+        saveSettings();
+      });
+
+      // Prompt
+      promptInput.addEventListener('input', saveSettings);
+
+      // Resolution & Aspect Ratio
+      resolutionSelect.addEventListener('change', saveSettings);
+      aspectRatioSelect.addEventListener('change', saveSettings);
+
+      // Range sliders
+      framesRange.addEventListener('input', () => {
+        framesValue.textContent = framesRange.value;
+        updateDurationDisplay();
+        saveSettings();
+      });
+      stepsRange.addEventListener('input', () => {
+        stepsValue.textContent = stepsRange.value;
+        saveSettings();
+      });
+      guidanceRange.addEventListener('input', () => {
+        guidanceValue.textContent = guidanceRange.value;
+        saveSettings();
+      });
+      fpsRange.addEventListener('input', () => {
+        fpsValue.textContent = fpsRange.value;
+        updateDurationDisplay();
+        saveSettings();
+      });
+      seedInput.addEventListener('change', saveSettings);
+
+      // Generate button
+      generateBtn.addEventListener('click', generateVideo);
+
+      // Image upload
+      uploadZone.addEventListener('click', () => imageInput.click());
+      uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+      });
+      uploadZone.addEventListener('dragleave', () => {
+        uploadZone.classList.remove('dragover');
+      });
+      uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) {
+          handleImageUpload(e.dataTransfer.files[0]);
+        }
+      });
+      imageInput.addEventListener('change', () => {
+        if (imageInput.files.length > 0) {
+          handleImageUpload(imageInput.files[0]);
+        }
+      });
+    }
+
+    function updateModeUI() {
+      // Update tab styles
+      document.querySelectorAll('.tab[data-mode]').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.mode === currentMode);
+      });
+
+      // Show/hide image section
+      imageSection.style.display = currentMode === 'i2v' ? 'block' : 'none';
+    }
+
+    function updateDurationDisplay() {
+      const frames = parseInt(framesRange.value);
+      const fps = parseInt(fpsRange.value);
+      const duration = (frames / fps).toFixed(1);
+      durationDisplay.textContent = `~${duration} seconds at ${fps}fps`;
+    }
+
+    function randomizeSeed() {
+      seedInput.value = Math.floor(Math.random() * 2147483647);
+      saveSettings();
+    }
+
+    function handleImageUpload(file) {
+      if (!file.type.startsWith('image/')) {
+        status.textContent = 'Please upload an image file';
+        status.className = 'status error';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        uploadedImage = e.target.result.split(',')[1]; // Remove data:image/...;base64, prefix
+        previewImage.src = e.target.result;
+        uploadZone.style.display = 'none';
+        imagePreview.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearImage() {
+      uploadedImage = null;
+      imageInput.value = '';
+      uploadZone.style.display = 'block';
+      imagePreview.style.display = 'none';
+    }
+
+    async function checkBackendStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/health`);
+        const data = await res.json();
+        statusDot.classList.remove('loading');
+        statusDot.classList.add('connected');
+
+        const videoModels = data.available_video_models || [];
+        statusText.textContent = videoModels.length > 0
+          ? `${videoModels.length} video model${videoModels.length > 1 ? 's' : ''} available`
+          : 'Connected';
+      } catch (e) {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Disconnected';
+      }
+    }
+
+    async function loadModels() {
+      try {
+        const res = await fetch(`${API_BASE}/video/models`);
+        const data = await res.json();
+
+        if (data.models && data.models.length > 0) {
+          modelSelect.innerHTML = data.models.map(m =>
+            `<option value="${m.id}">${m.name}${m.loaded ? ' (loaded)' : ''}</option>`
+          ).join('');
+        }
+      } catch (e) {
+        console.error('Failed to load models:', e);
+      }
+    }
+
+    async function generateVideo() {
+      const prompt = promptInput.value.trim();
+
+      if (!prompt) {
+        status.textContent = 'Please enter a prompt';
+        status.className = 'status error';
+        return;
+      }
+
+      if (currentMode === 'i2v' && !uploadedImage) {
+        status.textContent = 'Please upload a reference image for Image-to-Video';
+        status.className = 'status error';
+        return;
+      }
+
+      generateBtn.disabled = true;
+      status.textContent = 'Starting generation...';
+      status.className = 'status loading';
+      statusDot.classList.add('loading');
+
+      const endpoint = currentMode === 't2v'
+        ? `${API_BASE}/video/t2v/${selectedModel}`
+        : `${API_BASE}/video/i2v/${selectedModel}`;
+
+      const requestBody = {
+        prompt,
+        resolution: resolutionSelect.value,
+        aspect_ratio: aspectRatioSelect.value,
+        num_frames: parseInt(framesRange.value),
+        num_inference_steps: parseInt(stepsRange.value),
+        guidance_scale: parseFloat(guidanceRange.value),
+        fps: parseInt(fpsRange.value),
+        seed: parseInt(seedInput.value)
+      };
+
+      if (currentMode === 'i2v') {
+        requestBody.image = uploadedImage;
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Generation failed');
+        }
+
+        const data = await res.json();
+        currentJobId = data.job_id;
+
+        // Show progress section
+        showProgress();
+
+        // Start polling
+        pollInterval = setInterval(() => pollJobStatus(currentJobId), 1000);
+
+        status.textContent = `Job ${currentJobId} started. Estimated time: ${Math.round(data.estimated_time_seconds)}s`;
+        status.className = 'status success';
+
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = 'status error';
+        generateBtn.disabled = false;
+        statusDot.classList.remove('loading');
+      }
+    }
+
+    function showProgress() {
+      progressSection.style.display = 'block';
+      progressFill.style.width = '0%';
+      progressPercent.textContent = '0%';
+      progressSteps.textContent = `Step 0 / ${stepsRange.value}`;
+      progressTime.textContent = '0:00';
+      progressStatus.textContent = 'Queued...';
+      progressStatus.className = 'progress-status queued';
+    }
+
+    async function pollJobStatus(jobId) {
+      try {
+        const res = await fetch(`${API_BASE}/video/status/${jobId}`);
+        if (!res.ok) {
+          throw new Error('Failed to get status');
+        }
+
+        const data = await res.json();
+        updateProgress(data);
+
+        if (data.status === 'completed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          onJobCompleted(data);
+        } else if (data.status === 'failed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          onJobFailed(data);
+        }
+      } catch (e) {
+        console.error('Poll error:', e);
+      }
+    }
+
+    function updateProgress(data) {
+      const progress = data.progress || 0;
+      const currentStep = data.current_step || 0;
+      const totalSteps = data.total_steps || parseInt(stepsRange.value);
+      const elapsed = data.elapsed_seconds || 0;
+
+      progressFill.style.width = `${progress * 100}%`;
+      progressPercent.textContent = `${Math.round(progress * 100)}%`;
+      progressSteps.textContent = `Step ${currentStep} / ${totalSteps}`;
+      progressTime.textContent = formatTime(elapsed);
+
+      progressStatus.textContent = data.status === 'processing' ? 'Generating...' : 'Queued...';
+      progressStatus.className = `progress-status ${data.status}`;
+    }
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function onJobCompleted(data) {
+      progressStatus.textContent = 'Completed!';
+      progressStatus.className = 'progress-status completed';
+      progressFill.style.width = '100%';
+      progressPercent.textContent = '100%';
+
+      // Show video
+      const videoUrl = `${API_BASE}${data.video_url}`;
+      const thumbnailUrl = data.thumbnail_url ? `${API_BASE}${data.thumbnail_url}` : null;
+
+      currentVideo = {
+        jobId: currentJobId,
+        url: videoUrl,
+        thumbnailUrl,
+        prompt: promptInput.value,
+        resolution: resolutionSelect.value,
+        aspectRatio: aspectRatioSelect.value,
+        frames: framesRange.value,
+        fps: fpsRange.value,
+        elapsed: data.elapsed_seconds
+      };
+
+      showVideo(currentVideo);
+
+      // Reload history
+      loadHistory();
+
+      // Re-enable button
+      generateBtn.disabled = false;
+      statusDot.classList.remove('loading');
+      status.textContent = `Video generated in ${formatTime(data.elapsed_seconds)}`;
+      status.className = 'status success';
+
+      // Hide progress after a delay
+      setTimeout(() => {
+        progressSection.style.display = 'none';
+      }, 2000);
+    }
+
+    function onJobFailed(data) {
+      progressStatus.textContent = 'Failed';
+      progressStatus.className = 'progress-status failed';
+
+      generateBtn.disabled = false;
+      statusDot.classList.remove('loading');
+      status.textContent = data.error || 'Generation failed';
+      status.className = 'status error';
+
+      setTimeout(() => {
+        progressSection.style.display = 'none';
+      }, 3000);
+    }
+
+    function showVideo(video) {
+      videoPlayer.src = video.url;
+      videoPlaceholder.style.display = 'none';
+      videoPlayerWrapper.style.display = 'block';
+
+      const duration = (parseInt(video.frames) / parseInt(video.fps)).toFixed(1);
+      videoInfo.innerHTML = `
+        <span>${video.resolution} • ${video.aspectRatio}</span>
+        <span>${video.frames} frames • ${duration}s</span>
+        ${video.elapsed ? `<span>Generated in ${formatTime(video.elapsed)}</span>` : ''}
+      `;
+
+      videoPlayer.play();
+    }
+
+    function downloadVideo() {
+      if (!currentVideo) return;
+      const link = document.createElement('a');
+      link.href = currentVideo.url;
+      link.download = `video_${currentVideo.jobId}.mp4`;
+      link.click();
+    }
+
+    function copyVideoInfo() {
+      if (!currentVideo) return;
+      const info = `Prompt: ${currentVideo.prompt}\nResolution: ${currentVideo.resolution}\nAspect Ratio: ${currentVideo.aspectRatio}\nFrames: ${currentVideo.frames}\nFPS: ${currentVideo.fps}`;
+      navigator.clipboard.writeText(info);
+      status.textContent = 'Info copied to clipboard';
+      status.className = 'status success';
+    }
+
+    // History
+    async function loadHistory() {
+      try {
+        const res = await fetch(`${API_BASE}/video/history?limit=50`);
+        if (!res.ok) throw new Error('Failed to load history');
+        const data = await res.json();
+        history = data.videos || [];
+        currentPage = 1;
+        renderHistory();
+      } catch (e) {
+        console.error('Failed to load history:', e);
+        renderHistory();
+      }
+    }
+
+    function renderHistory() {
+      const historyCount = document.getElementById('historyCount');
+      const pagination = document.getElementById('historyPagination');
+      const pageInfo = document.getElementById('pageInfo');
+      const prevBtn = document.getElementById('prevPageBtn');
+      const nextBtn = document.getElementById('nextPageBtn');
+
+      historyCount.textContent = `${history.length} video${history.length !== 1 ? 's' : ''}`;
+
+      if (history.length === 0) {
+        historyGrid.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">🎬</div>
+            <div>No videos yet</div>
+          </div>
+        `;
+        pagination.style.display = 'none';
+        return;
+      }
+
+      const totalPages = Math.ceil(history.length / ITEMS_PER_PAGE);
+      if (currentPage > totalPages) currentPage = totalPages;
+
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, history.length);
+      const pageItems = history.slice(startIndex, endIndex);
+
+      historyGrid.innerHTML = pageItems.map((video, i) => {
+        const thumbnailUrl = video.thumbnail_url ? `${API_BASE}${video.thumbnail_url}` : '';
+        const duration = video.duration_seconds ? video.duration_seconds.toFixed(1) : '?';
+        const timeAgo = formatTimeAgo(new Date(video.created_at));
+
+        return `
+          <div class="history-card" onclick="playFromHistory('${video.id}')">
+            <div class="thumbnail" style="background-image: url('${thumbnailUrl}')">
+              <div class="play-overlay"><span>▶</span></div>
+            </div>
+            <div class="card-info">
+              <div class="card-prompt">${escapeHtml(video.prompt)}</div>
+              <div class="card-meta">
+                <span>${video.resolution} • ${duration}s</span>
+                <button class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem('${video.id}')" title="Delete">🗑</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Pagination
+      if (totalPages > 1) {
+        pagination.style.display = 'flex';
+        pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+        prevBtn.disabled = currentPage <= 1;
+        nextBtn.disabled = currentPage >= totalPages;
+      } else {
+        pagination.style.display = 'none';
+      }
+    }
+
+    function changePage(delta) {
+      const totalPages = Math.ceil(history.length / ITEMS_PER_PAGE);
+      const newPage = currentPage + delta;
+      if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        renderHistory();
+      }
+    }
+
+    async function playFromHistory(jobId) {
+      const video = history.find(v => v.id === jobId);
+      if (!video) return;
+
+      currentVideo = {
+        jobId: video.id,
+        url: `${API_BASE}/video/download/${video.id}`,
+        thumbnailUrl: video.thumbnail_url ? `${API_BASE}${video.thumbnail_url}` : null,
+        prompt: video.prompt,
+        resolution: video.resolution,
+        aspectRatio: video.aspect_ratio,
+        frames: video.num_frames,
+        fps: 24, // Default
+        elapsed: null
+      };
+
+      showVideo(currentVideo);
+
+      // Highlight in history
+      document.querySelectorAll('.history-card').forEach(card => {
+        card.classList.remove('playing');
+      });
+      event.currentTarget.classList.add('playing');
+    }
+
+    async function deleteHistoryItem(jobId) {
+      if (!confirm('Delete this video?')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/video/${jobId}`, {
+          method: 'DELETE'
+        });
+
+        if (!res.ok) throw new Error('Failed to delete');
+
+        // Remove from local array
+        history = history.filter(v => v.id !== jobId);
+        renderHistory();
+
+        // Clear player if this was the current video
+        if (currentVideo && currentVideo.jobId === jobId) {
+          videoPlayer.src = '';
+          videoPlaceholder.style.display = 'block';
+          videoPlayerWrapper.style.display = 'none';
+          currentVideo = null;
+        }
+
+        status.textContent = 'Video deleted';
+        status.className = 'status success';
+
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = 'status error';
+      }
+    }
+
+    // Utilities
+    function formatTimeAgo(date) {
+      const seconds = Math.floor((new Date() - date) / 1000);
+      if (seconds < 60) return 'just now';
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return `${minutes}m ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

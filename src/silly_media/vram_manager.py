@@ -22,6 +22,7 @@ class ModelType(Enum):
 
     IMAGE = "image"
     AUDIO = "audio"
+    VIDEO = "video"
 
 
 class Loadable(Protocol):
@@ -156,11 +157,34 @@ class VRAMManager:
 
     async def _unload_all(self) -> None:
         """Unload all loaded models."""
+        loaded_models = [name for name, info in self._models.items() if info.is_loaded]
+        if not loaded_models:
+            logger.info("No models to unload")
+            return
+
+        logger.info(f"Unloading {len(loaded_models)} models: {loaded_models}")
+
+        # Log VRAM before unloading
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1e9
+            reserved = torch.cuda.memory_reserved() / 1e9
+            logger.info(f"VRAM before unload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+
         for name, info in self._models.items():
             if info.is_loaded:
                 logger.info(f"Unloading model: {name}")
                 await asyncio.to_thread(info.instance.unload)
+                # Clear after each unload
+                gc.collect()
+                torch.cuda.empty_cache()
+
         self._current_loaded = None
+
+        # Log VRAM after unloading
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1e9
+            reserved = torch.cuda.memory_reserved() / 1e9
+            logger.info(f"VRAM after unload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
     def _unload_model_sync(self, name: str) -> None:
         """Synchronous unload for cleanup scenarios."""
@@ -172,13 +196,32 @@ class VRAMManager:
 
     def _clear_vram(self) -> None:
         """Aggressively clear VRAM."""
+        # Multiple gc passes help clear circular references
         gc.collect()
+        gc.collect()
+        gc.collect()
+
         if torch.cuda.is_available():
+            # Clear PyTorch's CUDA cache
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+
+            # Try to reset peak memory stats
+            torch.cuda.reset_peak_memory_stats()
+
+            # Reset accumulated memory (requires PyTorch 2.0+)
+            try:
+                torch.cuda.reset_accumulated_memory_stats()
+            except AttributeError:
+                pass  # Not available in older PyTorch versions
+
             allocated = torch.cuda.memory_allocated() / 1e9
             reserved = torch.cuda.memory_reserved() / 1e9
-            logger.info(f"VRAM cleared: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
+            free = (torch.cuda.get_device_properties(0).total_memory / 1e9) - reserved
+            logger.info(
+                f"VRAM after clear: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved, "
+                f"~{free:.2f}GB free"
+            )
 
     def _touch(self) -> None:
         """Update last-used timestamp and schedule idle check."""

@@ -523,7 +523,8 @@
           <span id="statusText">Connecting...</span>
         </span>
         <a href="ui.html">🖼️ Images</a>
-        <a href="/docs" target="_blank">API Docs</a>
+        <a href="ui-video.html">🎬 Video</a>
+        <a href="http://localhost:4201/docs" target="_blank">API Docs</a>
       </div>
     </div>
 
@@ -844,8 +845,8 @@
   </div>
 
   <script>
-    // Use localhost when opened from file://, otherwise same origin
-    const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:4201' : '';
+    // Always use localhost:4201 for API (works with file://, Live Server, etc.)
+    const API_BASE = 'http://localhost:4201';
 
     // State
     let actors = [];

@@ -66,6 +66,22 @@ class MayaActor:
     updated_at: datetime
 
 
+@dataclass
+class VideoJob:
+    """Video generation job record."""
+
+    id: str
+    model: str
+    prompt: str
+    resolution: str
+    aspect_ratio: str
+    num_frames: int
+    video_path: str | None
+    duration_seconds: float
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
 async def init_db() -> None:
     """Initialize the database and create tables if they don't exist."""
     # Ensure directories exist
@@ -122,6 +138,22 @@ async def init_db() -> None:
                 voice_description TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Video generation jobs
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS video_jobs (
+                id TEXT PRIMARY KEY,
+                model TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                resolution TEXT NOT NULL,
+                aspect_ratio TEXT NOT NULL,
+                num_frames INTEGER NOT NULL,
+                video_path TEXT,
+                duration_seconds REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP
             )
         """)
 
@@ -663,4 +695,120 @@ async def delete_maya_actor(actor_id: str) -> bool:
         await db.commit()
 
     logger.info(f"Deleted Maya actor: {actor.name} ({actor_id})")
+    return True
+
+
+# Video Job functions
+
+
+async def create_video_job(
+    job_id: str,
+    model: str,
+    prompt: str,
+    resolution: str,
+    aspect_ratio: str,
+    num_frames: int,
+    video_path: str,
+    duration_seconds: float,
+) -> VideoJob:
+    """Create a video job record."""
+    now = datetime.utcnow()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO video_jobs
+                (id, model, prompt, resolution, aspect_ratio, num_frames, video_path, duration_seconds, created_at, completed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_id, model, prompt, resolution, aspect_ratio, num_frames, video_path, duration_seconds, now, now),
+        )
+        await db.commit()
+
+    logger.info(f"Created video job: {job_id}")
+
+    return VideoJob(
+        id=job_id,
+        model=model,
+        prompt=prompt,
+        resolution=resolution,
+        aspect_ratio=aspect_ratio,
+        num_frames=num_frames,
+        video_path=video_path,
+        duration_seconds=duration_seconds,
+        created_at=now,
+        completed_at=now,
+    )
+
+
+async def get_video_job(job_id: str) -> VideoJob | None:
+    """Get a video job by ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM video_jobs WHERE id = ?", (job_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            return VideoJob(
+                id=row["id"],
+                model=row["model"],
+                prompt=row["prompt"],
+                resolution=row["resolution"],
+                aspect_ratio=row["aspect_ratio"],
+                num_frames=row["num_frames"],
+                video_path=row["video_path"],
+                duration_seconds=row["duration_seconds"],
+                created_at=datetime.fromisoformat(row["created_at"]),
+                completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+            )
+
+
+async def get_video_jobs(limit: int = 50, offset: int = 0) -> tuple[list[VideoJob], int]:
+    """Get video jobs with pagination. Returns (videos, total_count)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        # Get total count
+        async with db.execute("SELECT COUNT(*) FROM video_jobs") as cursor:
+            row = await cursor.fetchone()
+            total = row[0] if row else 0
+
+        # Get paginated results
+        async with db.execute(
+            "SELECT * FROM video_jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            videos = [
+                VideoJob(
+                    id=row["id"],
+                    model=row["model"],
+                    prompt=row["prompt"],
+                    resolution=row["resolution"],
+                    aspect_ratio=row["aspect_ratio"],
+                    num_frames=row["num_frames"],
+                    video_path=row["video_path"],
+                    duration_seconds=row["duration_seconds"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+                )
+                for row in rows
+            ]
+
+    return videos, total
+
+
+async def delete_video_job(job_id: str) -> bool:
+    """Delete a video job record (does not delete files)."""
+    job = await get_video_job(job_id)
+    if job is None:
+        return False
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM video_jobs WHERE id = ?", (job_id,))
+        await db.commit()
+
+    logger.info(f"Deleted video job: {job_id}")
     return True
