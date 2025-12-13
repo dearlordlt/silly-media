@@ -38,16 +38,16 @@ class VideoGenerateRequest(BaseModel):
     ] = VideoAspectRatio.LANDSCAPE_16_9
     num_frames: Annotated[
         int,
-        Field(default=61, ge=25, le=121, description="Number of frames (25-121, ~1-5 seconds at 24fps)"),
-    ] = 61
+        Field(default=45, ge=25, le=85, description="Number of frames (25-85, ~1-3.5 seconds at 24fps)"),
+    ] = 45
     num_inference_steps: Annotated[
         int,
-        Field(default=50, ge=8, le=100, description="Number of inference steps (8-12 for distilled, 50 for standard)"),
-    ] = 50
+        Field(default=6, ge=1, le=100, description="Number of inference steps (6 for distilled, 50 for standard)"),
+    ] = 6
     guidance_scale: Annotated[
         float,
-        Field(default=6.0, ge=1.0, le=15.0, description="Guidance scale for prompt adherence"),
-    ] = 6.0
+        Field(default=1.0, ge=1.0, le=15.0, description="Guidance scale (1.0 for distilled, 6.0 for standard)"),
+    ] = 1.0
     seed: Annotated[
         int,
         Field(default=-1, ge=-1, description="Random seed (-1 for random)"),

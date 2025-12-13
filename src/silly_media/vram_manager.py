@@ -83,6 +83,7 @@ class VRAMManager:
         self._last_used: float = 0
         self._idle_timeout: int = 300
         self._total_vram_gb: float = 24.0  # RTX 4090
+        self._in_use: bool = False  # Track if GPU is currently in use
         self._initialized = True
         logger.info("VRAMManager initialized")
 
@@ -120,10 +121,13 @@ class VRAMManager:
                 result = model.generate(request)
         """
         async with self._lock:
+            self._in_use = True  # Mark as in use to prevent idle unload
+            self._touch()  # Touch at start to reset idle timer
             model = await self._ensure_loaded(model_name)
             try:
                 yield model
             finally:
+                self._in_use = False
                 self._touch()
 
     async def _ensure_loaded(self, name: str) -> Loadable:
@@ -254,6 +258,14 @@ class VRAMManager:
                 remaining = self._idle_timeout - elapsed
 
                 if remaining <= 0:
+                    # Don't unload if GPU is currently in use
+                    if self._in_use:
+                        logger.debug("Idle timeout reached but GPU is in use, skipping unload")
+                        # Reset timer and continue waiting
+                        self._last_used = time.time()
+                        await asyncio.sleep(self._idle_timeout)
+                        continue
+
                     loaded = self.get_loaded_models()
                     if loaded:
                         logger.info(

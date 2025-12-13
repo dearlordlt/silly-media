@@ -549,28 +549,31 @@
       <div class="range-group">
         <div class="range-header">
           <label for="framesRange">Frames</label>
-          <span class="range-value" id="framesValue">61</span>
+          <span class="range-value" id="framesValue">45</span>
         </div>
-        <input type="range" id="framesRange" min="25" max="121" step="4" value="61">
-        <div class="duration-display" id="durationDisplay">~2.5 seconds at 24fps</div>
+        <input type="range" id="framesRange" min="25" max="85" step="4" value="45">
+        <div class="duration-display" id="durationDisplay">~1.9 seconds at 24fps</div>
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">Max 85 frames (~3.5s at 24fps) - VRAM limitation</div>
       </div>
 
       <!-- Inference Steps -->
       <div class="range-group">
         <div class="range-header">
           <label for="stepsRange">Inference Steps</label>
-          <span class="range-value" id="stepsValue">50</span>
+          <span class="range-value" id="stepsValue">6</span>
         </div>
-        <input type="range" id="stepsRange" min="8" max="100" step="1" value="50">
+        <input type="range" id="stepsRange" min="1" max="100" step="1" value="6">
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">6 steps for distilled model, 50 for standard</div>
       </div>
 
       <!-- Guidance Scale -->
       <div class="range-group">
         <div class="range-header">
           <label for="guidanceRange">Guidance Scale</label>
-          <span class="range-value" id="guidanceValue">6.0</span>
+          <span class="range-value" id="guidanceValue">1.0</span>
         </div>
-        <input type="range" id="guidanceRange" min="1.0" max="15.0" step="0.5" value="6.0">
+        <input type="range" id="guidanceRange" min="1.0" max="15.0" step="0.5" value="1.0">
+        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">1.0 for distilled, 6.0 for standard</div>
       </div>
 
       <!-- FPS -->
@@ -606,7 +609,7 @@
         </div>
         <div class="progress-info">
           <span id="progressPercent">0%</span>
-          <span id="progressSteps">Step 0 / 50</span>
+          <span id="progressSteps">Step 0 / 6</span>
           <span id="progressTime">0:00</span>
         </div>
       </div>
@@ -1035,7 +1038,16 @@
       progressSteps.textContent = `Step ${currentStep} / ${totalSteps}`;
       progressTime.textContent = formatTime(elapsed);
 
-      progressStatus.textContent = data.status === 'processing' ? 'Generating...' : 'Queued...';
+      // Determine status text
+      let statusText = 'Queued...';
+      if (data.status === 'processing') {
+        if (progress >= 1.0) {
+          statusText = 'Encoding video...';
+        } else {
+          statusText = 'Generating...';
+        }
+      }
+      progressStatus.textContent = statusText;
       progressStatus.className = `progress-status ${data.status}`;
     }
 

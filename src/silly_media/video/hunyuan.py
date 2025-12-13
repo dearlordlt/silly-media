@@ -19,16 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 class HunyuanVideoModel(BaseVideoModel):
-    """HunyuanVideo 1.5 model supporting both T2V and I2V."""
+    """HunyuanVideo 1.5 model supporting both T2V and I2V with official distilled models."""
 
-    # Separate model IDs for T2V and I2V pipelines
-    model_id_t2v = "hunyuanvideo-community/HunyuanVideo"
-    model_id_i2v = "hunyuanvideo-community/HunyuanVideo-I2V"
+    # Official distilled model IDs from hunyuanvideo-community (no LoRA needed!)
+    # These have distillation baked in for fast 6-step inference
+    model_id_t2v = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v_distilled"
+    model_id_i2v = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled"
 
     model_id = model_id_t2v  # Default for compatibility
-    display_name = "HunyuanVideo 1.5"
+    display_name = "HunyuanVideo 1.5 Distilled"
     estimated_vram_gb = 16.0
-    default_steps = 50
+    default_steps = 6  # Distilled models work best with 6 steps
 
     def __init__(self) -> None:
         super().__init__()
@@ -46,8 +47,8 @@ class HunyuanVideoModel(BaseVideoModel):
         self._loaded = True
 
     def _load_t2v(self) -> None:
-        """Load T2V pipeline with aggressive memory optimization."""
-        from diffusers import HunyuanVideoPipeline
+        """Load T2V distilled pipeline for fast generation."""
+        from diffusers import HunyuanVideo15Pipeline
 
         # Clear any lingering VRAM before loading
         gc.collect()
@@ -60,13 +61,16 @@ class HunyuanVideoModel(BaseVideoModel):
             reserved = torch.cuda.memory_reserved() / 1e9
             logger.info(f"VRAM before T2V load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
-        logger.info(f"Loading HunyuanVideo T2V pipeline from {self.model_id_t2v}...")
-        self._pipe_t2v = HunyuanVideoPipeline.from_pretrained(
+        logger.info(f"Loading HunyuanVideo 1.5 T2V distilled pipeline from {self.model_id_t2v}...")
+        self._pipe_t2v = HunyuanVideo15Pipeline.from_pretrained(
             self.model_id_t2v,
             torch_dtype=torch.bfloat16,
         )
-        # Use sequential CPU offload for lower VRAM usage (moves one layer at a time)
+
+        # Use sequential CPU offload for lower VRAM (slower but fits in 24GB)
         self._pipe_t2v.enable_sequential_cpu_offload()
+
+        # Enable memory optimizations - critical for VAE decoding
         self._pipe_t2v.vae.enable_tiling()
         self._pipe_t2v.vae.enable_slicing()
         self._current_mode = "t2v"
@@ -76,11 +80,11 @@ class HunyuanVideoModel(BaseVideoModel):
             allocated = torch.cuda.memory_allocated() / 1e9
             reserved = torch.cuda.memory_reserved() / 1e9
             logger.info(f"VRAM after T2V load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-        logger.info("HunyuanVideo T2V pipeline loaded")
+        logger.info("HunyuanVideo T2V distilled pipeline loaded")
 
     def _load_i2v(self) -> None:
-        """Load I2V pipeline with aggressive memory optimization."""
-        from diffusers import HunyuanVideoImageToVideoPipeline
+        """Load I2V distilled pipeline for image-to-video generation."""
+        from diffusers import HunyuanVideo15ImageToVideoPipeline
 
         # Unload T2V first
         if self._pipe_t2v is not None:
@@ -99,12 +103,13 @@ class HunyuanVideoModel(BaseVideoModel):
             reserved = torch.cuda.memory_reserved() / 1e9
             logger.info(f"VRAM before I2V load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
 
-        logger.info(f"Loading HunyuanVideo I2V pipeline from {self.model_id_i2v}...")
-        self._pipe_i2v = HunyuanVideoImageToVideoPipeline.from_pretrained(
+        logger.info(f"Loading HunyuanVideo 1.5 I2V distilled pipeline from {self.model_id_i2v}...")
+        self._pipe_i2v = HunyuanVideo15ImageToVideoPipeline.from_pretrained(
             self.model_id_i2v,
             torch_dtype=torch.bfloat16,
         )
-        # Use sequential CPU offload for lower VRAM usage (moves one layer at a time)
+
+        # Use sequential CPU offload for lower VRAM (slower but fits in 24GB)
         self._pipe_i2v.enable_sequential_cpu_offload()
         self._pipe_i2v.vae.enable_tiling()
         self._pipe_i2v.vae.enable_slicing()
@@ -115,7 +120,7 @@ class HunyuanVideoModel(BaseVideoModel):
             allocated = torch.cuda.memory_allocated() / 1e9
             reserved = torch.cuda.memory_reserved() / 1e9
             logger.info(f"VRAM after I2V load: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved")
-        logger.info("HunyuanVideo I2V pipeline loaded")
+        logger.info("HunyuanVideo I2V distilled pipeline loaded")
 
     def _ensure_t2v(self) -> None:
         """Ensure T2V pipeline is loaded."""
@@ -272,18 +277,23 @@ class HunyuanVideoModel(BaseVideoModel):
 
         logger.info(
             f"Generating T2V: {width}x{height}, {request.num_frames} frames, "
-            f"{request.num_inference_steps} steps, seed={seed}"
+            f"{request.num_inference_steps} steps, guidance={request.guidance_scale}, seed={seed}"
         )
 
+        # HunyuanVideo15Pipeline uses a guider object instead of guidance_scale parameter
+        if hasattr(self._pipe_t2v, "guider") and self._pipe_t2v.guider is not None:
+            self._pipe_t2v.guider = self._pipe_t2v.guider.new(
+                guidance_scale=request.guidance_scale
+            )
+
+        # Note: HunyuanVideo15Pipeline doesn't support callback_on_step_end
         output = self._pipe_t2v(
             prompt=request.prompt,
             height=height,
             width=width,
             num_frames=request.num_frames,
             num_inference_steps=request.num_inference_steps,
-            guidance_scale=request.guidance_scale,
             generator=generator,
-            callback_on_step_end=progress_callback,
         )
 
         frames = output.frames[0]
@@ -321,19 +331,22 @@ class HunyuanVideoModel(BaseVideoModel):
 
         logger.info(
             f"Generating I2V: {width}x{height}, {request.num_frames} frames, "
-            f"{request.num_inference_steps} steps, seed={seed}"
+            f"{request.num_inference_steps} steps, guidance={request.guidance_scale}, seed={seed}"
         )
 
+        # HunyuanVideo15ImageToVideoPipeline uses a guider object instead of guidance_scale parameter
+        if hasattr(self._pipe_i2v, "guider") and self._pipe_i2v.guider is not None:
+            self._pipe_i2v.guider = self._pipe_i2v.guider.new(
+                guidance_scale=request.guidance_scale
+            )
+
+        # Note: HunyuanVideo15ImageToVideoPipeline doesn't support callback_on_step_end
         output = self._pipe_i2v(
             prompt=request.prompt,
             image=image,
-            height=height,
-            width=width,
             num_frames=request.num_frames,
             num_inference_steps=request.num_inference_steps,
-            guidance_scale=request.guidance_scale,
             generator=generator,
-            callback_on_step_end=progress_callback,
         )
 
         frames = output.frames[0]

@@ -28,6 +28,7 @@ router = APIRouter(prefix="/video", tags=["video"])
 
 # In-memory job status tracking
 _jobs: dict[str, VideoStatusResponse] = {}
+_job_start_times: dict[str, float] = {}  # Track start times for elapsed calculation
 
 
 @router.get("/models", response_model=VideoModelsResponse)
@@ -141,18 +142,16 @@ async def generate_i2v(
 async def _run_t2v_job(job_id: str, model_name: str, request: T2VRequest) -> None:
     """Background task for T2V generation."""
     start_time = time.time()
+    _job_start_times[job_id] = start_time
     _jobs[job_id].status = "processing"
 
-    def progress_callback(pipe, step, timestep, callback_kwargs):
-        _jobs[job_id].current_step = step + 1
-        _jobs[job_id].progress = (step + 1) / request.num_inference_steps
-        _jobs[job_id].elapsed_seconds = time.time() - start_time
-        return callback_kwargs
+    # Note: HunyuanVideo15Pipeline doesn't support progress callbacks
+    # Elapsed time is calculated on status poll instead
 
     try:
         async with vram_manager.acquire_gpu(model_name) as model:
             output_path = await asyncio.to_thread(
-                model.generate_t2v, request, progress_callback
+                model.generate_t2v, request, None
             )
 
         # Calculate duration
@@ -190,18 +189,16 @@ async def _run_t2v_job(job_id: str, model_name: str, request: T2VRequest) -> Non
 async def _run_i2v_job(job_id: str, model_name: str, request: I2VRequest) -> None:
     """Background task for I2V generation."""
     start_time = time.time()
+    _job_start_times[job_id] = start_time
     _jobs[job_id].status = "processing"
 
-    def progress_callback(pipe, step, timestep, callback_kwargs):
-        _jobs[job_id].current_step = step + 1
-        _jobs[job_id].progress = (step + 1) / request.num_inference_steps
-        _jobs[job_id].elapsed_seconds = time.time() - start_time
-        return callback_kwargs
+    # Note: HunyuanVideo15ImageToVideoPipeline doesn't support progress callbacks
+    # Progress will show as "processing" until complete
 
     try:
         async with vram_manager.acquire_gpu(model_name) as model:
             output_path = await asyncio.to_thread(
-                model.generate_i2v, request, progress_callback
+                model.generate_i2v, request, None
             )
 
         # Calculate duration
@@ -255,7 +252,12 @@ async def get_job_status(job_id: str) -> VideoStatusResponse:
             )
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
-    return _jobs[job_id]
+    # Calculate elapsed time for in-progress jobs
+    job = _jobs[job_id]
+    if job.status == "processing" and job_id in _job_start_times:
+        job.elapsed_seconds = time.time() - _job_start_times[job_id]
+
+    return job
 
 
 @router.get("/download/{job_id}")
