@@ -1336,6 +1336,7 @@ Results:
       <h4>Random Built-ins <code>[variable]</code></h4>
       <p>Random values picked fresh for each image:</p>
       <table>
+        <tr><td><code>[occupation]</code></td><td>teacher, nurse, waitress, police officer, etc.</td></tr>
         <tr><td><code>[location]</code></td><td>bedroom, beach, forest, city street, etc.</td></tr>
         <tr><td><code>[time]</code></td><td>at dawn, at sunset, at night, etc.</td></tr>
         <tr><td><code>[weather]</code></td><td>sunny, rainy, foggy, stormy, etc.</td></tr>
@@ -1699,7 +1700,7 @@ Results:
         });
 
       container.innerHTML = sorted.map(h => `
-        <div class="history-item" onclick="applyHistoryItem(${h.origIndex})">
+        <div class="history-item" onclick="applyHistoryItem(${h.origIndex})" title="${escapeHtml(h.prompt)}">
           <button class="fav-btn ${h.favorite ? 'active' : ''}" onclick="event.stopPropagation(); toggleFavoriteHistory(${h.origIndex})" title="${h.favorite ? 'Unpin' : 'Pin'}">&#9733;</button>
           <span class="prompt-text">${escapeHtml(h.prompt)}</span>
           <button class="btn-danger btn-small delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${h.origIndex})">x</button>
@@ -3192,6 +3193,9 @@ with open("image.png", "wb") as f:
 
     // Built-in random variables
     const BUILTIN_VARS = {
+      occupation: [
+        'teacher', 'professor', 'nurse', 'doctor', 'surgeon', 'dentist', 'therapist', 'psychologist', 'veterinarian', 'pharmacist', 'paramedic', 'waitress', 'bartender', 'barista', 'chef', 'baker', 'hostess', 'flight attendant', 'stewardess', 'receptionist', 'secretary', 'office worker', 'businesswoman', 'CEO', 'manager', 'accountant', 'lawyer', 'judge', 'paralegal', 'police officer', 'detective', 'FBI agent', 'CIA agent', 'security guard', 'bodyguard', 'soldier', 'marine', 'pilot', 'firefighter', 'lifeguard', 'athlete', 'gymnast', 'dancer', 'ballerina', 'cheerleader', 'yoga instructor', 'personal trainer', 'fitness model', 'actress', 'model', 'singer', 'musician', 'DJ', 'influencer', 'streamer', 'journalist', 'news anchor', 'reporter', 'photographer', 'artist', 'painter', 'sculptor', 'fashion designer', 'stylist', 'makeup artist', 'hairdresser', 'beautician', 'masseuse', 'spa therapist', 'real estate agent', 'tour guide', 'librarian', 'archivist', 'scientist', 'researcher', 'engineer', 'programmer', 'hacker', 'astronaut', 'archaeologist', 'historian', 'diplomat', 'politician', 'princess', 'queen', 'duchess', 'countess', 'noblewoman', 'nun', 'priestess', 'witch', 'sorceress', 'fortune teller', 'stripper', 'escort', 'cam girl', 'porn star', 'dominatrix', 'prostitute', 'call girl', 'sugar baby', 'maid', 'housekeeper', 'nanny', 'au pair', 'babysitter', 'servant', 'slave', 'concubine', 'geisha', 'courtesan', 'showgirl', 'bunny girl', 'booth babe', 'ring girl', 'go-go dancer', 'exotic dancer', 'burlesque dancer', 'casino dealer', 'croupier', 'cocktail waitress', 'hooters girl', 'grid girl', 'umbrella girl', 'promo girl', 'spokesmodel', 'swimsuit model', 'lingerie model', 'nude model', 'art model', 'fetish model'
+      ],
       location: [
         'bedroom', 'living room', 'kitchen', 'bathroom', 'rooftop terrace', 'urban street', 'city alley', 'downtown plaza', 'subway station', 'parking garage', 'beach', 'tropical island', 'lakeside', 'riverbank', 'waterfall', 'forest', 'jungle', 'mountain peak', 'desert dunes', 'snowy wilderness', 'film studio', 'art gallery', 'library', 'coffee shop', 'nightclub', 'castle hall', 'space station', 'underwater ruins', 'neon-lit arcade', 'zen garden', 'slave-market', 'striptease-club', 'brothel', 'back alley', 'arena', 'carnival', 'slum district', 'industrial factory', 'abandoned warehouse', 'school', 'university campus', 'hospital room', 'laboratory', 'labor camp', 'landfill site', 'junkyard', 'construction site', 'docks', 'ship deck', 'train yard', 'airport hangar', 'BDSM dungeon', 'torture chamber', 'prison cell', 'execution ground', 'street-market', 'bazaar', 'temple courtyard', 'monastery garden', 'ruined city', 'apocalyptic wasteland', 'old ruins', 'grocery store', 'shopping mall', 'office building', 'skyscraper rooftop', 'concert stage', 'theater auditorium', 'opera house', 'ballroom', 'wine cellar', 'dining hall', 'kitchenette', 'pantry', 'laundry room', 'changing room', 'locker room', 'gymnasium', 'spa room', 'sauna', 'steam room', 'hot tub area', 'porn studio', 'fetish club', 'dark room', 'playroom', 'interrogation room', 'medieval dungeon', 'enchanted forest', 'magical academy', 'futuristic cityscape', 'cyberpunk alleyway', 'steampunk workshop'
       ],
