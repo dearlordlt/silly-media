@@ -6,12 +6,13 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides three main capabilities:
+Silly Media provides four main capabilities:
 - **Image Generation**: Text-to-image using diffusion models
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
+- **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
 
-The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model type (image, audio, or video) can be active at a time.
+The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model can be active at a time.
 
 ---
 
@@ -38,6 +39,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 |-------|-----|------|-------|
 | HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | T2V and I2V, 480p/720p, ~60-90s generation |
 
+### Vision Models
+
+| Model | ID | VRAM | Notes |
+|-------|-----|------|-------|
+| Qwen3-VL 8B | `qwen3-vl-8b` | ~18GB | Image analysis, OCR, visual Q&A, 256K context |
+
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 **Model comparison:**
@@ -59,7 +66,8 @@ Check API and model status.
   "models_loaded": ["z-image-turbo"],
   "available_image_models": ["z-image-turbo", "ovis-image-7b"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
-  "available_video_models": ["hunyuan-video"]
+  "available_video_models": ["hunyuan-video"],
+  "available_vision_models": ["qwen3-vl-8b"]
 }
 ```
 
@@ -80,6 +88,10 @@ List available and loaded models by type.
   },
   "video": {
     "available": ["hunyuan-video"],
+    "loaded": []
+  },
+  "vision": {
+    "available": ["qwen3-vl-8b"],
     "loaded": []
   }
 }
@@ -1062,6 +1074,93 @@ Get list of generated videos.
 
 ---
 
+## Vision Analysis
+
+Vision analysis allows you to send an image along with a text query and receive a text response. This enables image understanding, description, OCR, visual question answering, and more.
+
+### Features
+
+- **Image Understanding**: Describe images, identify objects, read text (OCR)
+- **Visual Q&A**: Ask questions about image content
+- **Multi-language OCR**: Extract text from images in 32+ languages
+- **Flexible Input**: Send images as base64 JSON or multipart file upload
+- **Long Context**: 256K token context window for detailed analysis
+
+### `GET /vision/models`
+
+List available vision models.
+
+**Response**
+```json
+{
+  "available": ["qwen3-vl-8b"],
+  "loaded": []
+}
+```
+
+### `POST /vision/analyze`
+
+Analyze an image with a text query using base64-encoded image in JSON body.
+
+**Request Body**
+```json
+{
+  "image": "base64_encoded_image_data...",
+  "query": "What is in this image?",
+  "max_tokens": null,
+  "temperature": 0.7
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | string | Yes | - | Base64 encoded image (PNG, JPG, WebP) |
+| `query` | string | Yes | - | Question or instruction about the image |
+| `max_tokens` | int | No | `null` | Maximum tokens in response (null = model default) |
+| `temperature` | float | No | `0.7` | Sampling temperature for response generation |
+
+**Response**
+```json
+{
+  "response": "This image shows a red panda sitting on a tree branch, eating bamboo leaves. The panda has distinctive reddish-brown fur with white markings on its face.",
+  "model": "qwen3-vl-8b"
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Missing image field or invalid image data |
+| 500 | Analysis failed |
+
+### `POST /vision/analyze/upload`
+
+Analyze an image with a text query using multipart file upload.
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | file | Yes | - | Image file to analyze |
+| `query` | string | Yes | - | Question or instruction about the image |
+| `max_tokens` | int | No | `null` | Maximum tokens in response |
+| `temperature` | float | No | `0.7` | Sampling temperature |
+
+**Response**
+```json
+{
+  "response": "The image contains a handwritten note that says: 'Meeting at 3pm in conference room B'",
+  "model": "qwen3-vl-8b"
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid image file |
+| 500 | Analysis failed |
+
+---
+
 ## Examples
 
 ### Image Generation
@@ -1301,6 +1400,85 @@ curl -X POST http://localhost:4201/video/i2v/hunyuan-video \
     \"resolution\": \"480p\",
     \"num_frames\": 61
   }"
+```
+
+### Vision Analysis
+
+#### Analyze Image (Base64 JSON)
+
+```bash
+# Encode image to base64
+IMAGE_B64=$(base64 -w 0 photo.jpg)
+
+# Analyze the image
+curl -X POST http://localhost:4201/vision/analyze \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image\": \"$IMAGE_B64\",
+    \"query\": \"Describe this image in detail\"
+  }"
+```
+
+#### Analyze Image (File Upload)
+
+```bash
+curl -X POST http://localhost:4201/vision/analyze/upload \
+  -F "image=@photo.jpg" \
+  -F "query=What objects are in this image?"
+```
+
+#### OCR - Extract Text from Image
+
+```bash
+curl -X POST http://localhost:4201/vision/analyze/upload \
+  -F "image=@document.png" \
+  -F "query=Extract all the text from this image"
+```
+
+#### Visual Q&A
+
+```bash
+curl -X POST http://localhost:4201/vision/analyze/upload \
+  -F "image=@chart.png" \
+  -F "query=What is the highest value shown in this chart?"
+```
+
+### Python Client (Vision)
+
+```python
+import base64
+import requests
+
+# Method 1: Base64 JSON
+with open("photo.jpg", "rb") as f:
+    image_b64 = base64.b64encode(f.read()).decode()
+
+response = requests.post(
+    "http://localhost:4201/vision/analyze",
+    json={
+        "image": image_b64,
+        "query": "What is in this image?",
+    },
+)
+print(response.json()["response"])
+
+# Method 2: File upload
+with open("photo.jpg", "rb") as f:
+    response = requests.post(
+        "http://localhost:4201/vision/analyze/upload",
+        files={"image": f},
+        data={"query": "Describe this image"},
+    )
+print(response.json()["response"])
+
+# OCR example
+with open("document.png", "rb") as f:
+    response = requests.post(
+        "http://localhost:4201/vision/analyze/upload",
+        files={"image": f},
+        data={"query": "Extract all text from this image"},
+    )
+print(response.json()["response"])
 ```
 
 ---

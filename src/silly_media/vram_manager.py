@@ -23,6 +23,7 @@ class ModelType(Enum):
     IMAGE = "image"
     AUDIO = "audio"
     VIDEO = "video"
+    VISION = "vision"
 
 
 class Loadable(Protocol):
@@ -64,6 +65,7 @@ class VRAMManager:
         "xtts-v2": 2.0,
         "demucs": 2.0,
         "maya": 16.0,
+        "qwen3-vl-8b": 18.0,
     }
 
     def __new__(cls) -> "VRAMManager":

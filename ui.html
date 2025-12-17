@@ -1352,6 +1352,8 @@ Results:
         <tr><td><code>[haircolor]</code></td><td>blonde, brunette, red, black, pink, etc.</td></tr>
         <tr><td><code>[hairstyle-color]</code></td><td>combines both: with long wavy blonde hair, with a red ponytail</td></tr>
         <tr><td><code>[bodytype]</code></td><td>petite body, slender figure, athletic build, hourglass figure, etc.</td></tr>
+        <tr><td><code>[creature]</code></td><td>elf, orc, vampire, succubus, nymph, tiefling, catgirl, etc.</td></tr>
+        <tr><td><code>[X-creature]</code></td><td>prefix + random creature: [female-creature] → female elf, [male-creature] → male orc</td></tr>
         <tr><td><code>[accessory]</code></td><td>glasses, hat, choker, tattoo, earrings, gloves, etc.</td></tr>
       </table>
 
@@ -3234,12 +3236,26 @@ with open("image.png", "wb") as f:
         'blonde', 'platinum blonde', 'golden blonde', 'strawberry blonde', 'brunette', 'brown', 'light brown', 'dark brown', 'chestnut', 'black', 'jet black', 'raven', 'red', 'ginger', 'auburn', 'copper',  'gray', 'silver', 'white', 'pink', 'blue', 'purple', 'green', 'rainbow', 'ombre'
       ],
       bodytype: [
-        'petite body', 'slender figure', 'athletic build', 'curvy figure', 'voluptuous body', 'muscular physique', 'toned body', 'lithe frame', 'willowy figure', 'buxom figure', 'hourglass figure', 'lean build', 'fit body', 'narrow waist', 'thick thighs', 'wide hips', 'slim waist'
+        'petite body', 'slender figure', 'athletic build', 'curvy figure', 'voluptuous body', 'muscular physique', 'toned body', 'lithe frame', 'willowy figure', 'buxom figure', 'hourglass figure', 'lean build', 'fit body', 'narrow waist', 'thick thighs', 'wide hips', 'slim waist', 'skinny body', 'defined abs', 'very short', 'round ass', 'gymnast physique', 'smooth curves', 'defined curves', 'sleek silhouette', 'graceful figure', 'elegant body', 'pear body'
       ],
       accessory: [
         'glasses', 'sunglasses', 'hat', 'cap', 'beanie', 'headband', 'tiara', 'crown', 'earrings', 'hoop earrings', 'necklace', 'choker', 'pendant', 'collar', 'dog collar', 'bracelet', 'watch', 'rings', 'belt', 'scarf', 'bow', 'ribbon', 'tattoo', 'sleeve tattoo', 'piercings', 'gloves', 'fingerless gloves', 'mask', 'blindfold', 'gag', 'leash', 'cuffs', 'anklet', 'humiliating tattoo', 'slave brand', 'nipple clamps', 'collar and leash', 'spiked collar', 'bondage ropes', 'shackles', 'manacles', 'chains', 'dirt', 'bowine patterns', 'fishnet stockings', 'lace gloves', 'lace stockings', 'garter belt', 'corset', 'fetish harness', 'latex outfit', 'leather outfit', 'PVC outfit', 'bondage gear', 'fetish mask', 'eye patch', 'corset', 'fetish heels', 'thigh high boots', 'platform boots', 'stiletto heels', 'collared leash',  'cat ears', 'dog ears', 'rabbit ears', 'cow ears', 'cow bell', 'playboy bunny outfit', 'maid headband', 'nurse hat', 'schoolgirl bow', 'police hat', 'military cap', 'sailor hat', 'witch hat', 'maid headpiece', 'skimpy outfit', 'sexy costume', 'lacy lingerie', 'bikini', 'swimsuit', 'corset and garter belt', 'fishnet bodysuit', 'latex catsuit', 'leather harness', 'bondage outfit', 'fetish wear', 'dominatrix attire', 'submissive outfit', 'slave outfit', 'sexy uniform', 'roleplay costume', 'naughty outfit', 'erotic lacy lingerie', 'transparent clothing', 'see-through outfit', 'barely-there outfit', 'micro bikini', 'pasties', 'crotchless panties', 'open-cup bra', 'bondage hood', 'full-body harness', 'restraint system', 'nipple pasties', 'anal hook', 'spreaders', 'chastity device', 'shock collar', 'tattoo with word \'SLUT\'', 'tattoo with word \'WHORE\'', 'tattoo with word \'SLAVE\'', 'tattoo with word \'PROPERTY\'', 'branding mark', 'slave ankle bracelet', 'skimpy thong', 'lace thong', 'g-string', 'crotchless thong', 'bowtie collar', 'leather collar', 'spiked leash', 'bondage mittens', 'latex gloves', 'fetish stockings', 'fishnet gloves', 'lace garter', 'fetish wrist cuffs', 'bondage ankle cuffs', 'collared harness', 'thorn clothes', 'rags', 'geisha outfit', 'kimono', 'sari', 'hanbok', 'cheongsam', 'yukata', 'bikini armor', 'slave bikini', 'chainmail lingerie', 'leather bikini', 'latex lingerie', 'bondage lingerie', 'fetish lingerie', 'erotic costume', 'sexy armor', 'naughty nurse outfit', 'sexy schoolgirl outfit', 'sexy police outfit', 'sexy maid outfit', 'sexy military outfit', 'sexy sailor outfit', 'sexy witch outfit', 'slutty cow costume', 'prostitute outfit', 'nipple clamps', 'dirt', 'feather', 'gag', 'pencil skirt', 'appron', 'see-through babydoll', '\'slut\' choker', 'heart pasties under mesh top', 'bunny tail plug visible', 'cat ears with whisker chains', 'schoolgirl collar', 'maid apron over lingerie', 'cheer pom-pom nipple covers', 'nurse hat with stethoscope garter', 'devil horns and tail', 'angel wings with halo thong', 'pirate eyepatch on nipple', 'superhero cape over crotchless suit', '\'property\' name tag', 'leash handle on belt loop', 'jingle bell anklets', 'glow-in-dark arrow \'insert here\'', 'tassel earrings to breast level', 'micro bikini with \'free use\' tag', 'stockings with \'upskirt\' label', 'ninja mask with slit eye pasties', 'santa hat \'ho ho hoe\' bell', 'elf ears connected to nipple rings', 'reindeer antler headband with tail plug', 'gingerbread man cookie cutter garter', 'snowflake pasties under sheer sweater', 'candy cane striped thong visible', 'hot cocoa mug apron \'warm me up\'', 'fireplace stocking garter \'hang here\'', 'ornament ball earrings to breast chain', 'wrapping paper bow on crotch', 'gift tag \'open me\' on thigh', 'tinsel garland nipple wrap', 'poinsettia flower clit pin', 'icicle dangle labia jewelry', 'snowman carrot nose plug tail', 'jingle bell nipple bells', 'frosty scarf with \'melt me\' tag', 'polar bear ear headband collar', 'penguin flipper armbands \'waddle for daddy\'', 'eskimo parka hood over exposed pasties', 'igloo door flap micro skirt', 'aurora borealis glow stick harness', 'winter solstice \'dark slut\' choker', 'yule log garter with flame pasties', 'mistletoe branch hanging from navel', 'holly berry nipple studs', 'ivy vine thigh tattoo chain', 'druid robe slit to waist \'nature\'s whore\'', 'pagan horn crown \'fertility goddess\' tag', 'Wonder Woman costume', 'clown makeup'
+      ],
+      creature: [
+        'elf', 'dark elf', 'high elf', 'wood elf', 'orc', 'half-orc', 'goblin', 'hobgoblin', 'troll', 'ogre', 'dwarf', 'gnome', 'halfling', 'human', 'tiefling', 'aasimar', 'genasi', 'dragonborn', 'lizardfolk', 'kobold', 'drow', 'vampire', 'werewolf', 'demon', 'devil', 'angel', 'fairy', 'pixie', 'sprite', 'nymph', 'dryad', 'satyr', 'centaur', 'minotaur', 'harpy', 'siren', 'mermaid', 'lamia', 'gorgon', 'sphinx', 'witch', 'warlock', 'necromancer', 'lich', 'ghost', 'wraith', 'specter', 'banshee', 'zombie', 'ghoul', 'skeleton', 'revenant', 'cambion', 'half-demon', 'shapeshifter', 'doppelganger', 'kitsune', 'android', 'cyborg', 'alien', 'mind flayer', 'yuan-ti', 'naga', 'giant', 'oni', 'yokai', 'kappa', 'tengu', 'djinn', 'genie', 'efreeti', 'marid', 'succubus', 'incubus'
       ]
     };
+
+    // Capitalize first letter of each word
+    function capitalizeWords(str) {
+      return str.replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    // Combine any prefix with a random creature: [female-creature] -> "female Elf", [male-creature] -> "male Orc"
+    function getPrefixedCreature(prefix) {
+      const creature = getRandomBuiltin('creature');
+      return prefix + ' ' + capitalizeWords(creature);
+    }
 
     // Combine hairstyle with color: "with long wavy hair" + "blonde" = "with long wavy blonde hair"
     function getHairstyleWithColor() {
@@ -3271,6 +3287,12 @@ with open("image.png", "wb") as f:
       // First, replace special combo variables like [hairstyle-color]
       let result = template.replace(/\[hairstyle-color\]/gi, () => getHairstyleWithColor());
 
+      // Replace [prefix-creature] patterns like [female-creature], [male-creature], [ancient-creature]
+      result = result.replace(/\[(\w+)-creature\]/gi, (match, prefix) => {
+        if (prefix.toLowerCase() === 'hairstyle') return match; // Skip [hairstyle-color] handled above
+        return getPrefixedCreature(prefix);
+      });
+
       // Then, replace number range variables [N-M] like [30-40]
       result = result.replace(/\[(\d+)-(\d+)\]/g, (match, min, max) => {
         const minNum = parseInt(min, 10);
@@ -3282,7 +3304,12 @@ with open("image.png", "wb") as f:
       // Then, replace built-in random variables [location], [time], etc.
       result = result.replace(/\[(\w+)\]/g, (match, key) => {
         const value = getRandomBuiltin(key);
-        return value !== null ? value : match;
+        if (value === null) return match;
+        // Capitalize creature and race
+        if (key.toLowerCase() === 'creature' || key.toLowerCase() === 'race') {
+          return capitalizeWords(value);
+        }
+        return value;
       });
 
       // Then, replace {variable} or {variable+N} or {variable-N}
