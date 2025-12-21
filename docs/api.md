@@ -6,8 +6,9 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides four main capabilities:
+Silly Media provides five main capabilities:
 - **Image Generation**: Text-to-image using diffusion models
+- **Image Editing (img2img)**: Edit existing images using AI-guided prompts
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
@@ -44,6 +45,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Model | ID | VRAM | Notes |
 |-------|-----|------|-------|
 | Qwen3-VL 8B | `qwen3-vl-8b` | ~18GB | Image analysis, OCR, visual Q&A, 256K context |
+
+### Img2Img Models
+
+| Model | ID | VRAM | Notes |
+|-------|-----|------|-------|
+| Qwen Image Edit | `qwen-image-edit` | ~20GB | AI-guided image editing with natural language prompts |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
@@ -229,6 +236,109 @@ Omit all sizing options for 1024×1024:
   "prompt": "a sunset over mountains"
 }
 ```
+
+---
+
+## Image Editing (Img2Img)
+
+Edit existing images using AI-guided natural language prompts. The model can change emotions, poses, backgrounds, styles, and more while preserving the original image structure.
+
+### Features
+
+- **Natural Language Editing**: Describe what changes you want in plain English
+- **Emotion Changes**: Make subjects happy, sad, angry, surprised, etc.
+- **Pose Adjustments**: Change body poses and positions
+- **Style Transfer**: Apply artistic styles or visual effects
+- **Preserve Dimensions**: Output matches input image dimensions by default
+
+### `GET /img2img/models`
+
+List available img2img models.
+
+**Response**
+```json
+{
+  "available": ["qwen-image-edit"],
+  "loaded": []
+}
+```
+
+### `POST /img2img/edit/{model}`
+
+Edit an image using base64-encoded image in JSON body.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model ID (e.g., `qwen-image-edit`) |
+
+**Request Body**
+```json
+{
+  "image": "base64_encoded_image_data...",
+  "prompt": "Make the person look happy and smiling",
+  "negative_prompt": " ",
+  "num_inference_steps": 20,
+  "true_cfg_scale": 4.0,
+  "seed": null,
+  "width": null,
+  "height": null
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | string | Yes | - | Base64 encoded image (PNG, JPG) |
+| `prompt` | string | Yes | - | Edit instruction for the image |
+| `negative_prompt` | string | No | `" "` | Negative prompt (model requires non-empty) |
+| `num_inference_steps` | int | No | `20` | Number of inference steps (1-100) |
+| `true_cfg_scale` | float | No | `4.0` | CFG scale for guidance (1.0-20.0) |
+| `seed` | int | No | `null` | Random seed (-1 or null for random) |
+| `width` | int | No | `null` | Output width (64-2048, defaults to input image width) |
+| `height` | int | No | `null` | Output height (64-2048, defaults to input image height) |
+
+**Response**
+- Content-Type: `image/png`
+- Body: Raw PNG bytes
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request or missing image field |
+| 404 | Model not found |
+| 500 | Edit failed |
+
+### `POST /img2img/edit/{model}/upload`
+
+Edit an image using multipart file upload.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model ID (e.g., `qwen-image-edit`) |
+
+**Request** (multipart/form-data)
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | file | Yes | - | Image file to edit |
+| `prompt` | string | Yes | - | Edit instruction for the image |
+| `negative_prompt` | string | No | `" "` | Negative prompt |
+| `num_inference_steps` | int | No | `20` | Number of inference steps |
+| `true_cfg_scale` | float | No | `4.0` | CFG scale for guidance |
+| `seed` | int | No | `null` | Random seed |
+| `width` | int | No | `null` | Output width (defaults to input image width) |
+| `height` | int | No | `null` | Output height (defaults to input image height) |
+
+**Response**
+- Content-Type: `image/png`
+- Body: Raw PNG bytes
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid image file |
+| 404 | Model not found |
+| 500 | Edit failed |
 
 ---
 
@@ -1186,6 +1296,43 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
   -o landscape.png
 ```
 
+### Image Editing (Img2Img)
+
+#### Edit Image (Base64 JSON)
+
+```bash
+# Encode image to base64
+IMAGE_B64=$(base64 -w 0 input.png)
+
+# Edit the image
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-edit \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image\": \"$IMAGE_B64\",
+    \"prompt\": \"Make the person look happy and smiling\"
+  }" \
+  -o edited.png
+```
+
+#### Edit Image (File Upload)
+
+```bash
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-edit/upload \
+  -F "image=@input.png" \
+  -F "prompt=Make the person look sad and melancholic" \
+  -o edited.png
+```
+
+#### Change Pose
+
+```bash
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-edit/upload \
+  -F "image=@portrait.png" \
+  -F "prompt=Change pose to sitting down" \
+  -F "num_inference_steps=25" \
+  -o sitting.png
+```
+
 ### TTS Generation
 
 #### Create an Actor
@@ -1273,6 +1420,7 @@ curl -X POST http://localhost:4201/tts/maya/actors \
 ### Python Client
 
 ```python
+import base64
 import requests
 
 # Image generation
@@ -1285,6 +1433,30 @@ response = requests.post(
     },
 )
 with open("image.png", "wb") as f:
+    f.write(response.content)
+
+# Image editing (img2img) - Base64 JSON
+with open("input.png", "rb") as f:
+    image_b64 = base64.b64encode(f.read()).decode()
+
+response = requests.post(
+    "http://localhost:4201/img2img/edit/qwen-image-edit",
+    json={
+        "image": image_b64,
+        "prompt": "Make the person look happy and smiling",
+    },
+)
+with open("edited.png", "wb") as f:
+    f.write(response.content)
+
+# Image editing (img2img) - File upload
+with open("input.png", "rb") as f:
+    response = requests.post(
+        "http://localhost:4201/img2img/edit/qwen-image-edit/upload",
+        files={"image": f},
+        data={"prompt": "Change pose to sitting down"},
+    )
+with open("edited_pose.png", "wb") as f:
     f.write(response.content)
 
 # TTS generation

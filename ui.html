@@ -3359,6 +3359,9 @@ Be thorough and specific in your description.`;
       { id: 'tired', label: 'Tired', prompt: 'Make the person look tired and sleepy' },
       { id: 'seductive', label: 'Seductive', prompt: 'Make the person look seductive and alluring' },
       { id: 'laughing', label: 'Laughing', prompt: 'Make the person laughing joyfully' },
+      { id: 'crying', label: 'Crying', prompt: 'Make the person crying emotionally' },
+      { id: 'serious', label: 'Serious', prompt: 'Make the person look serious and focused' },
+      { id: 'playful', label: 'Playful', prompt: 'Make the person look playful and mischievous' },
     ];
 
     const EDIT_POSES = [
@@ -3373,6 +3376,10 @@ Be thorough and specific in your description.`;
       { id: 'armsup', label: 'Arms Up', prompt: 'Change pose to arms raised above head' },
       { id: 'crossedarms', label: 'Crossed Arms', prompt: 'Change pose to arms crossed' },
       { id: 'handsonhips', label: 'Hands on Hips', prompt: 'Change pose to hands on hips' },
+      { id: 'handsbehindback', label: 'Hands Behind Back', prompt: 'Change pose to hands behind back' },
+      { id: 'spreadlegs', label: 'Spread Legs', prompt: 'Change pose to legs spread apart' },
+      {id: 'ready for sex', label: 'Lying Down Legs Open', prompt: 'Change pose to lying down with legs open' },
+      {id: 'doggystyle', label: 'Doggy Style Pose', prompt: 'Change pose to doggy style position, on all four\'s' },
     ];
 
     let selectedEmotions = new Set();
@@ -3664,6 +3671,9 @@ Be thorough and specific in your description.`;
 
           // Track for download
           editResultImages.push({ id: savedId, dataUrl, label });
+
+          // Show download button as soon as we have results
+          downloadBtn.style.display = 'inline-block';
 
           // Update progress
           progressFill.style.width = `${((i + 1) / prompts.length) * 100}%`;
