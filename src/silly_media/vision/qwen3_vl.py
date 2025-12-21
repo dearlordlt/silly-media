@@ -105,9 +105,8 @@ class Qwen3VLModel(BaseVisionModel):
         generate_kwargs = {
             "temperature": request.temperature,
             "do_sample": request.temperature > 0,
+            "max_new_tokens": request.max_tokens if request.max_tokens is not None else 16384,
         }
-        if request.max_tokens is not None:
-            generate_kwargs["max_new_tokens"] = request.max_tokens
 
         # Generate response
         with torch.inference_mode():
@@ -115,6 +114,13 @@ class Qwen3VLModel(BaseVisionModel):
 
         # Trim input tokens and decode
         generated_ids = output_ids[0][inputs["input_ids"].shape[1] :]
+
+        # Debug: log raw output
+        raw_response = self._processor.decode(generated_ids, skip_special_tokens=False)
+        logger.info(f"Raw response length: {len(generated_ids)} tokens")
+        logger.info(f"Raw response (first 500 chars): {raw_response[:500]}")
+
         response = self._processor.decode(generated_ids, skip_special_tokens=True)
+        logger.info(f"Clean response length: {len(response)} chars")
 
         return response.strip()

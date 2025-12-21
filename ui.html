@@ -608,6 +608,92 @@
       margin-top: 8px;
     }
 
+    /* Vision modal */
+    .vision-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .vision-modal.open {
+      display: flex;
+    }
+    .vision-modal-content {
+      display: flex;
+      gap: 24px;
+      max-width: 1400px;
+      max-height: 90vh;
+      width: 100%;
+    }
+    .vision-modal-image {
+      flex: 0 0 45%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .vision-modal-image img {
+      max-width: 100%;
+      max-height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    .vision-modal-text {
+      flex: 1;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 20px;
+      overflow-y: auto;
+      max-height: 80vh;
+    }
+    .vision-modal-text h3 {
+      margin: 0 0 16px 0;
+      color: var(--accent);
+      font-size: 1.2rem;
+    }
+    .vision-response-text {
+      line-height: 1.7;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    .vision-loading {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    .vision-loading::after {
+      content: '';
+      animation: dots 1.5s infinite;
+    }
+    @keyframes dots {
+      0%, 20% { content: ''; }
+      40% { content: '.'; }
+      60% { content: '..'; }
+      80%, 100% { content: '...'; }
+    }
+    .vision-error {
+      color: #ef4444;
+    }
+    @media (max-width: 900px) {
+      .vision-modal-content {
+        flex-direction: column;
+      }
+      .vision-modal-image {
+        flex: 0 0 auto;
+      }
+      .vision-modal-image img {
+        max-height: 40vh;
+      }
+      .vision-modal-text {
+        max-height: 45vh;
+      }
+    }
+
     /* Thumbnail strip */
     .thumbnail-strip {
       display: flex;
@@ -1303,6 +1389,7 @@
       <div class="modal-actions">
         <button class="btn-secondary btn-small" onclick="downloadImage(currentModalId)">Download</button>
         <button class="btn-secondary btn-small" onclick="reuseSettings(currentModalId)">Reuse Settings</button>
+        <button class="btn-secondary btn-small" onclick="testVision(currentModalId)">Vision</button>
         <button class="btn-danger btn-small" onclick="deleteFromModal()">Delete</button>
       </div>
     </div>
@@ -1385,6 +1472,20 @@ Results:
       <div class="var-modal-actions">
         <button class="btn-secondary btn-small" onclick="clearVarHighlights()">Clear All</button>
         <button class="btn-secondary btn-small" onclick="closeVarModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vision Modal -->
+  <div class="vision-modal" id="visionModal" onclick="closeVisionModal(event)">
+    <button class="modal-close" onclick="closeVisionModal()">&times;</button>
+    <div class="vision-modal-content" onclick="event.stopPropagation()">
+      <div class="vision-modal-image">
+        <img id="visionModalImg" src="" alt="Analyzed image">
+      </div>
+      <div class="vision-modal-text">
+        <h3>Vision Analysis</h3>
+        <div id="visionModalResponse"></div>
       </div>
     </div>
   </div>
@@ -2220,6 +2321,7 @@ Results:
         ${promptHtml}
         <div class="preview-actions">
           <button class="btn-secondary btn-small" onclick="downloadImage(${id})">Download</button>
+          <button class="btn-secondary btn-small" onclick="testVision(${id})">Vision</button>
         </div>
       `;
     }
@@ -2417,6 +2519,7 @@ Results:
           <div class="overlay">
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); openModal(${img.id})">View</button>
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); downloadImage(${img.id})">Save</button>
+            <button class="btn-secondary btn-small" onclick="event.stopPropagation(); testVision(${img.id})">Vision</button>
           </div>
         </div>
       `}).join('');
@@ -2929,6 +3032,73 @@ with open("image.png", "wb") as f:
       toast.textContent = message;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Vision API testing
+    const VISION_PROMPT = `Describe this image in comprehensive detail. Include:
+
+- The main subject(s) and their appearance
+- If there is a person and they appear to be a known public figure, celebrity, or fictional character, identify who they might be
+- For each person visible, estimate their age (provide your best guess as a specific number, e.g., "approximately 34 years old")
+- Location: identify where this might be (known landmark, city, country, or fictional location from a movie/game/book). If you can't identify a specific place, describe what type of location it appears to be
+- Colors, lighting, and atmosphere
+- Any text visible in the image
+- The overall mood or style
+- Notable details that stand out
+
+Be thorough and specific in your description.`;
+
+    async function testVision(id) {
+      const img = await getImage(id);
+      if (!img) {
+        showToast('Image not found');
+        return;
+      }
+
+      // Show modal with loading state
+      const modal = document.getElementById('visionModal');
+      const modalImg = document.getElementById('visionModalImg');
+      const responseEl = document.getElementById('visionModalResponse');
+
+      modalImg.src = img.data;
+      responseEl.innerHTML = '<div class="vision-loading">Analyzing image...</div>';
+      modal.classList.add('open');
+
+      try {
+        // Extract base64 data (remove data:image/...;base64, prefix)
+        const base64Data = img.data.split(',')[1];
+
+        const response = await fetch(`${getApiUrl()}/vision/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: base64Data,
+            query: VISION_PROMPT,
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || 'Vision analysis failed');
+        }
+
+        const data = await response.json();
+        // Format response with proper line breaks and styling
+        responseEl.innerHTML = formatVisionResponse(data.response);
+      } catch (error) {
+        responseEl.innerHTML = `<div class="vision-error">Error: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function formatVisionResponse(text) {
+      // Convert line breaks to <br> and wrap in paragraph
+      return `<div class="vision-response-text">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
+    }
+
+    function closeVisionModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('visionModal').classList.remove('open');
     }
 
     function showVariablesHelp() {

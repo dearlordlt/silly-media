@@ -42,8 +42,12 @@ async def analyze_image(request: VisionRequest):
 
     model_name = "qwen3-vl-8b"  # Default/only model for now
 
-    async with vram_manager.acquire_gpu(model_name) as model:
-        response = await asyncio.to_thread(model.analyze, request)
+    try:
+        async with vram_manager.acquire_gpu(model_name) as model:
+            response = await asyncio.to_thread(model.analyze, request)
+    except Exception as e:
+        logger.exception("Vision analysis failed")
+        raise HTTPException(500, f"Vision analysis failed: {e}")
 
     return VisionResponse(response=response, model=model_name)
 
