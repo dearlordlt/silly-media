@@ -173,20 +173,28 @@
       border-radius: var(--radius);
       min-height: 300px;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
       margin-bottom: 20px;
       position: relative;
-      overflow: hidden;
     }
     .preview-container img {
       max-width: 100%;
-      max-height: 70vh;
+      max-height: 60vh;
       object-fit: contain;
+      border-radius: var(--radius);
+    }
+    .preview-container .preview-prompt {
+      width: 100%;
+      box-sizing: border-box;
     }
     .preview-placeholder {
       color: var(--text-dim);
       text-align: center;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
     .preview-actions {
       position: absolute;
@@ -219,18 +227,34 @@
       to { width: 100%; }
     }
     .preview-prompt {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: rgba(0,0,0,0.3);
-      color: white;
-      padding: 12px;
+      background: var(--surface2);
+      color: var(--text);
+      padding: 10px 12px;
       font-size: 0.8rem;
       line-height: 1.4;
-      max-height: 30%;
+      max-height: 150px;
       overflow-y: auto;
-      text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+      border-radius: 0 0 var(--radius) var(--radius);
+      margin-top: -8px;
+    }
+    .preview-prompt:first-of-type {
+      border-radius: var(--radius) var(--radius) 0 0;
+      margin-top: 8px;
+    }
+    .preview-prompt + .preview-prompt {
+      border-radius: 0;
+      margin-top: 0;
+      border-top: 1px solid var(--border);
+    }
+    .preview-prompt-label {
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 4px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+    }
+    .preview-negative .preview-prompt-label {
+      color: #f87171;
     }
     .preview-prompt::-webkit-scrollbar { width: 4px; }
     .preview-prompt::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 2px; }
@@ -593,6 +617,17 @@
     .modal-prompt .var-builtin {
       color: #4ade80;
       font-weight: 600;
+    }
+    .modal-prompt-label {
+      font-weight: 600;
+      color: var(--accent);
+      margin-right: 6px;
+    }
+    .modal-negative {
+      margin-top: 4px;
+    }
+    .modal-negative .modal-prompt-label {
+      color: #f87171;
     }
     .modal-info {
       background: var(--surface);
@@ -1610,6 +1645,7 @@
     <div class="thumbnail-strip" id="thumbnailStrip" onclick="event.stopPropagation()"></div>
 
     <div class="modal-prompt" id="modalPrompt" onclick="event.stopPropagation()"></div>
+    <div class="modal-prompt modal-negative" id="modalNegative" onclick="event.stopPropagation()"></div>
 
     <div class="modal-info" onclick="event.stopPropagation()">
       <pre id="modalInfo"></pre>
@@ -2591,7 +2627,7 @@ Results:
     // Store current preview data for variable filtering
     let currentPreviewData = null;
 
-    function showPreview(url, id, prompt = null, template = null, variables = null, batchData = null, batchIndex = 0) {
+    function showPreview(url, id, prompt = null, template = null, variables = null, batchData = null, batchIndex = 0, negative_prompt = null) {
       const container = document.getElementById('previewContainer');
       let promptHtml = '';
 
@@ -2601,7 +2637,19 @@ Results:
       if (prompt) {
         // Use the already-resolved prompt with highlighting (don't regenerate random values!)
         // Always call highlightStoredPrompt to highlight builtin [] variables even without JSON variables
-        promptHtml = `<div class="preview-prompt" id="previewPrompt">${highlightStoredPrompt(prompt, variables || {}, batchData, batchIndex)}</div>`;
+        promptHtml = `<div class="preview-prompt" id="previewPrompt">
+          <div class="preview-prompt-label">Prompt:</div>
+          <div>${highlightStoredPrompt(prompt, variables || {}, batchData, batchIndex)}</div>
+        </div>`;
+      }
+
+      // Add negative prompt display if present
+      let negativeHtml = '';
+      if (negative_prompt && negative_prompt.trim() && negative_prompt.trim() !== ' ') {
+        negativeHtml = `<div class="preview-prompt preview-negative" id="previewNegative">
+          <div class="preview-prompt-label">Negative:</div>
+          <div>${escapeHtml(negative_prompt)}</div>
+        </div>`;
       }
 
       container.innerHTML = `
@@ -2610,6 +2658,7 @@ Results:
         <div class="debounce-bar" id="debounceBar" style="display:none"><div class="debounce-bar-fill" id="debounceBarFill"></div></div>
         <img src="${url}" alt="Generated image">
         ${promptHtml}
+        ${negativeHtml}
         <div class="preview-actions">
           <button class="btn-secondary btn-small" onclick="downloadImage(${id})">Download</button>
           <button class="btn-secondary btn-small" onclick="testVision(${id})">Vision</button>
@@ -2991,12 +3040,23 @@ Results:
 
       // Update prompt display with highlighting
       const modalPromptEl = document.getElementById('modalPrompt');
+      const modalNegativeEl = document.getElementById('modalNegative');
       const variables = img.settings?._variables || {};
       if (img.settings?.prompt) {
         // Always highlight - will catch builtin [] variables even without JSON variables
-        modalPromptEl.innerHTML = highlightStoredPrompt(img.settings.prompt, variables);
+        modalPromptEl.innerHTML = `<span class="modal-prompt-label">Prompt:</span> ${highlightStoredPrompt(img.settings.prompt, variables)}`;
+        modalPromptEl.style.display = 'block';
       } else {
-        modalPromptEl.innerHTML = '';
+        modalPromptEl.style.display = 'none';
+      }
+
+      // Update negative prompt display
+      const negPrompt = img.settings?.negative_prompt;
+      if (negPrompt && negPrompt.trim() && negPrompt.trim() !== ' ') {
+        modalNegativeEl.innerHTML = `<span class="modal-prompt-label">Negative:</span> ${escapeHtml(negPrompt)}`;
+        modalNegativeEl.style.display = 'block';
+      } else {
+        modalNegativeEl.style.display = 'none';
       }
 
       // Update name label
@@ -3630,7 +3690,7 @@ Be thorough and specific in your description.`;
           // Add naked variant first
           prompts.push({
             label: `${label} (Naked)`,
-            prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, exposed vagina, full frontal nudity`,
+            prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, anatomically correct vulva, realistic female genitalia, full frontal nudity`,
             negative_prompt: nakedNegative
           });
           // Add dressed variant
@@ -3767,6 +3827,7 @@ Be thorough and specific in your description.`;
           // Save edited image to same folder
           const settings = {
             prompt: prompt,
+            negative_prompt: negative_prompt,
             editLabel: label,
             originalId: editImageId
           };
