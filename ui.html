@@ -822,6 +822,37 @@
     .edit-actions button {
       flex: 1;
     }
+    .edit-clothes-option {
+      margin: 16px 0;
+      padding: 12px;
+      background: var(--surface2);
+      border-radius: 8px;
+    }
+    .edit-clothes-option label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    .edit-clothes-option input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+    }
+    .edit-clothes-option textarea {
+      margin-top: 10px;
+      min-height: 50px;
+      display: none;
+    }
+    .edit-clothes-option.enabled textarea {
+      display: block;
+    }
+    .edit-clothes-hint {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
     .edit-results {
       margin-top: 16px;
       border-top: 1px solid var(--surface2);
@@ -1710,6 +1741,15 @@ Results:
         <div class="edit-preset-section">
           <h4>Poses <button class="btn-secondary btn-small" onclick="toggleAllPoses()">All</button></h4>
           <div class="edit-preset-chips" id="poseChips"></div>
+        </div>
+
+        <div class="edit-clothes-option" id="editClothesOption">
+          <label>
+            <input type="checkbox" id="editClothesEnabled" onchange="toggleClothesOption()">
+            Generate with clothes (2x images per prompt)
+          </label>
+          <textarea id="editClothesPrompt" placeholder="Describe clothing: e.g., 'Business suit, high stockings, high heels'"></textarea>
+          <div class="edit-clothes-hint">Each emotion/pose will generate both naked and dressed versions</div>
         </div>
 
         <div class="edit-progress" id="editProgress" style="display:none">
@@ -3420,6 +3460,11 @@ Be thorough and specific in your description.`;
       document.getElementById('editModalImg').src = originalImg.data;
       document.getElementById('editCustomPrompt').value = '';
 
+      // Reset clothes option
+      document.getElementById('editClothesEnabled').checked = false;
+      document.getElementById('editClothesPrompt').value = '';
+      document.getElementById('editClothesOption').classList.remove('enabled');
+
       // Render chips
       renderEditChips();
 
@@ -3529,26 +3574,57 @@ Be thorough and specific in your description.`;
       renderEditChips();
     }
 
+    function toggleClothesOption() {
+      const checkbox = document.getElementById('editClothesEnabled');
+      const container = document.getElementById('editClothesOption');
+      if (checkbox.checked) {
+        container.classList.add('enabled');
+      } else {
+        container.classList.remove('enabled');
+      }
+    }
+
     function getEditPrompts() {
       const prompts = [];
+      const clothesEnabled = document.getElementById('editClothesEnabled').checked;
+      const clothesPrompt = document.getElementById('editClothesPrompt').value.trim();
+
+      // Helper to add prompt with optional clothing variants
+      const addPromptVariants = (label, basePrompt) => {
+        if (clothesEnabled && clothesPrompt) {
+          // Add naked variant first
+          prompts.push({
+            label: `${label} (Naked)`,
+            prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, exposed vagina, full frontal nudity`
+          });
+          // Add dressed variant
+          prompts.push({
+            label: `${label} (Dressed)`,
+            prompt: `${basePrompt}. Wearing ${clothesPrompt}`
+          });
+        } else {
+          // No clothing option, just add the base prompt
+          prompts.push({ label, prompt: basePrompt });
+        }
+      };
 
       // Add custom prompt if provided
       const customPrompt = document.getElementById('editCustomPrompt').value.trim();
       if (customPrompt) {
-        prompts.push({ label: 'Custom', prompt: customPrompt });
+        addPromptVariants('Custom', customPrompt);
       }
 
       // Add selected emotion prompts
       EDIT_EMOTIONS.forEach(e => {
         if (selectedEmotions.has(e.id)) {
-          prompts.push({ label: e.label, prompt: e.prompt });
+          addPromptVariants(e.label, e.prompt);
         }
       });
 
       // Add selected pose prompts
       EDIT_POSES.forEach(p => {
         if (selectedPoses.has(p.id)) {
-          prompts.push({ label: p.label, prompt: p.prompt });
+          addPromptVariants(p.label, p.prompt);
         }
       });
 
