@@ -1752,6 +1752,15 @@ Results:
           <div class="edit-clothes-hint">Each emotion/pose will generate both naked and dressed versions</div>
         </div>
 
+        <div class="edit-clothes-option" id="editNegativeOption">
+          <label>
+            <input type="checkbox" id="editNegativeEnabled" onchange="toggleNegativeOption()">
+            Custom negative prompt (override defaults)
+          </label>
+          <textarea id="editNegativePrompt" placeholder="Things to avoid in the image..."></textarea>
+          <div class="edit-clothes-hint">Default: ugly, deformed, low quality, blurry, male, penis, masculine</div>
+        </div>
+
         <div class="edit-progress" id="editProgress" style="display:none">
           <div class="edit-progress-bar">
             <div class="edit-progress-fill" id="editProgressFill"></div>
@@ -3465,6 +3474,11 @@ Be thorough and specific in your description.`;
       document.getElementById('editClothesPrompt').value = '';
       document.getElementById('editClothesOption').classList.remove('enabled');
 
+      // Reset negative prompt option
+      document.getElementById('editNegativeEnabled').checked = false;
+      document.getElementById('editNegativePrompt').value = '';
+      document.getElementById('editNegativeOption').classList.remove('enabled');
+
       // Render chips
       renderEditChips();
 
@@ -3584,10 +3598,31 @@ Be thorough and specific in your description.`;
       }
     }
 
+    function toggleNegativeOption() {
+      const checkbox = document.getElementById('editNegativeEnabled');
+      const container = document.getElementById('editNegativeOption');
+      if (checkbox.checked) {
+        container.classList.add('enabled');
+      } else {
+        container.classList.remove('enabled');
+      }
+    }
+
+    // Default negative prompts
+    const DEFAULT_NEGATIVE = 'ugly, deformed, disfigured, low quality, blurry, bad anatomy, extra limbs, male, penis, masculine, man, boy';
+    const CLOTHES_NEGATIVE = 'clothes, clothing, dressed, bra, underwear, panties, shirt, dress, bikini, swimsuit, lingerie';
+
     function getEditPrompts() {
       const prompts = [];
       const clothesEnabled = document.getElementById('editClothesEnabled').checked;
       const clothesPrompt = document.getElementById('editClothesPrompt').value.trim();
+      const negativeEnabled = document.getElementById('editNegativeEnabled').checked;
+      const customNegative = document.getElementById('editNegativePrompt').value.trim();
+
+      // Determine base negative prompt
+      const baseNegative = (negativeEnabled && customNegative) ? customNegative : DEFAULT_NEGATIVE;
+      // For naked variants, add clothes to negative
+      const nakedNegative = (negativeEnabled && customNegative) ? customNegative : `${DEFAULT_NEGATIVE}, ${CLOTHES_NEGATIVE}`;
 
       // Helper to add prompt with optional clothing variants
       const addPromptVariants = (label, basePrompt) => {
@@ -3595,16 +3630,18 @@ Be thorough and specific in your description.`;
           // Add naked variant first
           prompts.push({
             label: `${label} (Naked)`,
-            prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, exposed vagina, full frontal nudity`
+            prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, exposed vagina, full frontal nudity`,
+            negative_prompt: nakedNegative
           });
           // Add dressed variant
           prompts.push({
             label: `${label} (Dressed)`,
-            prompt: `${basePrompt}. Wearing ${clothesPrompt}`
+            prompt: `${basePrompt}. Wearing ${clothesPrompt}`,
+            negative_prompt: baseNegative
           });
         } else {
           // No clothing option, just add the base prompt
-          prompts.push({ label, prompt: basePrompt });
+          prompts.push({ label, prompt: basePrompt, negative_prompt: baseNegative });
         }
       };
 
@@ -3631,13 +3668,14 @@ Be thorough and specific in your description.`;
       return prompts;
     }
 
-    async function editSingleImage(base64Data, prompt) {
+    async function editSingleImage(base64Data, prompt, negative_prompt) {
       const response = await fetch(`${getApiUrl()}/img2img/edit/qwen-image-edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: base64Data,
           prompt: prompt,
+          negative_prompt: negative_prompt || ' ',
           num_inference_steps: 20,
           true_cfg_scale: 4.0
         })
@@ -3713,11 +3751,11 @@ Be thorough and specific in your description.`;
           break;
         }
 
-        const { label, prompt } = prompts[i];
+        const { label, prompt, negative_prompt } = prompts[i];
         progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
 
         try {
-          const blob = await editSingleImage(base64Data, prompt);
+          const blob = await editSingleImage(base64Data, prompt, negative_prompt);
 
           // Convert blob to data URL for thumbnail
           const dataUrl = await new Promise((resolve) => {
