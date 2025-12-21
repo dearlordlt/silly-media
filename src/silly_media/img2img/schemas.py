@@ -22,6 +22,12 @@ class Img2ImgRequest(BaseModel):
     seed: int | None = Field(
         default=None, ge=-1, description="Random seed (-1 or None for random)"
     )
+    width: int | None = Field(
+        default=None, ge=64, le=2048, description="Output width (defaults to input image width)"
+    )
+    height: int | None = Field(
+        default=None, ge=64, le=2048, description="Output height (defaults to input image height)"
+    )
 
 
 class Img2ImgResponse(BaseModel):

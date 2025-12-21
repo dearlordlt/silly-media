@@ -37,7 +37,8 @@ class QwenImageEditModel(BaseImg2ImgModel):
             self.model_id,
             torch_dtype=torch.bfloat16,
         )
-        self._pipe.to("cuda")
+        # Use CPU offloading to reduce peak VRAM usage during inference
+        self._pipe.enable_model_cpu_offload()
 
         self._loaded = True
         logger.info(f"{self.display_name} loaded")
@@ -85,13 +86,17 @@ class QwenImageEditModel(BaseImg2ImgModel):
         if image.mode != "RGB":
             image = image.convert("RGB")
 
+        # Use provided dimensions or fall back to original image size
+        width = request.width if request.width is not None else image.size[0]
+        height = request.height if request.height is not None else image.size[1]
+
         # Setup generator for reproducible results
         generator = None
         if request.seed is not None and request.seed >= 0:
             generator = torch.Generator(device="cuda").manual_seed(request.seed)
 
         logger.info(
-            f"Editing image: {image.size[0]}x{image.size[1]}, "
+            f"Editing image: {image.size[0]}x{image.size[1]} -> {width}x{height}, "
             f"steps={request.num_inference_steps}, cfg={request.true_cfg_scale}, "
             f"prompt={request.prompt[:50]}..."
         )
@@ -104,6 +109,8 @@ class QwenImageEditModel(BaseImg2ImgModel):
             "num_inference_steps": request.num_inference_steps,
             "true_cfg_scale": request.true_cfg_scale,
             "generator": generator,
+            "width": width,
+            "height": height,
         }
 
         # Add progress callback if supported

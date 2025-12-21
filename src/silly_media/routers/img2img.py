@@ -107,6 +107,8 @@ async def edit_image_upload(
     num_inference_steps: int = Form(20, description="Number of inference steps"),
     true_cfg_scale: float = Form(4.0, description="CFG scale"),
     seed: int | None = Form(None, description="Random seed (-1 or None for random)"),
+    width: int | None = Form(None, description="Output width (defaults to input image width)"),
+    height: int | None = Form(None, description="Output height (defaults to input image height)"),
 ):
     """Edit an image using the specified model with multipart upload.
 
@@ -134,6 +136,8 @@ async def edit_image_upload(
         num_inference_steps=num_inference_steps,
         true_cfg_scale=true_cfg_scale,
         seed=seed,
+        width=width,
+        height=height,
     )
 
     try:

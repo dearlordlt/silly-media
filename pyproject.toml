@@ -32,6 +32,7 @@ dependencies = [
     "imageio>=2.31.0",
     "imageio-ffmpeg>=0.4.8",
     "peft>=0.13.0",  # Required for LoRA loading in diffusers
+    "bitsandbytes>=0.41.0",  # Required for 4-bit quantized models (img2img)
 ]
 
 [project.optional-dependencies]

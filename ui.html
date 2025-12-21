@@ -365,11 +365,18 @@
       inset: 0;
       background: rgba(0,0,0,0.7);
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
+      align-content: center;
       justify-content: center;
-      gap: 8px;
+      gap: 6px;
+      padding: 8px;
       opacity: 0;
       transition: opacity 0.2s;
+    }
+    .gallery-item .overlay .btn-small {
+      padding: 4px 8px;
+      font-size: 0.7rem;
     }
     .gallery-item:hover .overlay { opacity: 1; }
     .gallery-item.selected { outline: 3px solid var(--accent); }
@@ -690,6 +697,195 @@
         max-height: 40vh;
       }
       .vision-modal-text {
+        max-height: 45vh;
+      }
+    }
+
+    /* Edit modal */
+    .edit-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.95);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .edit-modal.open {
+      display: flex;
+    }
+    .edit-modal-content {
+      display: flex;
+      gap: 24px;
+      max-width: 1400px;
+      max-height: 90vh;
+      width: 100%;
+    }
+    .edit-modal-image {
+      flex: 0 0 45%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .edit-modal-image img {
+      max-width: 100%;
+      max-height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    .edit-modal-controls {
+      flex: 1;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 20px;
+      overflow-y: auto;
+      max-height: 80vh;
+    }
+    .edit-modal-controls h3 {
+      margin: 0 0 16px 0;
+      color: var(--accent);
+      font-size: 1.2rem;
+    }
+    .edit-custom-prompt {
+      margin-bottom: 16px;
+    }
+    .edit-custom-prompt textarea {
+      min-height: 60px;
+      margin-bottom: 0;
+    }
+    .edit-preset-section {
+      margin: 16px 0;
+    }
+    .edit-preset-section h4 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    .edit-preset-section h4 button {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+    }
+    .edit-preset-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .edit-chip {
+      padding: 6px 14px;
+      background: var(--surface2);
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: all 0.2s;
+      user-select: none;
+    }
+    .edit-chip:hover {
+      background: var(--accent2);
+    }
+    .edit-chip.selected {
+      background: var(--accent);
+      color: white;
+    }
+    .edit-progress {
+      margin: 20px 0;
+    }
+    .edit-progress-bar {
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .edit-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      width: 0%;
+      transition: width 0.3s ease-out;
+    }
+    .edit-progress-text {
+      text-align: center;
+      margin-top: 8px;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+    .edit-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .edit-actions button {
+      flex: 1;
+    }
+    .edit-results {
+      margin-top: 16px;
+      border-top: 1px solid var(--surface2);
+      padding-top: 12px;
+    }
+    .edit-results h4 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 0 0 10px 0;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+    .edit-results h4 button {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+    }
+    .edit-results-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .edit-result-thumb {
+      position: relative;
+      width: 80px;
+      height: 80px;
+      border-radius: 6px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .edit-result-thumb:hover {
+      transform: scale(1.05);
+    }
+    .edit-result-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .edit-result-thumb .edit-result-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      font-size: 0.65rem;
+      padding: 2px 4px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 900px) {
+      .edit-modal-content {
+        flex-direction: column;
+      }
+      .edit-modal-image {
+        flex: 0 0 auto;
+      }
+      .edit-modal-image img {
+        max-height: 40vh;
+      }
+      .edit-modal-controls {
         max-height: 45vh;
       }
     }
@@ -1390,6 +1586,7 @@
         <button class="btn-secondary btn-small" onclick="downloadImage(currentModalId)">Download</button>
         <button class="btn-secondary btn-small" onclick="reuseSettings(currentModalId)">Reuse Settings</button>
         <button class="btn-secondary btn-small" onclick="testVision(currentModalId)">Vision</button>
+        <button class="btn-secondary btn-small" onclick="openEditModal(currentModalId)">Edit</button>
         <button class="btn-danger btn-small" onclick="deleteFromModal()">Delete</button>
       </div>
     </div>
@@ -1486,6 +1683,51 @@ Results:
       <div class="vision-modal-text">
         <h3>Vision Analysis</h3>
         <div id="visionModalResponse"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div class="edit-modal" id="editModal" onclick="closeEditModal(event)">
+    <button class="modal-close" onclick="closeEditModal()">&times;</button>
+    <div class="edit-modal-content" onclick="event.stopPropagation()">
+      <div class="edit-modal-image">
+        <img id="editModalImg" src="" alt="Image to edit">
+      </div>
+      <div class="edit-modal-controls">
+        <h3>Edit Image</h3>
+
+        <div class="edit-custom-prompt">
+          <label>Custom Prompt</label>
+          <textarea id="editCustomPrompt" placeholder="Enter custom edit instruction..."></textarea>
+        </div>
+
+        <div class="edit-preset-section">
+          <h4>Emotions <button class="btn-secondary btn-small" onclick="toggleAllEmotions()">All</button></h4>
+          <div class="edit-preset-chips" id="emotionChips"></div>
+        </div>
+
+        <div class="edit-preset-section">
+          <h4>Poses <button class="btn-secondary btn-small" onclick="toggleAllPoses()">All</button></h4>
+          <div class="edit-preset-chips" id="poseChips"></div>
+        </div>
+
+        <div class="edit-progress" id="editProgress" style="display:none">
+          <div class="edit-progress-bar">
+            <div class="edit-progress-fill" id="editProgressFill"></div>
+          </div>
+          <div class="edit-progress-text" id="editProgressText">0 / 0</div>
+        </div>
+
+        <div class="edit-actions">
+          <button class="btn-primary" id="editProceedBtn" onclick="proceedEdit()">Proceed</button>
+          <button class="btn-danger" id="editCancelBtn" onclick="cancelEdit()" style="display:none">Cancel</button>
+        </div>
+
+        <div class="edit-results" id="editResults" style="display:none">
+          <h4>Results <button class="btn-secondary btn-small" id="editDownloadAllBtn" onclick="downloadEditResults()" style="display:none">Download All</button></h4>
+          <div class="edit-results-grid" id="editResultsGrid"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -2322,6 +2564,7 @@ Results:
         <div class="preview-actions">
           <button class="btn-secondary btn-small" onclick="downloadImage(${id})">Download</button>
           <button class="btn-secondary btn-small" onclick="testVision(${id})">Vision</button>
+          <button class="btn-secondary btn-small" onclick="openEditModal(${id})">Edit</button>
         </div>
       `;
     }
@@ -2520,6 +2763,7 @@ Results:
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); openModal(${img.id})">View</button>
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); downloadImage(${img.id})">Save</button>
             <button class="btn-secondary btn-small" onclick="event.stopPropagation(); testVision(${img.id})">Vision</button>
+            <button class="btn-secondary btn-small" onclick="event.stopPropagation(); openEditModal(${img.id})">Edit</button>
           </div>
         </div>
       `}).join('');
@@ -3099,6 +3343,416 @@ Be thorough and specific in your description.`;
     function closeVisionModal(event) {
       if (event && event.target !== event.currentTarget) return;
       document.getElementById('visionModal').classList.remove('open');
+    }
+
+    // ========== Image Edit Modal ==========
+    const EDIT_EMOTIONS = [
+      { id: 'happy', label: 'Happy', prompt: 'Make the person look happy and smiling' },
+      { id: 'sad', label: 'Sad', prompt: 'Make the person look sad and melancholic' },
+      { id: 'angry', label: 'Angry', prompt: 'Make the person look angry and intense' },
+      { id: 'surprised', label: 'Surprised', prompt: 'Make the person look surprised and shocked' },
+      { id: 'scared', label: 'Scared', prompt: 'Make the person look scared and fearful' },
+      { id: 'disgusted', label: 'Disgusted', prompt: 'Make the person look disgusted' },
+      { id: 'confused', label: 'Confused', prompt: 'Make the person look confused and puzzled' },
+      { id: 'confident', label: 'Confident', prompt: 'Make the person look confident and proud' },
+      { id: 'shy', label: 'Shy', prompt: 'Make the person look shy and embarrassed' },
+      { id: 'tired', label: 'Tired', prompt: 'Make the person look tired and sleepy' },
+      { id: 'seductive', label: 'Seductive', prompt: 'Make the person look seductive and alluring' },
+      { id: 'laughing', label: 'Laughing', prompt: 'Make the person laughing joyfully' },
+    ];
+
+    const EDIT_POSES = [
+      { id: 'standing', label: 'Standing', prompt: 'Change pose to standing straight' },
+      { id: 'sitting', label: 'Sitting', prompt: 'Change pose to sitting down' },
+      { id: 'kneeling', label: 'Kneeling', prompt: 'Change pose to kneeling' },
+      { id: 'lying', label: 'Lying', prompt: 'Change pose to lying down' },
+      { id: 'leaning', label: 'Leaning', prompt: 'Change pose to leaning against something' },
+      { id: 'crouching', label: 'Crouching', prompt: 'Change pose to crouching' },
+      { id: 'walking', label: 'Walking', prompt: 'Change pose to walking' },
+      { id: 'bending', label: 'Bending', prompt: 'Change pose to bending over' },
+      { id: 'armsup', label: 'Arms Up', prompt: 'Change pose to arms raised above head' },
+      { id: 'crossedarms', label: 'Crossed Arms', prompt: 'Change pose to arms crossed' },
+      { id: 'handsonhips', label: 'Hands on Hips', prompt: 'Change pose to hands on hips' },
+    ];
+
+    let selectedEmotions = new Set();
+    let selectedPoses = new Set();
+    let editImageId = null;
+    let editCancelled = false;
+    let editResultImages = []; // Store {id, dataUrl, label} for download and persistence
+
+    async function openEditModal(id) {
+      const img = await getImage(id);
+      if (!img) {
+        showToast('Image not found');
+        return;
+      }
+
+      // Check if this image is part of an existing edit session
+      // Either it's the original, or it has originalId pointing to the original
+      let originalId = id;
+      let originalImg = img;
+
+      // If this image was edited from another, find the original
+      if (img.settings?.originalId) {
+        originalId = img.settings.originalId;
+        originalImg = await getImage(originalId);
+        if (!originalImg) {
+          // Original was deleted, use this image as the new original
+          originalId = id;
+          originalImg = img;
+        }
+      }
+
+      editImageId = originalId;
+      selectedEmotions.clear();
+      selectedPoses.clear();
+      editCancelled = false;
+
+      // Set image to original
+      document.getElementById('editModalImg').src = originalImg.data;
+      document.getElementById('editCustomPrompt').value = '';
+
+      // Render chips
+      renderEditChips();
+
+      // Reset UI state
+      document.getElementById('editProgress').style.display = 'none';
+      document.getElementById('editProceedBtn').style.display = 'block';
+      document.getElementById('editCancelBtn').style.display = 'none';
+
+      // Check for existing edit results from this original
+      await loadExistingEditResults(originalId, originalImg.data);
+
+      // Show modal
+      document.getElementById('editModal').classList.add('open');
+    }
+
+    async function loadExistingEditResults(originalId, originalDataUrl) {
+      const resultsEl = document.getElementById('editResults');
+      const resultsGrid = document.getElementById('editResultsGrid');
+      const downloadBtn = document.getElementById('editDownloadAllBtn');
+
+      // Clear previous results
+      resultsGrid.innerHTML = '';
+      editResultImages = [];
+
+      // Find all images that were edited from this original
+      const allImages = await getAllImages();
+      const editedImages = allImages.filter(img => img.settings?.originalId === originalId);
+
+      if (editedImages.length === 0) {
+        resultsEl.style.display = 'none';
+        downloadBtn.style.display = 'none';
+        return;
+      }
+
+      // Show results section
+      resultsEl.style.display = 'block';
+      downloadBtn.style.display = 'inline-block';
+
+      // Add original first
+      const originalThumb = document.createElement('div');
+      originalThumb.className = 'edit-result-thumb';
+      originalThumb.innerHTML = `
+        <img src="${originalDataUrl}" alt="Original">
+        <div class="edit-result-label">Original</div>
+      `;
+      originalThumb.onclick = () => previewEditResult(originalId, originalDataUrl);
+      resultsGrid.appendChild(originalThumb);
+      editResultImages.push({ id: originalId, dataUrl: originalDataUrl, label: 'Original' });
+
+      // Add edited images
+      for (const editedImg of editedImages) {
+        const label = editedImg.settings?.editLabel || 'Edited';
+        const thumb = document.createElement('div');
+        thumb.className = 'edit-result-thumb';
+        thumb.innerHTML = `
+          <img src="${editedImg.data}" alt="${label}">
+          <div class="edit-result-label">${label}</div>
+        `;
+        thumb.onclick = () => previewEditResult(editedImg.id, editedImg.data);
+        resultsGrid.appendChild(thumb);
+        editResultImages.push({ id: editedImg.id, dataUrl: editedImg.data, label });
+      }
+    }
+
+    function closeEditModal(event) {
+      if (event && event.target !== event.currentTarget) return;
+      document.getElementById('editModal').classList.remove('open');
+    }
+
+    function renderEditChips() {
+      // Render emotion chips
+      document.getElementById('emotionChips').innerHTML = EDIT_EMOTIONS.map(e =>
+        `<div class="edit-chip ${selectedEmotions.has(e.id) ? 'selected' : ''}" onclick="toggleEditChip('emotion', '${e.id}')">${e.label}</div>`
+      ).join('');
+
+      // Render pose chips
+      document.getElementById('poseChips').innerHTML = EDIT_POSES.map(p =>
+        `<div class="edit-chip ${selectedPoses.has(p.id) ? 'selected' : ''}" onclick="toggleEditChip('pose', '${p.id}')">${p.label}</div>`
+      ).join('');
+    }
+
+    function toggleEditChip(type, id) {
+      const set = type === 'emotion' ? selectedEmotions : selectedPoses;
+      if (set.has(id)) {
+        set.delete(id);
+      } else {
+        set.add(id);
+      }
+      renderEditChips();
+    }
+
+    function toggleAllEmotions() {
+      if (selectedEmotions.size === EDIT_EMOTIONS.length) {
+        selectedEmotions.clear();
+      } else {
+        EDIT_EMOTIONS.forEach(e => selectedEmotions.add(e.id));
+      }
+      renderEditChips();
+    }
+
+    function toggleAllPoses() {
+      if (selectedPoses.size === EDIT_POSES.length) {
+        selectedPoses.clear();
+      } else {
+        EDIT_POSES.forEach(p => selectedPoses.add(p.id));
+      }
+      renderEditChips();
+    }
+
+    function getEditPrompts() {
+      const prompts = [];
+
+      // Add custom prompt if provided
+      const customPrompt = document.getElementById('editCustomPrompt').value.trim();
+      if (customPrompt) {
+        prompts.push({ label: 'Custom', prompt: customPrompt });
+      }
+
+      // Add selected emotion prompts
+      EDIT_EMOTIONS.forEach(e => {
+        if (selectedEmotions.has(e.id)) {
+          prompts.push({ label: e.label, prompt: e.prompt });
+        }
+      });
+
+      // Add selected pose prompts
+      EDIT_POSES.forEach(p => {
+        if (selectedPoses.has(p.id)) {
+          prompts.push({ label: p.label, prompt: p.prompt });
+        }
+      });
+
+      return prompts;
+    }
+
+    async function editSingleImage(base64Data, prompt) {
+      const response = await fetch(`${getApiUrl()}/img2img/edit/qwen-image-edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64Data,
+          prompt: prompt,
+          num_inference_steps: 20,
+          true_cfg_scale: 4.0
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Edit failed');
+      }
+
+      return await response.blob();
+    }
+
+    async function proceedEdit() {
+      const prompts = getEditPrompts();
+      if (prompts.length === 0) {
+        showToast('Select at least one prompt or enter a custom prompt');
+        return;
+      }
+
+      const img = await getImage(editImageId);
+      if (!img) {
+        showToast('Image not found');
+        return;
+      }
+
+      // Get folder from original image
+      const folder = img.folder || null;
+
+      // Extract base64 data (remove data:image/...;base64, prefix)
+      const base64Data = img.data.split(',')[1];
+
+      // Show progress, hide proceed button, clear results
+      editCancelled = false;
+      const progressEl = document.getElementById('editProgress');
+      const progressFill = document.getElementById('editProgressFill');
+      const progressText = document.getElementById('editProgressText');
+      const proceedBtn = document.getElementById('editProceedBtn');
+      const cancelBtn = document.getElementById('editCancelBtn');
+      const resultsEl = document.getElementById('editResults');
+      const resultsGrid = document.getElementById('editResultsGrid');
+      const downloadBtn = document.getElementById('editDownloadAllBtn');
+
+      progressEl.style.display = 'block';
+      proceedBtn.style.display = 'none';
+      cancelBtn.style.display = 'block';
+      cancelBtn.textContent = 'Cancel';
+      progressFill.style.width = '0%';
+      progressText.textContent = `0 / ${prompts.length}`;
+
+      // Clear and show results section with original image first
+      resultsGrid.innerHTML = '';
+      resultsEl.style.display = 'block';
+      downloadBtn.style.display = 'none'; // Hide until we have results
+      editResultImages = []; // Clear tracked images
+
+      // Add original image as first thumbnail
+      const originalThumb = document.createElement('div');
+      originalThumb.className = 'edit-result-thumb';
+      originalThumb.innerHTML = `
+        <img src="${img.data}" alt="Original">
+        <div class="edit-result-label">Original</div>
+      `;
+      originalThumb.onclick = () => previewEditResult(editImageId, img.data);
+      resultsGrid.appendChild(originalThumb);
+      editResultImages.push({ id: editImageId, dataUrl: img.data, label: 'Original' });
+
+      let completed = 0;
+
+      for (let i = 0; i < prompts.length; i++) {
+        if (editCancelled) {
+          showToast(`Cancelled after ${completed} edit(s)`);
+          break;
+        }
+
+        const { label, prompt } = prompts[i];
+        progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
+
+        try {
+          const blob = await editSingleImage(base64Data, prompt);
+
+          // Convert blob to data URL for thumbnail
+          const dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+
+          // Save edited image to same folder
+          const settings = {
+            prompt: prompt,
+            editLabel: label,
+            originalId: editImageId
+          };
+          const savedId = await saveImage(blob, settings, folder);
+          completed++;
+
+          // Add thumbnail immediately
+          const thumb = document.createElement('div');
+          thumb.className = 'edit-result-thumb';
+          thumb.innerHTML = `
+            <img src="${dataUrl}" alt="${label}">
+            <div class="edit-result-label">${label}</div>
+          `;
+          thumb.onclick = () => previewEditResult(savedId, dataUrl);
+          resultsGrid.appendChild(thumb);
+
+          // Track for download
+          editResultImages.push({ id: savedId, dataUrl, label });
+
+          // Update progress
+          progressFill.style.width = `${((i + 1) / prompts.length) * 100}%`;
+
+          // Debounce between edits (2 seconds)
+          if (i < prompts.length - 1 && !editCancelled) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        } catch (error) {
+          console.error(`Failed to edit with "${label}":`, error);
+          showToast(`Error: ${error.message}`);
+          // Continue with next prompt
+        }
+      }
+
+      // Reset UI - keep results visible
+      progressEl.style.display = 'none';
+      proceedBtn.style.display = 'block';
+      cancelBtn.style.display = 'none';
+
+      if (completed > 0) {
+        showToast(`Created ${completed} edited image(s)`);
+        downloadBtn.style.display = 'inline-block'; // Show download button
+        await loadGallery();
+      }
+    }
+
+    function previewEditResult(id, dataUrl) {
+      // Show the edited image in the main preview area
+      document.getElementById('editModalImg').src = dataUrl;
+    }
+
+    async function downloadEditResults() {
+      if (editResultImages.length === 0) {
+        showToast('No images to download');
+        return;
+      }
+
+      const btn = document.getElementById('editDownloadAllBtn');
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Creating ZIP...';
+
+      try {
+        const zip = new JSZip();
+
+        for (let i = 0; i < editResultImages.length; i++) {
+          const { dataUrl, label } = editResultImages[i];
+          btn.textContent = `Zipping ${i + 1}/${editResultImages.length}...`;
+
+          // Determine extension from data URL
+          const ext = dataUrl.startsWith('data:image/png') ? 'png' :
+                      dataUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png';
+
+          // Create filename from label
+          const safeName = label.replace(/[<>:"/\\|?*]/g, '_').trim();
+          const filename = `${String(i).padStart(2, '0')}_${safeName}.${ext}`;
+
+          // Extract base64 data
+          const base64Data = dataUrl.split(',')[1];
+          zip.file(filename, base64Data, { base64: true });
+        }
+
+        btn.textContent = 'Generating ZIP...';
+
+        const content = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+          btn.textContent = `Compressing ${Math.round(metadata.percent)}%...`;
+        });
+
+        // Download the ZIP
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `edit-results-${Date.now()}.zip`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+
+        showToast(`Downloaded ${editResultImages.length} images as ZIP`);
+      } catch (error) {
+        console.error('ZIP creation failed:', error);
+        showToast('Failed to create ZIP');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    function cancelEdit() {
+      editCancelled = true;
+      document.getElementById('editCancelBtn').textContent = 'Cancelling...';
     }
 
     function showVariablesHelp() {
