@@ -3543,7 +3543,7 @@ Be thorough and specific in your description.`;
       { id: 'handsbehindback', label: 'Hands Behind Back', prompt: 'Change pose to hands behind back' },
       { id: 'spreadlegs', label: 'Spread Legs', prompt: 'Change pose to legs spread apart' },
       { id: 'ready for sex', label: 'Lying Down Legs Open', prompt: 'Change pose to lying down with legs open' },
-      { id: 'doggystyle', label: 'Doggy Style Pose', prompt: 'Change pose to doggy style position' },
+      { id: 'doggystyle', label: 'Doggy Style Pose', prompt: 'Change pose to crawling on hands and feets' },
       { id: 'dancing', label: 'Dancing', prompt: 'Change pose to dancing' },
     ];
 
@@ -3733,11 +3733,13 @@ Be thorough and specific in your description.`;
     // Edit progress polling and timing
     let editProgressInterval = null;
     let editBatchStartTime = null;
-    let editImageStartTime = null;
+    let editImageStartTime = null;      // When image request started (includes model loading)
+    let editInferenceStartTime = null;  // When actual inference steps started
     let editCompletedCount = 0;
-    let editTotalImageTime = 0;  // Actual generation time
-    let editTotalIdleTime = 0;   // Waiting/debounce time
+    let editTotalWorkTime = 0;   // Actual inference time (steps running)
+    let editTotalIdleTime = 0;   // Waiting/debounce/model loading time
     let editIdleStartTime = null;
+    let editWasActive = false;   // Track if inference was active last poll
 
     function startEditProgressPolling() {
       const stepFill = document.getElementById('editStepProgressFill');
@@ -3747,38 +3749,63 @@ Be thorough and specific in your description.`;
 
       editProgressInterval = setInterval(async () => {
         try {
-          // Calculate current idle time if in idle state
+          const response = await fetch(`${getApiUrl()}/img2img/progress`);
+          if (!response.ok) return;
+
+          const data = await response.json();
+          const isActive = data.active;
+
+          // Detect transition: idle -> active (inference started)
+          if (isActive && !editWasActive) {
+            // Accumulate idle time (model loading + debounce)
+            if (editIdleStartTime) {
+              editTotalIdleTime += (Date.now() - editIdleStartTime) / 1000;
+              editIdleStartTime = null;
+            }
+            // Start inference timer
+            editInferenceStartTime = Date.now();
+          }
+
+          // Detect transition: active -> idle (inference finished)
+          if (!isActive && editWasActive) {
+            // Accumulate work time
+            if (editInferenceStartTime) {
+              editTotalWorkTime += (Date.now() - editInferenceStartTime) / 1000;
+              editInferenceStartTime = null;
+            }
+            // Start idle timer (for debounce/next model load)
+            editIdleStartTime = Date.now();
+          }
+
+          editWasActive = isActive;
+
+          // Calculate current times
+          const currentWorkTime = editInferenceStartTime ? (Date.now() - editInferenceStartTime) / 1000 : 0;
           const currentIdleTime = editIdleStartTime ? (Date.now() - editIdleStartTime) / 1000 : 0;
+          const totalWork = editTotalWorkTime + currentWorkTime;
           const totalIdle = editTotalIdleTime + currentIdleTime;
 
           // Update batch elapsed time (work + idle breakdown)
           if (editBatchStartTime && batchTimeEl) {
-            const workTime = editTotalImageTime.toFixed(1);
-            const idleTime = totalIdle.toFixed(1);
-            const avgTime = editCompletedCount > 0 ? (editTotalImageTime / editCompletedCount).toFixed(1) : '—';
-            batchTimeEl.textContent = `work: ${workTime}s + idle: ${idleTime}s (avg: ${avgTime}s)`;
+            const avgTime = editCompletedCount > 0 ? (editTotalWorkTime / editCompletedCount).toFixed(1) : '—';
+            batchTimeEl.textContent = `work: ${totalWork.toFixed(1)}s + idle: ${totalIdle.toFixed(1)}s (avg: ${avgTime}s)`;
           }
 
-          // Update current image elapsed time (only when actively generating)
-          if (editImageStartTime && imageTimeEl) {
-            const imageElapsed = ((Date.now() - editImageStartTime) / 1000).toFixed(1);
-            imageTimeEl.textContent = `${imageElapsed}s`;
+          // Update current image elapsed time
+          if (isActive && imageTimeEl) {
+            imageTimeEl.textContent = `${currentWorkTime.toFixed(1)}s`;
           } else if (imageTimeEl && editIdleStartTime) {
             imageTimeEl.textContent = `idle ${currentIdleTime.toFixed(1)}s`;
           }
 
-          const response = await fetch(`${getApiUrl()}/img2img/progress`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.active) {
-              const percent = data.percent || 0;
-              if (stepFill) stepFill.style.width = `${percent}%`;
-              if (stepText) stepText.textContent = `Step ${data.step} / ${data.total_steps}`;
-            } else {
-              // Reset step progress when not active
-              if (stepFill) stepFill.style.width = '0%';
-              if (stepText) stepText.textContent = 'Waiting...';
-            }
+          // Update step progress
+          if (isActive) {
+            const percent = data.percent || 0;
+            if (stepFill) stepFill.style.width = `${percent}%`;
+            if (stepText) stepText.textContent = `Step ${data.step} / ${data.total_steps}`;
+          } else {
+            if (stepFill) stepFill.style.width = '0%';
+            if (stepText) stepText.textContent = 'Waiting...';
           }
         } catch (e) {
           // Ignore polling errors
@@ -3921,10 +3948,12 @@ Be thorough and specific in your description.`;
       document.getElementById('editImageTime').textContent = '';
       editBatchStartTime = Date.now();
       editImageStartTime = null;
+      editInferenceStartTime = null;
       editCompletedCount = 0;
-      editTotalImageTime = 0;
+      editTotalWorkTime = 0;
       editTotalIdleTime = 0;
-      editIdleStartTime = null;
+      editIdleStartTime = Date.now();  // Start in idle (model loading)
+      editWasActive = false;
 
       // Clear and show results section with original image first
       resultsGrid.innerHTML = '';
@@ -3957,21 +3986,10 @@ Be thorough and specific in your description.`;
         const { label, prompt, negative_prompt } = prompts[i];
         progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
 
-        // Stop idle timer and accumulate idle time (if coming from debounce)
-        if (editIdleStartTime) {
-          editTotalIdleTime += (Date.now() - editIdleStartTime) / 1000;
-          editIdleStartTime = null;
-        }
-
-        // Start timing for this image
-        editImageStartTime = Date.now();
-
         try {
           const blob = await editSingleImage(base64Data, prompt, negative_prompt);
 
-          // Track image completion time
-          const imageTime = (Date.now() - editImageStartTime) / 1000;
-          editTotalImageTime += imageTime;
+          // Increment completed count (timing is tracked by polling based on active state)
           editCompletedCount++;
 
           // Convert blob to data URL for thumbnail
@@ -4010,12 +4028,8 @@ Be thorough and specific in your description.`;
           // Update progress
           progressFill.style.width = `${((i + 1) / prompts.length) * 100}%`;
 
-          // Clear image timer and start idle timer before debounce
-          editImageStartTime = null;
-
-          // Debounce between edits (2 seconds)
+          // Debounce between edits (2 seconds) - idle time tracked by polling
           if (i < prompts.length - 1 && !editCancelled) {
-            editIdleStartTime = Date.now();
             await new Promise(r => setTimeout(r, 2000));
           }
         } catch (error) {
@@ -4028,7 +4042,9 @@ Be thorough and specific in your description.`;
       // Stop progress polling and clear timers
       stopEditProgressPolling();
       editImageStartTime = null;
+      editInferenceStartTime = null;
       editIdleStartTime = null;
+      editWasActive = false;
 
       // Show final stats
       const batchTimeEl = document.getElementById('editBatchTime');
@@ -4038,8 +4054,8 @@ Be thorough and specific in your description.`;
 
       if (completed > 0) {
         // Show final timing stats
-        const avgTime = (editTotalImageTime / editCompletedCount).toFixed(1);
-        batchTimeEl.textContent = `work: ${editTotalImageTime.toFixed(1)}s + idle: ${editTotalIdleTime.toFixed(1)}s (avg: ${avgTime}s)`;
+        const avgTime = (editTotalWorkTime / editCompletedCount).toFixed(1);
+        batchTimeEl.textContent = `work: ${editTotalWorkTime.toFixed(1)}s + idle: ${editTotalIdleTime.toFixed(1)}s (avg: ${avgTime}s)`;
         imageTimeEl.textContent = 'Done';
         stepFill.style.width = '100%';
         stepText.textContent = 'Complete';
