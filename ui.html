@@ -765,6 +765,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      position: relative;
     }
     .edit-modal-image img {
       max-width: 100%;
@@ -772,52 +773,107 @@
       object-fit: contain;
       border-radius: 8px;
     }
+    .edit-preview-regenerate {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+    .edit-preview-regenerate:hover {
+      background: var(--accent);
+    }
+    .edit-preview-regenerate .regen-icon {
+      font-size: 18px;
+    }
+    .edit-preview-progress {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    .edit-preview-progress.active {
+      display: flex;
+    }
+    .edit-preview-progress .progress-spinner {
+      width: 20px;
+      height: 20px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    .edit-preview-progress .progress-percent {
+      font-size: 14px;
+    }
     .edit-modal-controls {
       flex: 1;
       background: var(--surface);
       border-radius: 8px;
-      padding: 20px;
+      padding: 12px 14px;
       overflow-y: auto;
       max-height: 80vh;
     }
     .edit-modal-controls h3 {
-      margin: 0 0 16px 0;
+      margin: 0 0 10px 0;
       color: var(--accent);
-      font-size: 1.2rem;
+      font-size: 1.1rem;
     }
     .edit-custom-prompt {
-      margin-bottom: 16px;
+      margin-bottom: 8px;
+    }
+    .edit-custom-prompt label {
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+      display: block;
     }
     .edit-custom-prompt textarea {
-      min-height: 60px;
+      min-height: 50px;
       margin-bottom: 0;
     }
     .edit-preset-section {
-      margin: 16px 0;
+      margin: 8px 0;
     }
     .edit-preset-section h4 {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 10px;
+      margin-bottom: 6px;
       color: var(--text);
-      font-size: 0.95rem;
+      font-size: 0.85rem;
     }
     .edit-preset-section h4 button {
-      padding: 4px 10px;
-      font-size: 0.75rem;
+      padding: 2px 8px;
+      font-size: 0.7rem;
     }
     .edit-preset-chips {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 5px;
     }
     .edit-chip {
-      padding: 6px 14px;
+      padding: 4px 10px;
       background: var(--surface2);
-      border-radius: 16px;
+      border-radius: 12px;
       cursor: pointer;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       transition: all 0.2s;
       user-select: none;
     }
@@ -829,12 +885,25 @@
       color: white;
     }
     .edit-progress {
-      margin: 20px 0;
+      margin: 8px 0;
+      padding: 6px 8px;
+      background: var(--surface2);
+      border-radius: 6px;
+    }
+    .edit-progress-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .edit-progress-item {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
     }
     .edit-progress-bar {
-      height: 8px;
-      background: var(--surface2);
-      border-radius: 4px;
+      height: 6px;
+      background: var(--surface);
+      border-radius: 3px;
       overflow: hidden;
     }
     .edit-progress-fill {
@@ -844,15 +913,14 @@
       transition: width 0.3s ease-out;
     }
     .edit-progress-text {
-      text-align: center;
-      margin-top: 8px;
-      font-size: 0.9rem;
+      font-size: 0.75rem;
       color: var(--text-dim);
     }
     .edit-progress-label {
-      font-size: 0.8rem;
+      font-size: 0.7rem;
       color: var(--text-dim);
-      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
     }
     .edit-time-info {
       float: right;
@@ -862,88 +930,140 @@
     .edit-actions {
       display: flex;
       gap: 10px;
-      margin-top: 20px;
+      margin-top: 12px;
     }
     .edit-actions button {
       flex: 1;
     }
+    .edit-options-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin: 6px 0;
+    }
+    .edit-options-grid.full-width {
+      grid-template-columns: 1fr;
+    }
     .edit-clothes-option {
-      margin: 16px 0;
-      padding: 12px;
+      padding: 6px 8px;
       background: var(--surface2);
-      border-radius: 8px;
+      border-radius: 6px;
     }
     .edit-clothes-option label {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       cursor: pointer;
-      font-size: 0.95rem;
+      font-size: 0.8rem;
     }
     .edit-clothes-option input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+      width: 14px;
+      height: 14px;
       accent-color: var(--accent);
     }
     .edit-clothes-option textarea {
-      margin-top: 10px;
-      min-height: 50px;
+      margin-top: 4px;
+      min-height: 32px;
+      font-size: 0.8rem;
       display: none;
     }
     .edit-clothes-option.enabled textarea {
       display: block;
     }
     .edit-clothes-hint {
-      font-size: 0.8rem;
+      font-size: 0.7rem;
       color: var(--text-dim);
-      margin-top: 6px;
+      margin-top: 3px;
     }
     .edit-settings-section {
-      margin: 16px 0;
-      padding: 12px;
+      margin: 6px 0;
+      padding: 6px 8px;
       background: var(--surface2);
-      border-radius: 8px;
+      border-radius: 6px;
     }
     .edit-settings-section h4 {
-      margin: 0 0 12px 0;
-      font-size: 0.9rem;
+      margin: 0 0 4px 0;
+      font-size: 0.8rem;
       color: var(--text-dim);
+    }
+    .edit-settings-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .edit-settings-row .setting-item label {
+      display: block;
+      font-size: 0.75rem;
+      margin-bottom: 2px;
+      color: var(--text-dim);
+    }
+    .edit-settings-row .range-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .edit-settings-row .range-row input[type="range"] {
+      flex: 1;
+      height: 4px;
+    }
+    .edit-settings-row .range-value {
+      min-width: 24px;
+      text-align: right;
+      font-size: 0.8rem;
+    }
+    .edit-settings-section > .setting-item {
+      margin-top: 4px;
+    }
+    .edit-settings-section .seed-row {
+      display: flex;
+      gap: 6px;
+    }
+    .edit-settings-section .seed-row select {
+      flex: 1;
+      font-size: 0.75rem;
+      padding: 3px 5px;
+    }
+    .edit-settings-section .seed-row input {
+      width: 70px;
+      font-size: 0.75rem;
+      padding: 3px 5px;
     }
     .edit-settings-section label {
       display: block;
-      font-size: 0.85rem;
-      margin-bottom: 4px;
-      color: var(--text);
+      font-size: 0.7rem;
+      margin-bottom: 2px;
+      color: var(--text-dim);
     }
     .edit-settings-section .range-row {
-      margin-bottom: 12px;
+      margin-bottom: 4px;
     }
     .edit-results {
-      margin-top: 16px;
+      margin-top: 10px;
       border-top: 1px solid var(--surface2);
-      padding-top: 12px;
+      padding-top: 8px;
     }
     .edit-results h4 {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin: 0 0 10px 0;
-      font-size: 0.9rem;
+      margin: 0 0 6px 0;
+      font-size: 0.85rem;
       color: var(--text-dim);
     }
     .edit-results h4 button {
-      padding: 4px 10px;
-      font-size: 0.75rem;
+      padding: 3px 8px;
+      font-size: 0.7rem;
     }
     .edit-results-grid {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 6px;
     }
     .edit-result-thumb {
       position: relative;
-      width: 80px;
-      height: 80px;
+      width: 70px;
+      height: 70px;
       border-radius: 6px;
       overflow: hidden;
       cursor: pointer;
@@ -1812,6 +1932,13 @@ Results:
     <div class="edit-modal-content" onclick="event.stopPropagation()">
       <div class="edit-modal-image">
         <img id="editModalImg" src="" alt="Image to edit">
+        <button class="edit-preview-regenerate" id="editPreviewRegenerate" onclick="regenerateCurrentPreview()" style="display:none">
+          <span class="regen-icon">↻</span> Regenerate
+        </button>
+        <div class="edit-preview-progress" id="editPreviewProgress">
+          <div class="progress-spinner"></div>
+          <span class="progress-percent">0%</span>
+        </div>
       </div>
       <div class="edit-modal-controls">
         <h3>Edit Image</h3>
@@ -1831,69 +1958,81 @@ Results:
           <div class="edit-preset-chips" id="poseChips"></div>
         </div>
 
-        <div class="edit-clothes-option" id="editClothesOption">
-          <label>
-            <input type="checkbox" id="editClothesEnabled" onchange="toggleClothesOption()">
-            Generate with clothes (2x images per prompt)
-          </label>
-          <textarea id="editClothesPrompt" placeholder="Describe clothing: e.g., 'Business suit, high stockings, high heels'"></textarea>
-          <div class="edit-clothes-hint">Each emotion/pose will generate both naked and dressed versions</div>
+        <div class="edit-options-grid">
+          <div class="edit-clothes-option" id="editLoraOption">
+            <label>
+              <input type="checkbox" id="editUseLora" onchange="toggleLoraOption()">
+              Lightning LoRA (fast)
+            </label>
+          </div>
+          <div class="edit-clothes-option" id="editNegativeOption">
+            <label>
+              <input type="checkbox" id="editNegativeEnabled" onchange="toggleNegativeOption()">
+              Custom negative
+            </label>
+          </div>
         </div>
 
-        <div class="edit-clothes-option" id="editNegativeOption">
-          <label>
-            <input type="checkbox" id="editNegativeEnabled" onchange="toggleNegativeOption()">
-            Custom negative prompt (override defaults)
-          </label>
-          <textarea id="editNegativePrompt" placeholder="Things to avoid in the image..."></textarea>
-          <div class="edit-clothes-hint">Default: ugly, deformed, low quality, blurry, male, penis, masculine</div>
+        <div class="edit-options-grid full-width" id="editNegativeExpanded" style="display:none; margin-top:-4px;">
+          <div class="edit-clothes-option">
+            <textarea id="editNegativePrompt" placeholder="Things to avoid..." style="display:block; min-height:32px;"></textarea>
+            <div class="edit-clothes-hint">Default: ugly, deformed, low quality, blurry, male, penis</div>
+          </div>
         </div>
 
-        <div class="edit-clothes-option" id="editLoraOption">
-          <label>
-            <input type="checkbox" id="editUseLora" onchange="toggleLoraOption()">
-            Use Lightning LoRA (faster: 6 steps, CFG 1.0)
-          </label>
-          <div class="edit-clothes-hint">Reduces inference time significantly with minimal quality loss</div>
+        <div class="edit-options-grid full-width">
+          <div class="edit-clothes-option" id="editClothesOption">
+            <label>
+              <input type="checkbox" id="editClothesEnabled" onchange="toggleClothesOption()">
+              Generate clothed variants (2x images)
+            </label>
+            <textarea id="editClothesPrompt" placeholder="e.g., 'Business suit, stockings, heels'"></textarea>
+          </div>
         </div>
 
         <div class="edit-settings-section">
-          <h4>Edit Settings</h4>
-          <label for="editSteps">Inference Steps (lower = faster)</label>
-          <div class="range-row">
-            <input type="range" id="editSteps" min="10" max="30" value="20" oninput="document.getElementById('editStepsValue').textContent = this.value">
-            <span class="range-value" id="editStepsValue">20</span>
+          <div class="edit-settings-row">
+            <div class="setting-item">
+              <label>Steps</label>
+              <div class="range-row">
+                <input type="range" id="editSteps" min="10" max="30" value="20" oninput="document.getElementById('editStepsValue').textContent = this.value">
+                <span class="range-value" id="editStepsValue">20</span>
+              </div>
+            </div>
+            <div class="setting-item">
+              <label>CFG</label>
+              <div class="range-row">
+                <input type="range" id="editCfgScale" min="1" max="10" step="0.5" value="4" oninput="document.getElementById('editCfgScaleValue').textContent = this.value">
+                <span class="range-value" id="editCfgScaleValue">4</span>
+              </div>
+            </div>
           </div>
-
-          <label for="editCfgScale">CFG Scale</label>
-          <div class="range-row">
-            <input type="range" id="editCfgScale" min="1" max="10" step="0.5" value="4" oninput="document.getElementById('editCfgScaleValue').textContent = this.value">
-            <span class="range-value" id="editCfgScaleValue">4</span>
-          </div>
-
-          <label for="editSeedMode">Seed</label>
-          <div class="seed-row">
-            <select id="editSeedMode" onchange="toggleSeedInput()">
-              <option value="random">Random (different each image)</option>
-              <option value="fixed">Fixed Random (same for batch)</option>
-              <option value="custom">Custom</option>
-            </select>
-            <input type="number" id="editSeedValue" min="0" max="2147483647" value="" placeholder="Enter seed" style="display:none">
+          <div class="setting-item">
+            <label>Seed</label>
+            <div class="seed-row">
+              <select id="editSeedMode" onchange="toggleSeedInput()">
+                <option value="random">Random</option>
+                <option value="fixed">Fixed (batch)</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input type="number" id="editSeedValue" min="0" max="2147483647" value="" placeholder="Seed" style="display:none">
+            </div>
           </div>
         </div>
 
         <div class="edit-progress" id="editProgress" style="display:none">
-          <div class="edit-progress-label">Batch Progress <span id="editBatchTime" class="edit-time-info"></span></div>
-          <div class="edit-progress-bar">
-            <div class="edit-progress-fill" id="editProgressFill"></div>
+          <div class="edit-progress-row">
+            <div class="edit-progress-item">
+              <div class="edit-progress-label">Batch <span id="editBatchTime" class="edit-time-info"></span></div>
+              <div class="edit-progress-bar"><div class="edit-progress-fill" id="editProgressFill"></div></div>
+              <div class="edit-progress-text" id="editProgressText">0 / 0</div>
+            </div>
+            <div class="edit-progress-item">
+              <div class="edit-progress-label">Step <span id="editImageTime" class="edit-time-info"></span></div>
+              <div class="edit-progress-bar"><div class="edit-progress-fill" id="editStepProgressFill"></div></div>
+              <div class="edit-progress-text" id="editStepProgressText">0 / 0</div>
+            </div>
           </div>
-          <div class="edit-progress-text" id="editProgressText">0 / 0</div>
-
-          <div class="edit-progress-label" style="margin-top: 12px;">Current Image <span id="editImageTime" class="edit-time-info"></span></div>
-          <div class="edit-progress-bar">
-            <div class="edit-progress-fill" id="editStepProgressFill"></div>
-          </div>
-          <div class="edit-progress-text" id="editStepProgressText">Step 0 / 0</div>
         </div>
 
         <div class="edit-actions">
@@ -3699,29 +3838,55 @@ Be thorough and specific in your description.`;
       resultsEl.style.display = 'block';
       downloadBtn.style.display = 'inline-block';
 
-      // Add original first
+      // Add original first (index 0, no regenerate)
       const originalThumb = document.createElement('div');
       originalThumb.className = 'edit-result-thumb';
+      originalThumb.dataset.index = '0';
       originalThumb.innerHTML = `
         <img src="${originalDataUrl}" alt="Original">
         <div class="edit-result-label">Original</div>
       `;
-      originalThumb.onclick = () => previewEditResult(originalId, originalDataUrl);
+      originalThumb.onclick = () => previewEditResult(0);
       resultsGrid.appendChild(originalThumb);
-      editResultImages.push({ id: originalId, dataUrl: originalDataUrl, label: 'Original' });
+      editResultImages.push({ id: originalId, dataUrl: originalDataUrl, label: 'Original', isOriginal: true });
 
       // Add edited images
       for (const editedImg of editedImages) {
-        const label = editedImg.settings?.editLabel || 'Edited';
+        const s = editedImg.settings || {};
+        const label = s.editLabel || 'Edited';
+        const prompt = s.prompt || '';
+        const negative_prompt = s.negative_prompt || '';
+        // Load stored generation settings (defaults for old images without these)
+        const steps = s.steps || 20;
+        const cfgScale = s.cfgScale || 4.0;
+        const useLora = s.useLora || false;
+        const seed = s.seed ?? null;  // null means random was used
+        const basePrompt = s.basePrompt || '';
+        const clothedPrompt = s.clothedPrompt || '';
+        const thumbIndex = editResultImages.length;
+
         const thumb = document.createElement('div');
         thumb.className = 'edit-result-thumb';
+        thumb.dataset.index = thumbIndex;
         thumb.innerHTML = `
           <img src="${editedImg.data}" alt="${label}">
           <div class="edit-result-label">${label}</div>
         `;
-        thumb.onclick = () => previewEditResult(editedImg.id, editedImg.data);
+        thumb.onclick = () => previewEditResult(thumbIndex);
         resultsGrid.appendChild(thumb);
-        editResultImages.push({ id: editedImg.id, dataUrl: editedImg.data, label });
+        editResultImages.push({
+          id: editedImg.id,
+          dataUrl: editedImg.data,
+          label,
+          prompt,
+          negative_prompt,
+          steps,
+          cfgScale,
+          useLora,
+          seed,
+          basePrompt,
+          clothedPrompt
+        });
       }
     }
 
@@ -3782,12 +3947,8 @@ Be thorough and specific in your description.`;
 
     function toggleNegativeOption() {
       const checkbox = document.getElementById('editNegativeEnabled');
-      const container = document.getElementById('editNegativeOption');
-      if (checkbox.checked) {
-        container.classList.add('enabled');
-      } else {
-        container.classList.remove('enabled');
-      }
+      const expanded = document.getElementById('editNegativeExpanded');
+      expanded.style.display = checkbox.checked ? 'grid' : 'none';
     }
 
     function toggleLoraOption() {
@@ -3950,13 +4111,16 @@ Be thorough and specific in your description.`;
           prompts.push({
             label: `${label} (Naked)`,
             prompt: `${basePrompt}. Completely naked, nude, no clothes, exposed breasts, anatomically correct vulva, realistic female genitalia, full frontal nudity`,
-            negative_prompt: nakedNegative
+            negative_prompt: nakedNegative,
+            basePrompt: basePrompt  // Store base for regeneration
           });
           // Add dressed variant
           prompts.push({
             label: `${label} (Dressed)`,
             prompt: `${basePrompt}. Wearing ${clothesPrompt}`,
-            negative_prompt: baseNegative
+            negative_prompt: baseNegative,
+            basePrompt: basePrompt,  // Store base for regeneration
+            clothedPrompt: clothesPrompt  // Store clothes description for regeneration
           });
         } else {
           // No clothing option, just add the base prompt
@@ -3987,10 +4151,11 @@ Be thorough and specific in your description.`;
       return prompts;
     }
 
-    async function editSingleImage(base64Data, prompt, negative_prompt, seed) {
-      const steps = parseInt(document.getElementById('editSteps').value);
-      const cfgScale = parseFloat(document.getElementById('editCfgScale').value);
-      const useLora = document.getElementById('editUseLora').checked;
+    async function editSingleImage(base64Data, prompt, negative_prompt, seed, overrideSettings = null) {
+      // Use override settings if provided (for regeneration), otherwise use current UI values
+      const steps = overrideSettings?.steps ?? parseInt(document.getElementById('editSteps').value);
+      const cfgScale = overrideSettings?.cfgScale ?? parseFloat(document.getElementById('editCfgScale').value);
+      const useLora = overrideSettings?.useLora ?? document.getElementById('editUseLora').checked;
 
       const payload = {
         image: base64Data,
@@ -4086,13 +4251,14 @@ Be thorough and specific in your description.`;
       // Add original image as first thumbnail
       const originalThumb = document.createElement('div');
       originalThumb.className = 'edit-result-thumb';
+      originalThumb.dataset.index = '0';
       originalThumb.innerHTML = `
         <img src="${img.data}" alt="Original">
         <div class="edit-result-label">Original</div>
       `;
-      originalThumb.onclick = () => previewEditResult(editImageId, img.data);
+      originalThumb.onclick = () => previewEditResult(0);
       resultsGrid.appendChild(originalThumb);
-      editResultImages.push({ id: editImageId, dataUrl: img.data, label: 'Original' });
+      editResultImages.push({ id: editImageId, dataUrl: img.data, label: 'Original', isOriginal: true });
 
       let completed = 0;
 
@@ -4105,7 +4271,7 @@ Be thorough and specific in your description.`;
           break;
         }
 
-        const { label, prompt, negative_prompt } = prompts[i];
+        const { label, prompt, negative_prompt, basePrompt, clothedPrompt } = prompts[i];
         progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
 
         try {
@@ -4122,28 +4288,51 @@ Be thorough and specific in your description.`;
             reader.readAsDataURL(blob);
           });
 
-          // Save edited image to same folder
-          const settings = {
+          // Save edited image to same folder (include all generation settings for regeneration)
+          const genSettings = {
             prompt: prompt,
             negative_prompt: negative_prompt,
             editLabel: label,
-            originalId: editImageId
+            originalId: editImageId,
+            // Store generation settings for future regeneration
+            steps: parseInt(document.getElementById('editSteps').value),
+            cfgScale: parseFloat(document.getElementById('editCfgScale').value),
+            useLora: document.getElementById('editUseLora').checked,
+            // Store seed used (null means random was used)
+            seed: seed,
+            // Store base prompt and clothed prompt for dressed variants
+            basePrompt: basePrompt || '',
+            clothedPrompt: clothedPrompt || ''
           };
-          const savedId = await saveImage(blob, settings, folder);
+          const savedId = await saveImage(blob, genSettings, folder);
           completed++;
 
           // Add thumbnail immediately
+          const thumbIndex = editResultImages.length;
           const thumb = document.createElement('div');
           thumb.className = 'edit-result-thumb';
+          thumb.dataset.index = thumbIndex;
           thumb.innerHTML = `
             <img src="${dataUrl}" alt="${label}">
             <div class="edit-result-label">${label}</div>
           `;
-          thumb.onclick = () => previewEditResult(savedId, dataUrl);
+          thumb.onclick = () => previewEditResult(thumbIndex);
           resultsGrid.appendChild(thumb);
 
-          // Track for download
-          editResultImages.push({ id: savedId, dataUrl, label });
+          // Track for download (include all metadata for regeneration)
+          editResultImages.push({
+            id: savedId,
+            dataUrl,
+            label,
+            prompt,
+            negative_prompt,
+            steps: genSettings.steps,
+            cfgScale: genSettings.cfgScale,
+            useLora: genSettings.useLora,
+            seed: genSettings.seed,
+            basePrompt: genSettings.basePrompt,
+            clothedPrompt: genSettings.clothedPrompt
+          });
 
           // Show download button as soon as we have results
           downloadBtn.style.display = 'inline-block';
@@ -4177,8 +4366,8 @@ Be thorough and specific in your description.`;
 
       if (completed > 0) {
         // Show final timing stats
-        const avgTime = (editTotalWorkTime / editCompletedCount).toFixed(1);
-        batchTimeEl.textContent = `work: ${editTotalWorkTime.toFixed(1)}s + idle: ${editTotalIdleTime.toFixed(1)}s (avg: ${avgTime}s)`;
+        const avgTime = formatDuration(editTotalWorkTime / editCompletedCount);
+        batchTimeEl.textContent = `work: ${formatDuration(editTotalWorkTime)} + idle: ${formatDuration(editTotalIdleTime)} (avg: ${avgTime})`;
         imageTimeEl.textContent = 'Done';
         stepFill.style.width = '100%';
         stepText.textContent = 'Complete';
@@ -4199,9 +4388,147 @@ Be thorough and specific in your description.`;
       }
     }
 
-    function previewEditResult(id, dataUrl) {
+    let currentPreviewIndex = null;
+
+    function previewEditResult(index) {
+      const item = editResultImages[index];
+      if (!item) return;
+
+      currentPreviewIndex = index;
+
       // Show the edited image in the main preview area
-      document.getElementById('editModalImg').src = dataUrl;
+      document.getElementById('editModalImg').src = item.dataUrl;
+
+      // Show/hide regenerate button based on whether this is an edited image (not original)
+      const regenBtn = document.getElementById('editPreviewRegenerate');
+      if (item.isOriginal || !item.prompt) {
+        regenBtn.style.display = 'none';
+      } else {
+        regenBtn.style.display = 'flex';
+      }
+    }
+
+    let regeneratingPreview = false;
+    let regenerateProgressInterval = null;
+
+    async function regenerateCurrentPreview() {
+      if (regeneratingPreview) {
+        showToast('Already regenerating');
+        return;
+      }
+
+      if (currentPreviewIndex === null) {
+        showToast('No image selected');
+        return;
+      }
+
+      const item = editResultImages[currentPreviewIndex];
+      if (!item || !item.prompt) {
+        showToast('Cannot regenerate: missing prompt data');
+        return;
+      }
+
+      regeneratingPreview = true;
+      const regenBtn = document.getElementById('editPreviewRegenerate');
+      const progressEl = document.getElementById('editPreviewProgress');
+      const progressPercent = progressEl.querySelector('.progress-percent');
+
+      regenBtn.style.display = 'none';
+      progressEl.classList.add('active');
+
+      // Start progress polling
+      regenerateProgressInterval = setInterval(async () => {
+        try {
+          const resp = await fetch(`${getApiUrl()}/img2img/progress`);
+          const data = await resp.json();
+          const percent = data.percent || 0;
+          progressPercent.textContent = `${Math.round(percent)}%`;
+        } catch (e) {
+          // Ignore polling errors
+        }
+      }, 200);
+
+      try {
+        // Get the original image base64 data
+        const originalImage = await getImage(editImageId);
+        if (!originalImage) {
+          throw new Error('Original image not found');
+        }
+        const base64Data = originalImage.data.split(',')[1];
+
+        // Use stored generation settings from the item (regenerate with same settings)
+        const storedSettings = {
+          steps: item.steps || 20,
+          cfgScale: item.cfgScale || 4.0,
+          useLora: item.useLora || false
+        };
+
+        // Use stored seed if it was a fixed seed, otherwise use random (null)
+        // This preserves the batch behavior: fixed seed = same seed, random = new random
+        const seedToUse = item.seed ?? null;
+        const blob = await editSingleImage(base64Data, item.prompt, item.negative_prompt || '', seedToUse, storedSettings);
+
+        // Convert blob to data URL
+        const newDataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+
+        // Delete old image from IndexedDB
+        if (item.id) {
+          await deleteImage(item.id);
+        }
+
+        // Save new image with same settings
+        const folder = originalImage.folder || 'default';
+        const settings = {
+          prompt: item.prompt,
+          negative_prompt: item.negative_prompt || '',
+          editLabel: item.label,
+          originalId: editImageId,
+          steps: storedSettings.steps,
+          cfgScale: storedSettings.cfgScale,
+          useLora: storedSettings.useLora,
+          seed: seedToUse,
+          basePrompt: item.basePrompt || '',
+          clothedPrompt: item.clothedPrompt || ''
+        };
+        const newId = await saveImage(blob, settings, folder);
+
+        // Update the thumbnail image
+        const thumb = document.querySelector(`.edit-result-thumb[data-index="${currentPreviewIndex}"]`);
+        if (thumb) {
+          const imgEl = thumb.querySelector('img');
+          imgEl.src = newDataUrl;
+        }
+
+        // Update editResultImages array
+        editResultImages[currentPreviewIndex] = {
+          ...item,
+          id: newId,
+          dataUrl: newDataUrl
+        };
+
+        // Update preview
+        document.getElementById('editModalImg').src = newDataUrl;
+
+        showToast('Regenerated successfully');
+        await loadGallery();
+
+      } catch (error) {
+        console.error('Regenerate failed:', error);
+        showToast(`Regenerate failed: ${error.message}`);
+      } finally {
+        // Stop polling and reset UI
+        clearInterval(regenerateProgressInterval);
+        regenerateProgressInterval = null;
+        regeneratingPreview = false;
+
+        progressEl.classList.remove('active');
+        progressPercent.textContent = '0%';
+        regenBtn.style.display = 'flex';
+      }
     }
 
     async function downloadEditResults() {
