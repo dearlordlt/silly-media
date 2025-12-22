@@ -263,6 +263,28 @@ List available img2img models.
 }
 ```
 
+### `GET /img2img/progress`
+
+Get the current img2img edit progress (useful for polling during edits).
+
+**Response (when editing)**
+```json
+{
+  "active": true,
+  "step": 12,
+  "total_steps": 20,
+  "percent": 60,
+  "elapsed": 8.5
+}
+```
+
+**Response (when idle)**
+```json
+{
+  "active": false
+}
+```
+
 ### `POST /img2img/edit/{model}`
 
 Edit an image using base64-encoded image in JSON body.

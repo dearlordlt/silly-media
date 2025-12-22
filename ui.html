@@ -849,6 +849,16 @@
       font-size: 0.9rem;
       color: var(--text-dim);
     }
+    .edit-progress-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    .edit-time-info {
+      float: right;
+      color: var(--accent);
+      font-weight: 500;
+    }
     .edit-actions {
       display: flex;
       gap: 10px;
@@ -887,6 +897,26 @@
       font-size: 0.8rem;
       color: var(--text-dim);
       margin-top: 6px;
+    }
+    .edit-settings-section {
+      margin: 16px 0;
+      padding: 12px;
+      background: var(--surface2);
+      border-radius: 8px;
+    }
+    .edit-settings-section h4 {
+      margin: 0 0 12px 0;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+    .edit-settings-section label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+    .edit-settings-section .range-row {
+      margin-bottom: 12px;
     }
     .edit-results {
       margin-top: 16px;
@@ -1797,11 +1827,33 @@ Results:
           <div class="edit-clothes-hint">Default: ugly, deformed, low quality, blurry, male, penis, masculine</div>
         </div>
 
+        <div class="edit-settings-section">
+          <h4>Edit Settings</h4>
+          <label for="editSteps">Inference Steps (lower = faster)</label>
+          <div class="range-row">
+            <input type="range" id="editSteps" min="10" max="30" value="20" oninput="document.getElementById('editStepsValue').textContent = this.value">
+            <span class="range-value" id="editStepsValue">20</span>
+          </div>
+
+          <label for="editCfgScale">CFG Scale</label>
+          <div class="range-row">
+            <input type="range" id="editCfgScale" min="1" max="10" step="0.5" value="4" oninput="document.getElementById('editCfgScaleValue').textContent = this.value">
+            <span class="range-value" id="editCfgScaleValue">4</span>
+          </div>
+        </div>
+
         <div class="edit-progress" id="editProgress" style="display:none">
+          <div class="edit-progress-label">Batch Progress <span id="editBatchTime" class="edit-time-info"></span></div>
           <div class="edit-progress-bar">
             <div class="edit-progress-fill" id="editProgressFill"></div>
           </div>
           <div class="edit-progress-text" id="editProgressText">0 / 0</div>
+
+          <div class="edit-progress-label" style="margin-top: 12px;">Current Image <span id="editImageTime" class="edit-time-info"></span></div>
+          <div class="edit-progress-bar">
+            <div class="edit-progress-fill" id="editStepProgressFill"></div>
+          </div>
+          <div class="edit-progress-text" id="editStepProgressText">Step 0 / 0</div>
         </div>
 
         <div class="edit-actions">
@@ -3471,6 +3523,9 @@ Be thorough and specific in your description.`;
       { id: 'crying', label: 'Crying', prompt: 'Make the person crying emotionally' },
       { id: 'serious', label: 'Serious', prompt: 'Make the person look serious and focused' },
       { id: 'playful', label: 'Playful', prompt: 'Make the person look playful and mischievous' },
+      { id: 'curious', label: 'Curious', prompt: 'Make the person look curious and inquisitive' },
+      { id: 'relaxed', label: 'Relaxed', prompt: 'Make the person look relaxed and calm' },
+      { id: 'desperate', label: 'Desperate', prompt: 'Make the person look desperate and anxious' },
     ];
 
     const EDIT_POSES = [
@@ -3487,8 +3542,9 @@ Be thorough and specific in your description.`;
       { id: 'handsonhips', label: 'Hands on Hips', prompt: 'Change pose to hands on hips' },
       { id: 'handsbehindback', label: 'Hands Behind Back', prompt: 'Change pose to hands behind back' },
       { id: 'spreadlegs', label: 'Spread Legs', prompt: 'Change pose to legs spread apart' },
-      {id: 'ready for sex', label: 'Lying Down Legs Open', prompt: 'Change pose to lying down with legs open' },
-      {id: 'doggystyle', label: 'Doggy Style Pose', prompt: 'Change pose to doggy style position, on all four\'s' },
+      { id: 'ready for sex', label: 'Lying Down Legs Open', prompt: 'Change pose to lying down with legs open' },
+      { id: 'doggystyle', label: 'Doggy Style Pose', prompt: 'Change pose to doggy style position' },
+      { id: 'dancing', label: 'Dancing', prompt: 'Change pose to dancing' },
     ];
 
     let selectedEmotions = new Set();
@@ -3538,6 +3594,12 @@ Be thorough and specific in your description.`;
       document.getElementById('editNegativeEnabled').checked = false;
       document.getElementById('editNegativePrompt').value = '';
       document.getElementById('editNegativeOption').classList.remove('enabled');
+
+      // Reset edit settings to defaults
+      document.getElementById('editSteps').value = 20;
+      document.getElementById('editStepsValue').textContent = '20';
+      document.getElementById('editCfgScale').value = 4;
+      document.getElementById('editCfgScaleValue').textContent = '4';
 
       // Render chips
       renderEditChips();
@@ -3668,6 +3730,69 @@ Be thorough and specific in your description.`;
       }
     }
 
+    // Edit progress polling and timing
+    let editProgressInterval = null;
+    let editBatchStartTime = null;
+    let editImageStartTime = null;
+    let editCompletedCount = 0;
+    let editTotalImageTime = 0;  // Actual generation time
+    let editTotalIdleTime = 0;   // Waiting/debounce time
+    let editIdleStartTime = null;
+
+    function startEditProgressPolling() {
+      const stepFill = document.getElementById('editStepProgressFill');
+      const stepText = document.getElementById('editStepProgressText');
+      const batchTimeEl = document.getElementById('editBatchTime');
+      const imageTimeEl = document.getElementById('editImageTime');
+
+      editProgressInterval = setInterval(async () => {
+        try {
+          // Calculate current idle time if in idle state
+          const currentIdleTime = editIdleStartTime ? (Date.now() - editIdleStartTime) / 1000 : 0;
+          const totalIdle = editTotalIdleTime + currentIdleTime;
+
+          // Update batch elapsed time (work + idle breakdown)
+          if (editBatchStartTime && batchTimeEl) {
+            const workTime = editTotalImageTime.toFixed(1);
+            const idleTime = totalIdle.toFixed(1);
+            const avgTime = editCompletedCount > 0 ? (editTotalImageTime / editCompletedCount).toFixed(1) : '—';
+            batchTimeEl.textContent = `work: ${workTime}s + idle: ${idleTime}s (avg: ${avgTime}s)`;
+          }
+
+          // Update current image elapsed time (only when actively generating)
+          if (editImageStartTime && imageTimeEl) {
+            const imageElapsed = ((Date.now() - editImageStartTime) / 1000).toFixed(1);
+            imageTimeEl.textContent = `${imageElapsed}s`;
+          } else if (imageTimeEl && editIdleStartTime) {
+            imageTimeEl.textContent = `idle ${currentIdleTime.toFixed(1)}s`;
+          }
+
+          const response = await fetch(`${getApiUrl()}/img2img/progress`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.active) {
+              const percent = data.percent || 0;
+              if (stepFill) stepFill.style.width = `${percent}%`;
+              if (stepText) stepText.textContent = `Step ${data.step} / ${data.total_steps}`;
+            } else {
+              // Reset step progress when not active
+              if (stepFill) stepFill.style.width = '0%';
+              if (stepText) stepText.textContent = 'Waiting...';
+            }
+          }
+        } catch (e) {
+          // Ignore polling errors
+        }
+      }, 200);
+    }
+
+    function stopEditProgressPolling() {
+      if (editProgressInterval) {
+        clearInterval(editProgressInterval);
+        editProgressInterval = null;
+      }
+    }
+
     // Default negative prompts
     const DEFAULT_NEGATIVE = 'ugly, deformed, disfigured, low quality, blurry, bad anatomy, extra limbs, male, penis, masculine, man, boy';
     const CLOTHES_NEGATIVE = 'clothes, clothing, dressed, bra, underwear, panties, shirt, dress, bikini, swimsuit, lingerie';
@@ -3729,6 +3854,9 @@ Be thorough and specific in your description.`;
     }
 
     async function editSingleImage(base64Data, prompt, negative_prompt) {
+      const steps = parseInt(document.getElementById('editSteps').value);
+      const cfgScale = parseFloat(document.getElementById('editCfgScale').value);
+
       const response = await fetch(`${getApiUrl()}/img2img/edit/qwen-image-edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3736,8 +3864,8 @@ Be thorough and specific in your description.`;
           image: base64Data,
           prompt: prompt,
           negative_prompt: negative_prompt || ' ',
-          num_inference_steps: 20,
-          true_cfg_scale: 4.0
+          num_inference_steps: steps,
+          true_cfg_scale: cfgScale
         })
       });
 
@@ -3786,6 +3914,18 @@ Be thorough and specific in your description.`;
       progressFill.style.width = '0%';
       progressText.textContent = `0 / ${prompts.length}`;
 
+      // Reset step progress and timing
+      document.getElementById('editStepProgressFill').style.width = '0%';
+      document.getElementById('editStepProgressText').textContent = 'Starting...';
+      document.getElementById('editBatchTime').textContent = '';
+      document.getElementById('editImageTime').textContent = '';
+      editBatchStartTime = Date.now();
+      editImageStartTime = null;
+      editCompletedCount = 0;
+      editTotalImageTime = 0;
+      editTotalIdleTime = 0;
+      editIdleStartTime = null;
+
       // Clear and show results section with original image first
       resultsGrid.innerHTML = '';
       resultsEl.style.display = 'block';
@@ -3805,6 +3945,9 @@ Be thorough and specific in your description.`;
 
       let completed = 0;
 
+      // Start progress polling
+      startEditProgressPolling();
+
       for (let i = 0; i < prompts.length; i++) {
         if (editCancelled) {
           showToast(`Cancelled after ${completed} edit(s)`);
@@ -3814,8 +3957,22 @@ Be thorough and specific in your description.`;
         const { label, prompt, negative_prompt } = prompts[i];
         progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
 
+        // Stop idle timer and accumulate idle time (if coming from debounce)
+        if (editIdleStartTime) {
+          editTotalIdleTime += (Date.now() - editIdleStartTime) / 1000;
+          editIdleStartTime = null;
+        }
+
+        // Start timing for this image
+        editImageStartTime = Date.now();
+
         try {
           const blob = await editSingleImage(base64Data, prompt, negative_prompt);
+
+          // Track image completion time
+          const imageTime = (Date.now() - editImageStartTime) / 1000;
+          editTotalImageTime += imageTime;
+          editCompletedCount++;
 
           // Convert blob to data URL for thumbnail
           const dataUrl = await new Promise((resolve) => {
@@ -3853,8 +4010,12 @@ Be thorough and specific in your description.`;
           // Update progress
           progressFill.style.width = `${((i + 1) / prompts.length) * 100}%`;
 
+          // Clear image timer and start idle timer before debounce
+          editImageStartTime = null;
+
           // Debounce between edits (2 seconds)
           if (i < prompts.length - 1 && !editCancelled) {
+            editIdleStartTime = Date.now();
             await new Promise(r => setTimeout(r, 2000));
           }
         } catch (error) {
@@ -3864,8 +4025,31 @@ Be thorough and specific in your description.`;
         }
       }
 
-      // Reset UI - keep results visible
-      progressEl.style.display = 'none';
+      // Stop progress polling and clear timers
+      stopEditProgressPolling();
+      editImageStartTime = null;
+      editIdleStartTime = null;
+
+      // Show final stats
+      const batchTimeEl = document.getElementById('editBatchTime');
+      const imageTimeEl = document.getElementById('editImageTime');
+      const stepFill = document.getElementById('editStepProgressFill');
+      const stepText = document.getElementById('editStepProgressText');
+
+      if (completed > 0) {
+        // Show final timing stats
+        const avgTime = (editTotalImageTime / editCompletedCount).toFixed(1);
+        batchTimeEl.textContent = `work: ${editTotalImageTime.toFixed(1)}s + idle: ${editTotalIdleTime.toFixed(1)}s (avg: ${avgTime}s)`;
+        imageTimeEl.textContent = 'Done';
+        stepFill.style.width = '100%';
+        stepText.textContent = 'Complete';
+        progressFill.style.width = '100%';
+        progressText.textContent = `${completed} / ${prompts.length} - Done!`;
+      } else {
+        progressEl.style.display = 'none';
+      }
+
+      // Reset UI - keep results and stats visible
       proceedBtn.style.display = 'block';
       cancelBtn.style.display = 'none';
 

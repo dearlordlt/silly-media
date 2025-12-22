@@ -10,11 +10,26 @@ from PIL import Image
 
 from ..img2img import Img2ImgRegistry
 from ..img2img.schemas import Img2ImgRequest
+from ..progress import img2img_progress
 from ..vram_manager import ModelType, vram_manager
 
 logger = logging.getLogger(__name__)
 
+
+def make_progress_callback(total_steps: int):
+    """Create a progress callback for diffusers pipeline."""
+    def callback(pipe, step_index, timestep, callback_kwargs):
+        img2img_progress.update(step_index + 1)
+        return callback_kwargs
+    return callback
+
 router = APIRouter(prefix="/img2img", tags=["img2img"])
+
+
+@router.get("/progress")
+async def get_img2img_progress():
+    """Get current img2img edit progress."""
+    return img2img_progress.to_dict()
 
 
 @router.get("/models")
@@ -74,9 +89,16 @@ async def edit_image(
                 f"Img2img request: model={model}, prompt={request.prompt[:50]}..."
             )
 
-            result_image = await asyncio.to_thread(
-                model_instance.edit, request, pil_image
-            )
+            # Setup progress tracking
+            img2img_progress.start(request.num_inference_steps)
+            progress_callback = make_progress_callback(request.num_inference_steps)
+
+            try:
+                result_image = await asyncio.to_thread(
+                    model_instance.edit, request, pil_image, progress_callback
+                )
+            finally:
+                img2img_progress.finish()
 
             # Convert to PNG bytes
             buffer = io.BytesIO()
@@ -146,9 +168,16 @@ async def edit_image_upload(
                 f"Img2img request: model={model}, prompt={request.prompt[:50]}..."
             )
 
-            result_image = await asyncio.to_thread(
-                model_instance.edit, request, pil_image
-            )
+            # Setup progress tracking
+            img2img_progress.start(request.num_inference_steps)
+            progress_callback = make_progress_callback(request.num_inference_steps)
+
+            try:
+                result_image = await asyncio.to_thread(
+                    model_instance.edit, request, pil_image, progress_callback
+                )
+            finally:
+                img2img_progress.finish()
 
             # Convert to PNG bytes
             buffer = io.BytesIO()
