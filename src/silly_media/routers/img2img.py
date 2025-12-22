@@ -131,6 +131,7 @@ async def edit_image_upload(
     seed: int | None = Form(None, description="Random seed (-1 or None for random)"),
     width: int | None = Form(None, description="Output width (defaults to input image width)"),
     height: int | None = Form(None, description="Output height (defaults to input image height)"),
+    use_lora: bool = Form(False, description="Use Lightning LoRA for faster inference"),
 ):
     """Edit an image using the specified model with multipart upload.
 
@@ -160,6 +161,7 @@ async def edit_image_upload(
         seed=seed,
         width=width,
         height=height,
+        use_lora=use_lora,
     )
 
     try:

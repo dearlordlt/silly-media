@@ -304,7 +304,8 @@ Edit an image using base64-encoded image in JSON body.
   "true_cfg_scale": 4.0,
   "seed": null,
   "width": null,
-  "height": null
+  "height": null,
+  "use_lora": false
 }
 ```
 
@@ -318,6 +319,9 @@ Edit an image using base64-encoded image in JSON body.
 | `seed` | int | No | `null` | Random seed (-1 or null for random) |
 | `width` | int | No | `null` | Output width (64-2048, defaults to input image width) |
 | `height` | int | No | `null` | Output height (64-2048, defaults to input image height) |
+| `use_lora` | bool | No | `false` | Use Lightning LoRA for faster inference (recommended: 4-6 steps, CFG 1.0) |
+
+> **Lightning LoRA**: When `use_lora: true`, use `num_inference_steps: 4-6` and `true_cfg_scale: 1.0` for optimal results. Higher CFG values may cause artifacts with distilled models. The LoRA (`lightx2v/Qwen-Image-Lightning`) uses the EulerAncestral scheduler for best quality.
 
 **Response**
 - Content-Type: `image/png`
@@ -350,6 +354,7 @@ Edit an image using multipart file upload.
 | `seed` | int | No | `null` | Random seed |
 | `width` | int | No | `null` | Output width (defaults to input image width) |
 | `height` | int | No | `null` | Output height (defaults to input image height) |
+| `use_lora` | bool | No | `false` | Use Lightning LoRA for faster inference |
 
 **Response**
 - Content-Type: `image/png`

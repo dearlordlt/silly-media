@@ -28,6 +28,9 @@ class Img2ImgRequest(BaseModel):
     height: int | None = Field(
         default=None, ge=64, le=2048, description="Output height (defaults to input image height)"
     )
+    use_lora: bool = Field(
+        default=False, description="Use Lightning LoRA for faster inference (4-6 steps, CFG 1.0)"
+    )
 
 
 class Img2ImgResponse(BaseModel):

@@ -12,6 +12,9 @@ from .schemas import Img2ImgRequest
 
 logger = logging.getLogger(__name__)
 
+# Lightning LoRA for faster inference
+LIGHTNING_LORA_ID = "lightx2v/Qwen-Image-Lightning"
+
 
 class QwenImageEditModel(BaseImg2ImgModel):
     """Qwen-Image-Edit-2509-4bit image editing model."""
@@ -23,6 +26,7 @@ class QwenImageEditModel(BaseImg2ImgModel):
     def __init__(self) -> None:
         super().__init__()
         self._pipe: Any = None
+        self._lora_active: bool = False
 
     def load(self) -> None:
         """Load model into VRAM."""
@@ -40,8 +44,14 @@ class QwenImageEditModel(BaseImg2ImgModel):
         # Use CPU offloading to reduce peak VRAM usage during inference
         self._pipe.enable_model_cpu_offload()
 
+        # Load Lightning LoRA as named adapter (not fused - fusing breaks 4-bit models)
+        logger.info(f"Loading Lightning LoRA: {LIGHTNING_LORA_ID}")
+        self._pipe.load_lora_weights(LIGHTNING_LORA_ID, adapter_name="lightning")
+        self._pipe.disable_lora()  # Start with LoRA disabled
+        self._lora_active = False
+
         self._loaded = True
-        logger.info(f"{self.display_name} loaded")
+        logger.info(f"{self.display_name} loaded with Lightning LoRA")
 
     def unload(self) -> None:
         """Unload model from VRAM."""
@@ -98,8 +108,22 @@ class QwenImageEditModel(BaseImg2ImgModel):
         logger.info(
             f"Editing image: {image.size[0]}x{image.size[1]} -> {width}x{height}, "
             f"steps={request.num_inference_steps}, cfg={request.true_cfg_scale}, "
-            f"prompt={request.prompt[:50]}..."
+            f"use_lora={request.use_lora}, prompt={request.prompt[:50]}..."
         )
+
+        # Handle LoRA enable/disable
+        # Note: We don't fuse LoRA with 4-bit models - it causes hangs/issues
+        # Note: Keep the default scheduler - EulerAncestral is not compatible with this pipeline
+        if request.use_lora:
+            if not self._lora_active:
+                logger.info("Enabling Lightning LoRA")
+                self._pipe.set_adapters(["lightning"], adapter_weights=[1.0])
+                self._lora_active = True
+        else:
+            if self._lora_active:
+                logger.info("Disabling Lightning LoRA")
+                self._pipe.disable_lora()
+                self._lora_active = False
 
         # Build pipeline kwargs
         pipe_kwargs = {

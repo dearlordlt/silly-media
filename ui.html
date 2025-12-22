@@ -1398,6 +1398,28 @@
       font-size: 0.85rem;
       color: var(--text-dim);
     }
+    .seed-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .seed-row select {
+      padding: 6px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    .seed-row input[type="number"] {
+      padding: 6px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 0.9rem;
+      width: 100%;
+    }
 
     /* Collapsible */
     .collapsible-header {
@@ -1827,6 +1849,14 @@ Results:
           <div class="edit-clothes-hint">Default: ugly, deformed, low quality, blurry, male, penis, masculine</div>
         </div>
 
+        <div class="edit-clothes-option" id="editLoraOption">
+          <label>
+            <input type="checkbox" id="editUseLora" onchange="toggleLoraOption()">
+            Use Lightning LoRA (faster: 6 steps, CFG 1.0)
+          </label>
+          <div class="edit-clothes-hint">Reduces inference time significantly with minimal quality loss</div>
+        </div>
+
         <div class="edit-settings-section">
           <h4>Edit Settings</h4>
           <label for="editSteps">Inference Steps (lower = faster)</label>
@@ -1839,6 +1869,16 @@ Results:
           <div class="range-row">
             <input type="range" id="editCfgScale" min="1" max="10" step="0.5" value="4" oninput="document.getElementById('editCfgScaleValue').textContent = this.value">
             <span class="range-value" id="editCfgScaleValue">4</span>
+          </div>
+
+          <label for="editSeedMode">Seed</label>
+          <div class="seed-row">
+            <select id="editSeedMode" onchange="toggleSeedInput()">
+              <option value="random">Random (different each image)</option>
+              <option value="fixed">Fixed Random (same for batch)</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input type="number" id="editSeedValue" min="0" max="2147483647" value="" placeholder="Enter seed" style="display:none">
           </div>
         </div>
 
@@ -2568,6 +2608,16 @@ Results:
 
     function getApiUrl() {
       return document.getElementById('apiUrl').value;
+    }
+
+    function formatDuration(seconds) {
+      // Format seconds as "Xm Ys" when over 60, otherwise "Xs"
+      if (seconds >= 60) {
+        const mins = Math.floor(seconds / 60);
+        const secs = (seconds % 60).toFixed(1);
+        return `${mins}m ${secs}s`;
+      }
+      return `${seconds.toFixed(1)}s`;
     }
 
     function getModel() {
@@ -3595,11 +3645,21 @@ Be thorough and specific in your description.`;
       document.getElementById('editNegativePrompt').value = '';
       document.getElementById('editNegativeOption').classList.remove('enabled');
 
-      // Reset edit settings to defaults
+      // Reset LoRA option (always unchecked by default)
+      document.getElementById('editUseLora').checked = false;
+
+      // Reset edit settings to defaults (non-LoRA values)
+      document.getElementById('editSteps').min = 10;
       document.getElementById('editSteps').value = 20;
       document.getElementById('editStepsValue').textContent = '20';
       document.getElementById('editCfgScale').value = 4;
       document.getElementById('editCfgScaleValue').textContent = '4';
+
+      // Reset seed settings
+      document.getElementById('editSeedMode').value = 'random';
+      document.getElementById('editSeedValue').value = '';
+      document.getElementById('editSeedValue').style.display = 'none';
+      editBatchSeed = null;
 
       // Render chips
       renderEditChips();
@@ -3730,6 +3790,53 @@ Be thorough and specific in your description.`;
       }
     }
 
+    function toggleLoraOption() {
+      const useLora = document.getElementById('editUseLora').checked;
+      const stepsInput = document.getElementById('editSteps');
+      const cfgInput = document.getElementById('editCfgScale');
+      const stepsValue = document.getElementById('editStepsValue');
+      const cfgValue = document.getElementById('editCfgScaleValue');
+
+      if (useLora) {
+        // Lightning LoRA optimal settings - allow lower step counts
+        stepsInput.min = 4;
+        stepsInput.value = 6;
+        cfgInput.value = 1;
+        stepsValue.textContent = '6';
+        cfgValue.textContent = '1';
+      } else {
+        // Default settings - restore normal min
+        stepsInput.min = 10;
+        stepsInput.value = 20;
+        cfgInput.value = 4;
+        stepsValue.textContent = '20';
+        cfgValue.textContent = '4';
+      }
+    }
+
+    function toggleSeedInput() {
+      const mode = document.getElementById('editSeedMode').value;
+      const seedInput = document.getElementById('editSeedValue');
+      seedInput.style.display = mode === 'custom' ? 'block' : 'none';
+    }
+
+    // Batch seed for "fixed random" mode
+    let editBatchSeed = null;
+
+    function getEditSeed() {
+      const mode = document.getElementById('editSeedMode').value;
+      if (mode === 'random') {
+        return null; // Backend will use random
+      } else if (mode === 'fixed') {
+        // Use the batch seed (generated at batch start)
+        return editBatchSeed;
+      } else {
+        // Custom seed from input
+        const val = parseInt(document.getElementById('editSeedValue').value);
+        return isNaN(val) ? null : val;
+      }
+    }
+
     // Edit progress polling and timing
     let editProgressInterval = null;
     let editBatchStartTime = null;
@@ -3787,15 +3894,15 @@ Be thorough and specific in your description.`;
 
           // Update batch elapsed time (work + idle breakdown)
           if (editBatchStartTime && batchTimeEl) {
-            const avgTime = editCompletedCount > 0 ? (editTotalWorkTime / editCompletedCount).toFixed(1) : '—';
-            batchTimeEl.textContent = `work: ${totalWork.toFixed(1)}s + idle: ${totalIdle.toFixed(1)}s (avg: ${avgTime}s)`;
+            const avgTime = editCompletedCount > 0 ? formatDuration(editTotalWorkTime / editCompletedCount) : '—';
+            batchTimeEl.textContent = `work: ${formatDuration(totalWork)} + idle: ${formatDuration(totalIdle)} (avg: ${avgTime})`;
           }
 
           // Update current image elapsed time
           if (isActive && imageTimeEl) {
-            imageTimeEl.textContent = `${currentWorkTime.toFixed(1)}s`;
+            imageTimeEl.textContent = formatDuration(currentWorkTime);
           } else if (imageTimeEl && editIdleStartTime) {
-            imageTimeEl.textContent = `idle ${currentIdleTime.toFixed(1)}s`;
+            imageTimeEl.textContent = `idle ${formatDuration(currentIdleTime)}`;
           }
 
           // Update step progress
@@ -3880,20 +3987,29 @@ Be thorough and specific in your description.`;
       return prompts;
     }
 
-    async function editSingleImage(base64Data, prompt, negative_prompt) {
+    async function editSingleImage(base64Data, prompt, negative_prompt, seed) {
       const steps = parseInt(document.getElementById('editSteps').value);
       const cfgScale = parseFloat(document.getElementById('editCfgScale').value);
+      const useLora = document.getElementById('editUseLora').checked;
+
+      const payload = {
+        image: base64Data,
+        prompt: prompt,
+        negative_prompt: negative_prompt || ' ',
+        num_inference_steps: steps,
+        true_cfg_scale: cfgScale,
+        use_lora: useLora
+      };
+
+      // Add seed if provided (null means random)
+      if (seed !== null && seed !== undefined) {
+        payload.seed = seed;
+      }
 
       const response = await fetch(`${getApiUrl()}/img2img/edit/qwen-image-edit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: base64Data,
-          prompt: prompt,
-          negative_prompt: negative_prompt || ' ',
-          num_inference_steps: steps,
-          true_cfg_scale: cfgScale
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -3955,6 +4071,12 @@ Be thorough and specific in your description.`;
       editIdleStartTime = Date.now();  // Start in idle (model loading)
       editWasActive = false;
 
+      // Generate batch seed if using "fixed random" mode
+      const seedMode = document.getElementById('editSeedMode').value;
+      if (seedMode === 'fixed') {
+        editBatchSeed = Math.floor(Math.random() * 2147483647);
+      }
+
       // Clear and show results section with original image first
       resultsGrid.innerHTML = '';
       resultsEl.style.display = 'block';
@@ -3987,7 +4109,8 @@ Be thorough and specific in your description.`;
         progressText.textContent = `${i + 1} / ${prompts.length} - ${label}`;
 
         try {
-          const blob = await editSingleImage(base64Data, prompt, negative_prompt);
+          const seed = getEditSeed();
+          const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed);
 
           // Increment completed count (timing is tracked by polling based on active state)
           editCompletedCount++;
