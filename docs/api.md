@@ -6,9 +6,10 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides five main capabilities:
+Silly Media provides six main capabilities:
 
 - **Image Generation**: Text-to-image using diffusion models
+- **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
@@ -245,6 +246,175 @@ Omit all sizing options for 1024×1024:
 {
   "prompt": "a sunset over mountains"
 }
+```
+
+---
+
+## Pixel Art Generation
+
+Generate small pixel art icons, sprites, and tiles. The endpoint generates a high-resolution image using Z-Image-Turbo, then processes it for pixel art use:
+
+1. **Generate** at 1024×1024 using Z-Image-Turbo (9 steps)
+2. **Remove background** using AI (rembg with u2net model, runs on CPU)
+3. **Resize** to target size using nearest-neighbor interpolation (keeps pixels sharp)
+4. **Return** PNG with transparency
+
+### Features
+
+- **Automatic prompt enhancement**: Your prompt is enhanced with pixel art style keywords
+- **AI background removal**: Uses rembg (u2net) to cleanly separate subject from background
+- **Sharp pixel edges**: Nearest-neighbor resize preserves hard pixel boundaries
+- **Transparency support**: Output PNG with alpha channel for game sprites/icons
+- **Tile mode**: Disable background removal for seamless tiles (grass, stone, etc.)
+
+### `GET /pixelart/progress`
+
+Get the current pixel art generation progress.
+
+**Response (when generating)**
+
+```json
+{
+  "active": true,
+  "step": 5,
+  "total_steps": 9,
+  "percent": 56,
+  "elapsed": 2.3
+}
+```
+
+**Response (when idle)**
+
+```json
+{
+  "active": false
+}
+```
+
+### `POST /pixelart/generate`
+
+Generate a pixel art icon from a text prompt.
+
+**Request Body**
+
+```json
+{
+  "prompt": "golden coin",
+  "size": 32,
+  "remove_background": true,
+  "num_inference_steps": 9,
+  "seed": null,
+  "negative_prompt": "blurry, realistic, photorealistic, 3d render, smooth gradients"
+}
+```
+
+| Field                 | Type   | Required | Default                                                       | Description                                           |
+| --------------------- | ------ | -------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| `prompt`              | string | Yes      | -                                                             | Subject to generate (e.g., "golden coin", "red potion") |
+| `size`                | int    | No       | `32`                                                          | Output size in pixels (square, 8-512)                 |
+| `remove_background`   | bool   | No       | `true`                                                        | Remove background using AI (set false for tiles)      |
+| `num_inference_steps` | int    | No       | `9`                                                           | Denoising steps (9 optimal for Z-Image-Turbo)         |
+| `seed`                | int    | No       | `null`                                                        | Random seed (-1 or null for random)                   |
+| `negative_prompt`     | string | No       | `"blurry, realistic, photorealistic, 3d render, smooth gradients"` | Terms to avoid in generation                          |
+
+**Prompt Enhancement**
+
+Your prompt is automatically enhanced for pixel art style:
+```
+{your prompt}, pixel art style, pixelated, 8-bit, retro game sprite, clean white background, isometric view, single object
+```
+
+**Response**
+
+- Content-Type: `image/png`
+- Body: Raw PNG bytes with transparency (if background removal enabled)
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request parameters |
+| 500 | Generation failed |
+
+### Use Cases
+
+**Game Sprites & Icons**
+```json
+{
+  "prompt": "golden coin",
+  "size": 32,
+  "remove_background": true
+}
+```
+
+**Character Sprites**
+```json
+{
+  "prompt": "knight in armor",
+  "size": 64,
+  "remove_background": true
+}
+```
+
+**Seamless Tiles** (for maps, backgrounds)
+```json
+{
+  "prompt": "grass tile seamless pattern",
+  "size": 32,
+  "remove_background": false
+}
+```
+
+**Larger Icons**
+```json
+{
+  "prompt": "treasure chest",
+  "size": 128,
+  "remove_background": true
+}
+```
+
+### Test Script
+
+A test script is included to generate example pixel art:
+
+```bash
+# Generate all 21 examples (7 items, 7 characters, 7 tiles)
+./test-pixelart.sh
+
+# Generate only items
+./test-pixelart.sh --category items
+
+# Generate at 64x64 size
+./test-pixelart.sh --size 64
+
+# Generate only background tiles
+./test-pixelart.sh --category backgrounds
+```
+
+**Output includes timing statistics:**
+```
+=== Pixel Art Generator ===
+Output: ./images/icons
+Size: 32x32
+Category: all (21 images)
+
+--- Items (with background removal) ---
+  [ 1/21] golden coin                          00:12.34  OK
+  [ 2/21] red potion bottle                    00:11.89  OK
+  ...
+
+=== Complete ===
+
+Timing Statistics:
+  Total time:   04:23.45
+  Average:      00:12.54
+  Fastest:      00:10.23
+  Slowest:      00:15.67
+
+Results:
+  Generated: 21
+  Failed:    0
+  Output:    ./images/icons
 ```
 
 ---
@@ -1359,6 +1529,85 @@ Analyze an image with a text query using multipart file upload.
 ---
 
 ## Examples
+
+### Pixel Art Generation
+
+#### Generate Icon (curl)
+
+```bash
+curl -X POST http://localhost:4201/pixelart/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "golden coin", "size": 32}' \
+  -o coin.png
+```
+
+#### Generate Character Sprite
+
+```bash
+curl -X POST http://localhost:4201/pixelart/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "knight in armor",
+    "size": 64,
+    "remove_background": true
+  }' \
+  -o knight.png
+```
+
+#### Generate Tile (No Background Removal)
+
+```bash
+curl -X POST http://localhost:4201/pixelart/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "grass tile seamless pattern",
+    "size": 32,
+    "remove_background": false
+  }' \
+  -o grass_tile.png
+```
+
+#### Python Client (Pixel Art)
+
+```python
+import requests
+
+# Generate icon with background removal
+response = requests.post(
+    "http://localhost:4201/pixelart/generate",
+    json={
+        "prompt": "red potion bottle",
+        "size": 32,
+        "remove_background": True,
+    },
+)
+with open("potion.png", "wb") as f:
+    f.write(response.content)
+
+# Generate tile without background removal
+response = requests.post(
+    "http://localhost:4201/pixelart/generate",
+    json={
+        "prompt": "stone brick wall tile",
+        "size": 32,
+        "remove_background": False,
+    },
+)
+with open("stone_tile.png", "wb") as f:
+    f.write(response.content)
+
+# Generate with seed for reproducibility
+response = requests.post(
+    "http://localhost:4201/pixelart/generate",
+    json={
+        "prompt": "treasure chest",
+        "size": 64,
+        "seed": 42,
+    },
+)
+with open("chest.png", "wb") as f:
+    f.write(response.content)
+```
 
 ### Image Generation
 
