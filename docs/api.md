@@ -399,22 +399,38 @@ Size: 32x32
 Category: all (21 images)
 
 --- Items (with background removal) ---
-  [ 1/21] golden coin                          00:12.34  OK
-  [ 2/21] red potion bottle                    00:11.89  OK
+  [ 1/21] golden coin                         00:10.22  OK
+  [ 2/21] red potion bottle                   00:05.12  OK
+  [ 3/21] wooden treasure chest               00:05.10  OK
+  ...
+
+--- Characters (with background removal) ---
+  [ 8/21] knight in armor                     00:05.15  OK
+  ...
+
+--- Backgrounds/Tiles (NO background removal) ---
+  [15/21] grass tile seamless pattern         00:05.08  OK
   ...
 
 === Complete ===
 
 Timing Statistics:
-  Total time:   04:23.45
-  Average:      00:12.54
-  Fastest:      00:10.23
-  Slowest:      00:15.67
+  Total time:   01:52.73
+  Average:      00:05.36
+  Fastest:      00:05.04
+  Slowest:      00:10.22
 
 Results:
   Generated: 21
   Failed:    0
   Output:    ./images/icons
+
+Generated files:
+    1400 bytes  bg_blue_water_waves_tile_20260102_185440.png
+    2048 bytes  bg_grass_tile_seamless_pattern_20260102_185430.png
+     973 bytes  item_golden_coin_20260102_185312.png
+    1048 bytes  char_knight_in_armor_20260102_185353.png
+    ...
 ```
 
 ---
