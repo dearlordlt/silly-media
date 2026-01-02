@@ -19,7 +19,7 @@ router = APIRouter(prefix="/pixelart", tags=["pixelart"])
 
 # Fixed model for pixel art generation
 PIXELART_MODEL = "z-image-turbo"
-# Fixed generation size (model minimum for quality)
+# Fixed generation size (1024 for best quality)
 GENERATION_SIZE = 1024
 
 
@@ -48,8 +48,23 @@ async def generate_pixelart(request: PixelArtRequest):
     """
     start_time = time.time()
 
-    # Enhance prompt for pixel art style (subject first for SDXL weighting)
-    enhanced_prompt = f"{request.prompt}, pixel art style, pixelated, 8-bit, retro game sprite, clean white background, isometric view, single object"
+    # Branching prompt enhancement based on mode
+    if request.remove_background:
+        # === MODE A: SPRITES (Characters, Items) ===
+        # Isometric view, outlines, white background for clean rembg extraction
+        enhanced_prompt = (
+            f"{request.prompt}, pixel art style, "
+            f"thick dark outlines, high contrast, minimalist, "
+            f"isometric view, white background, centered, full shot, single object"
+        )
+    else:
+        # === MODE B: TILES (Floors, Walls, Textures) ===
+        # Top-down view, no outlines (breaks tiling), seamless pattern
+        enhanced_prompt = (
+            f"texture of {request.prompt}, pixel art style, "
+            f"top down view, flat 2d, seamless pattern, "
+            f"filling the frame, edge to edge, no border, no outlines"
+        )
 
     try:
         async with vram_manager.acquire_gpu(PIXELART_MODEL) as model_instance:
