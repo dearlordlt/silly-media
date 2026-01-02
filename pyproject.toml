@@ -33,6 +33,7 @@ dependencies = [
     "imageio-ffmpeg>=0.4.8",
     "peft>=0.13.0",  # Required for LoRA loading in diffusers
     "bitsandbytes>=0.41.0",  # Required for 4-bit quantized models (img2img)
+    "rembg[cpu]>=2.0.50",  # AI background removal for pixel art (CPU to avoid VRAM conflicts)
 ]
 
 [project.optional-dependencies]

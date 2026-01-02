@@ -130,3 +130,40 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str | None = None
+
+
+class PixelArtRequest(BaseModel):
+    """Request schema for pixel art / icon generation."""
+
+    prompt: Annotated[
+        str, Field(min_length=1, max_length=4096, description="Text prompt for pixel art generation")
+    ]
+    negative_prompt: Annotated[
+        str,
+        Field(
+            default="blurry, realistic, photorealistic, 3d render, smooth gradients",
+            max_length=2048,
+            description="Negative prompt (defaults to anti-realistic terms)",
+        ),
+    ] = "blurry, realistic, photorealistic, 3d render, smooth gradients"
+
+    num_inference_steps: Annotated[
+        int,
+        Field(default=9, ge=1, le=100, description="Number of denoising steps (9 optimal for turbo)"),
+    ] = 9
+
+    seed: Annotated[
+        int | None, Field(default=None, ge=-1, description="Random seed (-1 or omit for random)")
+    ] = None
+
+    # Output size (square only)
+    size: Annotated[
+        int,
+        Field(default=32, ge=8, le=512, description="Output size in pixels (square, e.g., 32 for 32x32)"),
+    ] = 32
+
+    # Background removal option
+    remove_background: Annotated[
+        bool,
+        Field(default=True, description="Remove background using AI (rembg)"),
+    ] = True
