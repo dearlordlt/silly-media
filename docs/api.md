@@ -7,6 +7,7 @@ Base URL: `http://localhost:4201`
 ## Overview
 
 Silly Media provides five main capabilities:
+
 - **Image Generation**: Text-to-image using diffusion models
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
@@ -21,40 +22,41 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 ### Image Models
 
-| Model | ID | Steps | Speed | Notes |
-|-------|-----|-------|-------|-------|
-| Z-Image Turbo | `z-image-turbo` | 9 | Fast | Default, bilingual text rendering |
-| Ovis Image 7B | `ovis-image-7b` | 50 | Slower | Requires custom diffusers fork |
+| Model         | ID              | Steps | Speed  | Notes                             |
+| ------------- | --------------- | ----- | ------ | --------------------------------- |
+| Z-Image Turbo | `z-image-turbo` | 9     | Fast   | Default, bilingual text rendering |
+| Ovis Image 7B | `ovis-image-7b` | 50    | Slower | Requires custom diffusers fork    |
 
 ### Audio Models
 
-| Model | ID | VRAM | Notes |
-|-------|-----|------|-------|
-| XTTS v2 | `xtts-v2` | ~2GB | 17 languages, zero-shot voice cloning |
-| Maya TTS | `maya` | ~16GB | Voice description (no reference audio), English only, emotion tags |
-| Demucs | `demucs` | ~2GB | Vocal separation (used for YouTube extraction) |
+| Model    | ID        | VRAM  | Notes                                                              |
+| -------- | --------- | ----- | ------------------------------------------------------------------ |
+| XTTS v2  | `xtts-v2` | ~2GB  | 17 languages, zero-shot voice cloning                              |
+| Maya TTS | `maya`    | ~16GB | Voice description (no reference audio), English only, emotion tags |
+| Demucs   | `demucs`  | ~2GB  | Vocal separation (used for YouTube extraction)                     |
 
 ### Video Models
 
-| Model | ID | VRAM | Notes |
-|-------|-----|------|-------|
+| Model            | ID              | VRAM  | Notes                                      |
+| ---------------- | --------------- | ----- | ------------------------------------------ |
 | HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | T2V and I2V, 480p/720p, ~60-90s generation |
 
 ### Vision Models
 
-| Model | ID | VRAM | Notes |
-|-------|-----|------|-------|
+| Model       | ID            | VRAM  | Notes                                         |
+| ----------- | ------------- | ----- | --------------------------------------------- |
 | Qwen3-VL 8B | `qwen3-vl-8b` | ~18GB | Image analysis, OCR, visual Q&A, 256K context |
 
 ### Img2Img Models
 
-| Model | ID | VRAM | Notes |
-|-------|-----|------|-------|
+| Model           | ID                | VRAM  | Notes                                                 |
+| --------------- | ----------------- | ----- | ----------------------------------------------------- |
 | Qwen Image Edit | `qwen-image-edit` | ~20GB | AI-guided image editing with natural language prompts |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 **Model comparison:**
+
 - **XTTS v2**: Clone any voice from reference audio, multi-language support
 - **Maya TTS**: Describe the voice you want in natural language (no audio needed), supports emotion tags like `<laugh>`, `<whisper>`, etc.
 
@@ -67,6 +69,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 Check API and model status.
 
 **Response**
+
 ```json
 {
   "status": "healthy",
@@ -83,6 +86,7 @@ Check API and model status.
 List available and loaded models by type.
 
 **Response**
+
 ```json
 {
   "image": {
@@ -109,6 +113,7 @@ List available and loaded models by type.
 Get the current image generation progress (useful for polling).
 
 **Response (when generating)**
+
 ```json
 {
   "active": true,
@@ -120,6 +125,7 @@ Get the current image generation progress (useful for polling).
 ```
 
 **Response (when idle)**
+
 ```json
 {
   "active": false
@@ -135,11 +141,12 @@ Get the current image generation progress (useful for polling).
 List available aspect ratio presets with calculated dimensions.
 
 **Response**
+
 ```json
 {
-  "1:1": {"name": "SQUARE", "dimensions_at_1024": [1024, 1024]},
-  "16:9": {"name": "LANDSCAPE_16_9", "dimensions_at_1024": [1344, 768]},
-  "9:16": {"name": "PORTRAIT_9_16", "dimensions_at_1024": [768, 1344]}
+  "1:1": { "name": "SQUARE", "dimensions_at_1024": [1024, 1024] },
+  "16:9": { "name": "LANDSCAPE_16_9", "dimensions_at_1024": [1344, 768] },
+  "9:16": { "name": "PORTRAIT_9_16", "dimensions_at_1024": [768, 1344] }
 }
 ```
 
@@ -153,6 +160,7 @@ Generate an image using the specified model.
 | `model` | string | Model ID (e.g., `z-image-turbo`) |
 
 **Request Body**
+
 ```json
 {
   "prompt": "string, required",
@@ -168,10 +176,12 @@ Generate an image using the specified model.
 ```
 
 **Model-specific defaults:**
+
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
 
 **Response**
+
 - Content-Type: `image/png`
 - Body: Raw PNG bytes
 
@@ -214,18 +224,18 @@ Use a preset with optional base size:
 
 **Available Presets**
 
-| Value | Name | Dimensions (at 1024) |
-|-------|------|---------------------|
-| `1:1` | Square | 1024 × 1024 |
-| `4:5` | Portrait | 896 × 1088 |
-| `3:4` | Portrait | 896 × 1152 |
-| `2:3` | Portrait | 832 × 1216 |
-| `9:16` | Portrait | 768 × 1344 |
-| `5:4` | Landscape | 1088 × 896 |
-| `4:3` | Landscape | 1152 × 896 |
-| `3:2` | Landscape | 1216 × 832 |
-| `16:9` | Landscape | 1344 × 768 |
-| `21:9` | Ultrawide | 1536 × 640 |
+| Value  | Name      | Dimensions (at 1024) |
+| ------ | --------- | -------------------- |
+| `1:1`  | Square    | 1024 × 1024          |
+| `4:5`  | Portrait  | 896 × 1088           |
+| `3:4`  | Portrait  | 896 × 1152           |
+| `2:3`  | Portrait  | 832 × 1216           |
+| `9:16` | Portrait  | 768 × 1344           |
+| `5:4`  | Landscape | 1088 × 896           |
+| `4:3`  | Landscape | 1152 × 896           |
+| `3:2`  | Landscape | 1216 × 832           |
+| `16:9` | Landscape | 1344 × 768           |
+| `21:9` | Ultrawide | 1536 × 640           |
 
 ### 3. Default
 
@@ -256,6 +266,7 @@ Edit existing images using AI-guided natural language prompts. The model can cha
 List available img2img models.
 
 **Response**
+
 ```json
 {
   "available": ["qwen-image-edit"],
@@ -268,6 +279,7 @@ List available img2img models.
 Get the current img2img edit progress (useful for polling during edits).
 
 **Response (when editing)**
+
 ```json
 {
   "active": true,
@@ -279,6 +291,7 @@ Get the current img2img edit progress (useful for polling during edits).
 ```
 
 **Response (when idle)**
+
 ```json
 {
   "active": false
@@ -295,6 +308,7 @@ Edit an image using base64-encoded image in JSON body.
 | `model` | string | Model ID (e.g., `qwen-image-edit`) |
 
 **Request Body**
+
 ```json
 {
   "image": "base64_encoded_image_data...",
@@ -309,21 +323,22 @@ Edit an image using base64-encoded image in JSON body.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `image` | string | Yes | - | Base64 encoded image (PNG, JPG) |
-| `prompt` | string | Yes | - | Edit instruction for the image |
-| `negative_prompt` | string | No | `" "` | Negative prompt (model requires non-empty) |
-| `num_inference_steps` | int | No | `20` | Number of inference steps (1-100) |
-| `true_cfg_scale` | float | No | `4.0` | CFG scale for guidance (1.0-20.0) |
-| `seed` | int | No | `null` | Random seed (-1 or null for random) |
-| `width` | int | No | `null` | Output width (64-2048, defaults to input image width) |
-| `height` | int | No | `null` | Output height (64-2048, defaults to input image height) |
-| `use_lora` | bool | No | `false` | Use Lightning LoRA for faster inference (recommended: 4-6 steps, CFG 1.0) |
+| Field                 | Type   | Required | Default | Description                                                               |
+| --------------------- | ------ | -------- | ------- | ------------------------------------------------------------------------- |
+| `image`               | string | Yes      | -       | Base64 encoded image (PNG, JPG)                                           |
+| `prompt`              | string | Yes      | -       | Edit instruction for the image                                            |
+| `negative_prompt`     | string | No       | `" "`   | Negative prompt (model requires non-empty)                                |
+| `num_inference_steps` | int    | No       | `20`    | Number of inference steps (1-100)                                         |
+| `true_cfg_scale`      | float  | No       | `4.0`   | CFG scale for guidance (1.0-20.0)                                         |
+| `seed`                | int    | No       | `null`  | Random seed (-1 or null for random)                                       |
+| `width`               | int    | No       | `null`  | Output width (64-2048, defaults to input image width)                     |
+| `height`              | int    | No       | `null`  | Output height (64-2048, defaults to input image height)                   |
+| `use_lora`            | bool   | No       | `false` | Use Lightning LoRA for faster inference (recommended: 4-6 steps, CFG 1.0) |
 
 > **Lightning LoRA**: When `use_lora: true`, use `num_inference_steps: 4-6` and `true_cfg_scale: 1.0` for optimal results. Higher CFG values may cause artifacts with distilled models. The LoRA (`lightx2v/Qwen-Image-Lightning`) uses the EulerAncestral scheduler for best quality.
 
 **Response**
+
 - Content-Type: `image/png`
 - Body: Raw PNG bytes
 
@@ -357,6 +372,7 @@ Edit an image using multipart file upload.
 | `use_lora` | bool | No | `false` | Use Lightning LoRA for faster inference |
 
 **Response**
+
 - Content-Type: `image/png`
 - Body: Raw PNG bytes
 
@@ -375,31 +391,32 @@ TTS uses **actors** - named voice profiles created from reference audio. The sys
 
 ### Supported Languages
 
-| Code | Language |
-|------|----------|
-| `en` | English |
-| `es` | Spanish |
-| `fr` | French |
-| `de` | German |
-| `it` | Italian |
-| `pt` | Portuguese |
-| `pl` | Polish |
-| `tr` | Turkish |
-| `ru` | Russian |
-| `nl` | Dutch |
-| `cs` | Czech |
-| `ar` | Arabic |
-| `zh-cn` | Chinese |
-| `ja` | Japanese |
-| `hu` | Hungarian |
-| `ko` | Korean |
-| `hi` | Hindi |
+| Code    | Language   |
+| ------- | ---------- |
+| `en`    | English    |
+| `es`    | Spanish    |
+| `fr`    | French     |
+| `de`    | German     |
+| `it`    | Italian    |
+| `pt`    | Portuguese |
+| `pl`    | Polish     |
+| `tr`    | Turkish    |
+| `ru`    | Russian    |
+| `nl`    | Dutch      |
+| `cs`    | Czech      |
+| `ar`    | Arabic     |
+| `zh-cn` | Chinese    |
+| `ja`    | Japanese   |
+| `hu`    | Hungarian  |
+| `ko`    | Korean     |
+| `hi`    | Hindi      |
 
 ### `GET /tts/languages`
 
 List supported TTS languages.
 
 **Response**
+
 ```json
 {
   "languages": [
@@ -415,6 +432,7 @@ List supported TTS languages.
 Generate speech from text using a stored actor's voice (batch mode).
 
 **Request Body**
+
 ```json
 {
   "text": "Hello, this is a test.",
@@ -426,16 +444,17 @@ Generate speech from text using a stored actor's voice (batch mode).
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `text` | string | Yes | - | Text to synthesize (1-10000 chars) |
-| `actor` | string | Yes | - | Actor name for voice |
-| `language` | string | No | `en` | Output language code |
-| `temperature` | float | No | `0.65` | Sampling temperature (0.0-1.0) |
-| `speed` | float | No | `1.0` | Playback speed (0.5-2.0) |
-| `split_sentences` | bool | No | `true` | Split text into sentences |
+| Field             | Type   | Required | Default | Description                        |
+| ----------------- | ------ | -------- | ------- | ---------------------------------- |
+| `text`            | string | Yes      | -       | Text to synthesize (1-10000 chars) |
+| `actor`           | string | Yes      | -       | Actor name for voice               |
+| `language`        | string | No       | `en`    | Output language code               |
+| `temperature`     | float  | No       | `0.65`  | Sampling temperature (0.0-1.0)     |
+| `speed`           | float  | No       | `1.0`   | Playback speed (0.5-2.0)           |
+| `split_sentences` | bool   | No       | `true`  | Split text into sentences          |
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Raw WAV bytes (24kHz, 16-bit, mono)
 
@@ -453,6 +472,7 @@ Generate speech with streaming output (lower time-to-first-audio).
 Same request body as `/tts/generate`.
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Streaming WAV chunks
 
@@ -471,6 +491,7 @@ One-shot TTS with uploaded reference audio (no stored actor required).
 | `split_sentences` | bool | No | Split text (default: true) |
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Raw WAV bytes
 
@@ -485,6 +506,7 @@ Actors are named voice profiles with stored reference audio for voice cloning.
 List all actors.
 
 **Response**
+
 ```json
 {
   "actors": [
@@ -515,12 +537,14 @@ Create a new actor from uploaded audio files.
 | `audio_files` | file(s) | Yes | Reference audio (WAV, MP3, etc.) |
 
 **Tips for reference audio:**
+
 - Minimum 6 seconds recommended for best quality
 - Clean audio with minimal background noise
 - Multiple clips improve voice consistency
 - Supported formats: WAV, MP3, FLAC, OGG
 
 **Response** (201 Created)
+
 ```json
 {
   "id": "abc123",
@@ -544,6 +568,7 @@ Create a new actor from uploaded audio files.
 Get actor details by name.
 
 **Response**
+
 ```json
 {
   "id": "abc123",
@@ -569,6 +594,7 @@ Create a new actor from a YouTube video URL.
 Downloads audio from YouTube, optionally separates vocals using Demucs, trims silence using voice activity detection, and saves as actor reference. Useful for creating voice actors from interviews, podcasts, etc.
 
 **Request Body**
+
 ```json
 {
   "name": "string, required",
@@ -580,21 +606,23 @@ Downloads audio from YouTube, optionally separates vocals using Demucs, trims si
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `name` | string | Yes | - | Actor display name (must be unique) |
-| `youtube_url` | string | Yes | - | YouTube video URL |
-| `language` | string | No | `en` | Primary language code |
-| `description` | string | No | `""` | Actor description |
-| `max_duration` | float | No | `30.0` | Max duration of extracted audio (seconds) |
-| `separate_vocals` | bool | No | `true` | Remove background music using Demucs |
+| Field             | Type   | Required | Default | Description                               |
+| ----------------- | ------ | -------- | ------- | ----------------------------------------- |
+| `name`            | string | Yes      | -       | Actor display name (must be unique)       |
+| `youtube_url`     | string | Yes      | -       | YouTube video URL                         |
+| `language`        | string | No       | `en`    | Primary language code                     |
+| `description`     | string | No       | `""`    | Actor description                         |
+| `max_duration`    | float  | No       | `30.0`  | Max duration of extracted audio (seconds) |
+| `separate_vocals` | bool   | No       | `true`  | Remove background music using Demucs      |
 
 **Supported YouTube URL formats:**
+
 - `https://youtube.com/watch?v=VIDEO_ID`
 - `https://youtu.be/VIDEO_ID`
 - `https://youtube.com/shorts/VIDEO_ID`
 
 **Response** (201 Created)
+
 ```json
 {
   "id": "abc123",
@@ -626,6 +654,7 @@ Add additional audio file to an existing actor.
 | `audio_file` | file | Yes | Audio file to add |
 
 **Response** (201 Created)
+
 ```json
 {
   "id": "file123",
@@ -641,6 +670,7 @@ Add additional audio file to an existing actor.
 List all audio files for an actor.
 
 **Response**
+
 ```json
 [
   {
@@ -664,6 +694,7 @@ Download a specific audio file from an actor.
 | `file_id` | string | Audio file ID |
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Content-Disposition: attachment with original filename
 - Body: Raw WAV bytes
@@ -706,6 +737,7 @@ Get TTS generation history, most recent first.
 | `limit` | int | 50 | Maximum entries to return |
 
 **Response**
+
 ```json
 {
   "entries": [
@@ -727,6 +759,7 @@ Get TTS generation history, most recent first.
 Get the audio file for a TTS history entry.
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Raw WAV bytes
 
@@ -765,6 +798,7 @@ Maya TTS uses natural language voice descriptions instead of reference audio. De
 List available TTS models with their capabilities.
 
 **Response**
+
 ```json
 {
   "models": [
@@ -797,6 +831,7 @@ List available TTS models with their capabilities.
 Generate speech using Maya TTS with a voice description.
 
 **Request Body**
+
 ```json
 {
   "text": "Hello! <laugh> That's hilarious!",
@@ -806,14 +841,15 @@ Generate speech using Maya TTS with a voice description.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `text` | string | Yes | - | Text to synthesize (1-10000 chars), can include emotion tags |
-| `voice_description` | string | Yes | - | Natural language description of the voice (1-500 chars) |
-| `temperature` | float | No | `0.7` | Sampling temperature (0.0-1.0) |
-| `speed` | float | No | `1.0` | Playback speed (0.5-2.0) |
+| Field               | Type   | Required | Default | Description                                                  |
+| ------------------- | ------ | -------- | ------- | ------------------------------------------------------------ |
+| `text`              | string | Yes      | -       | Text to synthesize (1-10000 chars), can include emotion tags |
+| `voice_description` | string | Yes      | -       | Natural language description of the voice (1-500 chars)      |
+| `temperature`       | float  | No       | `0.7`   | Sampling temperature (0.0-1.0)                               |
+| `speed`             | float  | No       | `1.0`   | Playback speed (0.5-2.0)                                     |
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Raw WAV bytes (24kHz, 16-bit, mono)
 
@@ -830,6 +866,7 @@ Generate speech with Maya using streaming output.
 Same request body as `/tts/maya/generate`.
 
 **Response**
+
 - Content-Type: `audio/wav`
 - Body: Streaming WAV chunks
 
@@ -838,6 +875,7 @@ Same request body as `/tts/maya/generate`.
 List available emotion tags for Maya TTS.
 
 **Response**
+
 ```json
 {
   "tags": [
@@ -864,6 +902,7 @@ List available emotion tags for Maya TTS.
 ```
 
 **Usage example:**
+
 ```
 Hello everyone! <excited> I'm so happy to be here! <laugh> This is going to be fun.
 <whisper> But between you and me... <gasp> I can't believe it worked!
@@ -880,6 +919,7 @@ Maya Actors are saved voice descriptions that can be reused. Unlike XTTS actors 
 List all saved Maya actors.
 
 **Response**
+
 ```json
 {
   "actors": [
@@ -906,6 +946,7 @@ Create a new Maya actor (save a voice description preset).
 | `voice_description` | string | Yes | Voice description for Maya |
 
 **Response** (201 Created)
+
 ```json
 {
   "id": "abc123",
@@ -926,6 +967,7 @@ Create a new Maya actor (save a voice description preset).
 Get a specific Maya actor by ID.
 
 **Response**
+
 ```json
 {
   "id": "abc123",
@@ -947,6 +989,7 @@ Update a Maya actor.
 | `voice_description` | string | No | New voice description |
 
 **Response**
+
 ```json
 {
   "id": "abc123",
@@ -968,6 +1011,7 @@ Delete a Maya actor.
 ## Video Generation
 
 Video generation supports two modes:
+
 - **Text-to-Video (T2V)**: Generate video from a text prompt
 - **Image-to-Video (I2V)**: Animate a reference image based on a text prompt
 
@@ -975,22 +1019,22 @@ Generation is **asynchronous** - you start a job and poll for completion (~60-90
 
 ### Video Parameters
 
-| Parameter | Type | Default | Range | Description |
-|-----------|------|---------|-------|-------------|
-| `prompt` | string | required | 1-2000 chars | Text description of video |
-| `resolution` | enum | `"480p"` | `480p`, `720p` | Output resolution |
-| `aspect_ratio` | enum | `"16:9"` | `16:9`, `9:16`, `1:1` | Video aspect ratio |
-| `num_frames` | int | `61` | 25-121 | Number of frames (~1-5s at 24fps) |
-| `num_inference_steps` | int | `50` | 8-100 | Quality steps |
-| `guidance_scale` | float | `6.0` | 1.0-15.0 | Prompt adherence |
-| `seed` | int | `-1` | -1 or 0+ | Random seed (-1 = random) |
-| `fps` | int | `24` | 12-30 | Output video FPS |
+| Parameter             | Type   | Default  | Range                 | Description                       |
+| --------------------- | ------ | -------- | --------------------- | --------------------------------- |
+| `prompt`              | string | required | 1-2000 chars          | Text description of video         |
+| `resolution`          | enum   | `"480p"` | `480p`, `720p`        | Output resolution                 |
+| `aspect_ratio`        | enum   | `"16:9"` | `16:9`, `9:16`, `1:1` | Video aspect ratio                |
+| `num_frames`          | int    | `61`     | 25-121                | Number of frames (~1-5s at 24fps) |
+| `num_inference_steps` | int    | `50`     | 8-100                 | Quality steps                     |
+| `guidance_scale`      | float  | `6.0`    | 1.0-15.0              | Prompt adherence                  |
+| `seed`                | int    | `-1`     | -1 or 0+              | Random seed (-1 = random)         |
+| `fps`                 | int    | `24`     | 12-30                 | Output video FPS                  |
 
 **I2V-specific parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `image` | string | Yes | Base64 encoded reference image (PNG/JPG) |
+| Parameter | Type   | Required | Description                              |
+| --------- | ------ | -------- | ---------------------------------------- |
+| `image`   | string | Yes      | Base64 encoded reference image (PNG/JPG) |
 
 **Note:** For I2V, input images are automatically resized to match the target resolution (shorter side scaled to 480 or 720).
 
@@ -999,6 +1043,7 @@ Generation is **asynchronous** - you start a job and poll for completion (~60-90
 List available video generation models.
 
 **Response**
+
 ```json
 {
   "models": [
@@ -1024,6 +1069,7 @@ Start text-to-video generation.
 | `model` | string | Model ID (e.g., `hunyuan-video`) |
 
 **Request Body**
+
 ```json
 {
   "prompt": "A red panda eating bamboo in a bamboo forest",
@@ -1038,6 +1084,7 @@ Start text-to-video generation.
 ```
 
 **Response**
+
 ```json
 {
   "job_id": "abc12345",
@@ -1056,6 +1103,7 @@ Start image-to-video generation.
 | `model` | string | Model ID (e.g., `hunyuan-video`) |
 
 **Request Body**
+
 ```json
 {
   "prompt": "The panda starts eating the bamboo, moving its head slowly",
@@ -1071,6 +1119,7 @@ Start image-to-video generation.
 ```
 
 **Response**
+
 ```json
 {
   "job_id": "abc12345",
@@ -1089,6 +1138,7 @@ Get video generation job status. Poll this endpoint to track progress.
 | `job_id` | string | Job ID from generation request |
 
 **Response (processing)**
+
 ```json
 {
   "job_id": "abc12345",
@@ -1104,6 +1154,7 @@ Get video generation job status. Poll this endpoint to track progress.
 ```
 
 **Response (completed)**
+
 ```json
 {
   "job_id": "abc12345",
@@ -1119,6 +1170,7 @@ Get video generation job status. Poll this endpoint to track progress.
 ```
 
 **Response (failed)**
+
 ```json
 {
   "job_id": "abc12345",
@@ -1146,6 +1198,7 @@ Download completed video as MP4.
 | `job_id` | string | Job ID |
 
 **Response**
+
 - Content-Type: `video/mp4`
 - Body: Raw MP4 video bytes
 
@@ -1164,6 +1217,7 @@ Get video thumbnail (first frame as JPEG).
 | `job_id` | string | Job ID |
 
 **Response**
+
 - Content-Type: `image/jpeg`
 - Body: JPEG image bytes
 
@@ -1172,6 +1226,7 @@ Get video thumbnail (first frame as JPEG).
 Delete a video and its associated files.
 
 **Response**
+
 ```json
 {
   "status": "deleted",
@@ -1190,6 +1245,7 @@ Get list of generated videos.
 | `offset` | int | 0 | Number of entries to skip |
 
 **Response**
+
 ```json
 {
   "videos": [
@@ -1228,6 +1284,7 @@ Vision analysis allows you to send an image along with a text query and receive 
 List available vision models.
 
 **Response**
+
 ```json
 {
   "available": ["qwen3-vl-8b"],
@@ -1240,6 +1297,7 @@ List available vision models.
 Analyze an image with a text query using base64-encoded image in JSON body.
 
 **Request Body**
+
 ```json
 {
   "image": "base64_encoded_image_data...",
@@ -1249,14 +1307,15 @@ Analyze an image with a text query using base64-encoded image in JSON body.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `image` | string | Yes | - | Base64 encoded image (PNG, JPG, WebP) |
-| `query` | string | Yes | - | Question or instruction about the image |
-| `max_tokens` | int | No | `null` | Maximum tokens in response (null = model default) |
-| `temperature` | float | No | `0.7` | Sampling temperature for response generation |
+| Field         | Type   | Required | Default | Description                                       |
+| ------------- | ------ | -------- | ------- | ------------------------------------------------- |
+| `image`       | string | Yes      | -       | Base64 encoded image (PNG, JPG, WebP)             |
+| `query`       | string | Yes      | -       | Question or instruction about the image           |
+| `max_tokens`  | int    | No       | `null`  | Maximum tokens in response (null = model default) |
+| `temperature` | float  | No       | `0.7`   | Sampling temperature for response generation      |
 
 **Response**
+
 ```json
 {
   "response": "This image shows a red panda sitting on a tree branch, eating bamboo leaves. The panda has distinctive reddish-brown fur with white markings on its face.",
@@ -1283,6 +1342,7 @@ Analyze an image with a text query using multipart file upload.
 | `temperature` | float | No | `0.7` | Sampling temperature |
 
 **Response**
+
 ```json
 {
   "response": "The image contains a handwritten note that says: 'Meeting at 3pm in conference room B'",
@@ -1685,5 +1745,6 @@ print(response.json()["response"])
 ## OpenAPI Schema
 
 Interactive docs available at:
+
 - Swagger UI: `http://localhost:4201/docs`
 - ReDoc: `http://localhost:4201/redoc`
