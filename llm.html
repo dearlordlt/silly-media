@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Silly Media - LLM Chat</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface2: #0f3460;
+      --accent: #e94560;
+      --accent2: #533483;
+      --text: #eee;
+      --text-dim: #888;
+      --success: #4ade80;
+      --radius: 8px;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      gap: 20px;
+      height: calc(100vh - 40px);
+    }
+    @media (max-width: 900px) {
+      .container { grid-template-columns: 1fr; height: auto; }
+      .chat-panel { height: 70vh; }
+    }
+    h1 { font-size: 1.5rem; margin-bottom: 20px; color: var(--accent); }
+    h2 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text-dim); }
+
+    .panel {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .controls {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    textarea, input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; min-width: 0; }
+    .row input[type="number"] {
+      width: 100%;
+      box-sizing: border-box;
+      appearance: textfield;
+      -moz-appearance: textfield;
+    }
+
+    button {
+      padding: 10px 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+    }
+    .btn-secondary:hover { background: var(--accent2); }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+
+    .btn-group { display: flex; gap: 8px; margin-top: 16px; }
+    .btn-group button { flex: 1; }
+
+    #sendBtn {
+      padding: 14px 24px;
+      font-size: 1rem;
+    }
+
+    .status {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      display: none;
+    }
+    .status.error { display: block; background: #dc262633; color: #fca5a5; }
+    .status.success { display: block; background: #16a34a33; color: var(--success); }
+    .status.loading { display: block; background: var(--surface2); color: var(--text-dim); }
+
+    /* Chat panel */
+    .chat-panel {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      background: var(--bg);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+    }
+    .message {
+      margin-bottom: 16px;
+      padding: 12px;
+      border-radius: var(--radius);
+      max-width: 85%;
+    }
+    .message.user {
+      background: var(--accent2);
+      margin-left: auto;
+    }
+    .message.assistant {
+      background: var(--surface2);
+      margin-right: auto;
+    }
+    .message.system {
+      background: var(--surface);
+      border: 1px dashed var(--text-dim);
+      font-style: italic;
+      max-width: 100%;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+    .message-role {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    .message-content {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      line-height: 1.5;
+    }
+    .message-meta {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 8px;
+      text-align: right;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 8px;
+    }
+    .input-area textarea {
+      flex: 1;
+      margin-bottom: 0;
+      min-height: 60px;
+    }
+    .input-area button {
+      align-self: flex-end;
+      flex-shrink: 0;
+    }
+
+    /* Slider styling */
+    .slider-container {
+      margin-bottom: 12px;
+    }
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .slider-value {
+      font-size: 0.85rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      margin-bottom: 0;
+      padding: 0;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* Toggle switch */
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .toggle {
+      position: relative;
+      width: 48px;
+      height: 24px;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--surface2);
+      border-radius: 12px;
+      transition: 0.3s;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+    .toggle input:checked + .toggle-slider {
+      background: var(--accent);
+    }
+    .toggle input:checked + .toggle-slider:before {
+      transform: translateX(24px);
+    }
+
+    /* Section divider */
+    .section-divider {
+      border-top: 1px solid var(--surface2);
+      margin: 16px 0;
+      padding-top: 16px;
+    }
+
+    /* Model info */
+    .model-info {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      padding: 8px;
+      background: var(--bg);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+    }
+    .model-info span {
+      color: var(--success);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Controls Panel -->
+    <div class="panel controls">
+      <h1>LLM Chat</h1>
+
+      <div class="model-info">
+        Model: <span id="modelName">huihui-qwen3-4b</span><br>
+        Status: <span id="modelStatus">Ready</span>
+      </div>
+
+      <label for="systemPrompt">System Prompt</label>
+      <textarea id="systemPrompt" placeholder="You are a helpful assistant...">You are a creative and helpful assistant. Be concise but thorough.</textarea>
+
+      <div class="section-divider">
+        <h2>Generation Settings</h2>
+      </div>
+
+      <div class="slider-container">
+        <div class="slider-header">
+          <label>Temperature</label>
+          <span class="slider-value" id="tempValue">0.8</span>
+        </div>
+        <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.8">
+      </div>
+
+      <div class="slider-container">
+        <div class="slider-header">
+          <label>Top P</label>
+          <span class="slider-value" id="topPValue">0.9</span>
+        </div>
+        <input type="range" id="topP" min="0" max="1" step="0.05" value="0.9">
+      </div>
+
+      <div class="slider-container">
+        <div class="slider-header">
+          <label>Top K</label>
+          <span class="slider-value" id="topKValue">50</span>
+        </div>
+        <input type="range" id="topK" min="1" max="100" step="1" value="50">
+      </div>
+
+      <div class="slider-container">
+        <div class="slider-header">
+          <label>Repetition Penalty</label>
+          <span class="slider-value" id="repPenValue">1.1</span>
+        </div>
+        <input type="range" id="repPen" min="1" max="2" step="0.05" value="1.1">
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="maxTokens">Max Tokens</label>
+          <input type="number" id="maxTokens" value="32768" min="1" max="32768">
+        </div>
+        <div>
+          <label for="seed">Seed (-1 = random)</label>
+          <input type="number" id="seed" value="-1" min="-1">
+        </div>
+      </div>
+
+      <div class="toggle-container">
+        <label>Streaming</label>
+        <label class="toggle">
+          <input type="checkbox" id="streaming" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-container">
+        <label>Enable Thinking</label>
+        <label class="toggle">
+          <input type="checkbox" id="enableThinking">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn-secondary" onclick="clearChat()">Clear Chat</button>
+        <button class="btn-danger" onclick="stopGeneration()">Stop</button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="panel chat-panel">
+      <div class="chat-messages" id="chatMessages">
+        <!-- Messages will be added here -->
+      </div>
+
+      <div class="input-area">
+        <textarea id="userInput" placeholder="Type your message..." onkeydown="handleKeydown(event)"></textarea>
+        <button id="sendBtn" class="btn-primary" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:4201';
+    let messages = [];
+    let abortController = null;
+    let isGenerating = false;
+
+    // Initialize sliders
+    document.querySelectorAll('input[type="range"]').forEach(slider => {
+      const valueSpan = document.getElementById(slider.id.replace(/([A-Z])/g, (m) => m) + 'Value')
+        || document.getElementById(slider.id + 'Value');
+      if (valueSpan) {
+        slider.addEventListener('input', () => {
+          valueSpan.textContent = slider.value;
+        });
+      }
+    });
+
+    // Fix slider value IDs
+    document.getElementById('temperature').addEventListener('input', (e) => {
+      document.getElementById('tempValue').textContent = e.target.value;
+    });
+    document.getElementById('topP').addEventListener('input', (e) => {
+      document.getElementById('topPValue').textContent = e.target.value;
+    });
+    document.getElementById('topK').addEventListener('input', (e) => {
+      document.getElementById('topKValue').textContent = e.target.value;
+    });
+    document.getElementById('repPen').addEventListener('input', (e) => {
+      document.getElementById('repPenValue').textContent = e.target.value;
+    });
+
+    function getApiUrl() {
+      return API_URL;
+    }
+
+    function showStatus(message, type = 'loading') {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = 'status ' + type;
+    }
+
+    function hideStatus() {
+      const status = document.getElementById('status');
+      status.className = 'status';
+    }
+
+    function addMessage(role, content, meta = null) {
+      const chatMessages = document.getElementById('chatMessages');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message ' + role;
+
+      let html = `
+        <div class="message-role">${role}</div>
+        <div class="message-content">${escapeHtml(content)}</div>
+      `;
+
+      if (meta) {
+        html += `<div class="message-meta">${meta}</div>`;
+      }
+
+      messageDiv.innerHTML = html;
+      chatMessages.appendChild(messageDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      return messageDiv;
+    }
+
+    function updateLastMessage(content, meta = null) {
+      const chatMessages = document.getElementById('chatMessages');
+      const lastMessage = chatMessages.lastElementChild;
+      if (lastMessage) {
+        const contentDiv = lastMessage.querySelector('.message-content');
+        if (contentDiv) {
+          contentDiv.textContent = content;
+        }
+        if (meta) {
+          let metaDiv = lastMessage.querySelector('.message-meta');
+          if (!metaDiv) {
+            metaDiv = document.createElement('div');
+            metaDiv.className = 'message-meta';
+            lastMessage.appendChild(metaDiv);
+          }
+          metaDiv.textContent = meta;
+        }
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function handleKeydown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    }
+
+    async function sendMessage() {
+      const userInput = document.getElementById('userInput');
+      const content = userInput.value.trim();
+
+      if (!content || isGenerating) return;
+
+      // Add user message
+      messages.push({ role: 'user', content });
+      addMessage('user', content);
+      userInput.value = '';
+
+      // Build request
+      const systemPrompt = document.getElementById('systemPrompt').value.trim();
+      const requestMessages = [];
+
+      if (systemPrompt) {
+        requestMessages.push({ role: 'system', content: systemPrompt });
+      }
+      requestMessages.push(...messages);
+
+      const request = {
+        messages: requestMessages,
+        temperature: parseFloat(document.getElementById('temperature').value),
+        top_p: parseFloat(document.getElementById('topP').value),
+        top_k: parseInt(document.getElementById('topK').value),
+        max_tokens: parseInt(document.getElementById('maxTokens').value),
+        repetition_penalty: parseFloat(document.getElementById('repPen').value),
+        enable_thinking: document.getElementById('enableThinking').checked,
+      };
+
+      const seed = parseInt(document.getElementById('seed').value);
+      if (seed >= 0) {
+        request.seed = seed;
+      }
+
+      const streaming = document.getElementById('streaming').checked;
+      isGenerating = true;
+      document.getElementById('sendBtn').disabled = true;
+      document.getElementById('modelStatus').textContent = 'Generating...';
+
+      try {
+        if (streaming) {
+          await streamResponse(request);
+        } else {
+          await generateResponse(request);
+        }
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          showStatus('Error: ' + error.message, 'error');
+          console.error('Generation error:', error);
+        }
+      }
+
+      // Always re-enable UI (outside try-catch to ensure it runs)
+      isGenerating = false;
+      document.getElementById('sendBtn').disabled = false;
+      document.getElementById('modelStatus').textContent = 'Ready';
+      abortController = null;
+      hideStatus();
+    }
+
+    async function generateResponse(request) {
+      showStatus('Generating...', 'loading');
+      const startTime = Date.now();
+
+      const response = await fetch(`${getApiUrl()}/llm/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Generation failed');
+      }
+
+      const data = await response.json();
+      const elapsed = (Date.now() - startTime) / 1000;
+      const tokensPerSec = data.output_tokens > 0 ? (data.output_tokens / elapsed).toFixed(1) : 0;
+
+      messages.push({ role: 'assistant', content: data.text });
+      addMessage('assistant', data.text,
+        `${data.input_tokens} in / ${data.output_tokens} out | ${elapsed.toFixed(1)}s | ${tokensPerSec} tok/s`);
+
+      hideStatus();
+    }
+
+    async function streamResponse(request) {
+      showStatus('Streaming...', 'loading');
+      const startTime = Date.now();
+      let tokenCount = 0;
+      let firstTokenTime = null;
+
+      abortController = new AbortController();
+
+      const response = await fetch(`${getApiUrl()}/llm/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || 'Stream failed');
+      }
+
+      // Add empty assistant message
+      addMessage('assistant', '');
+      let fullContent = '';
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                continue;
+              }
+              try {
+                const chunk = JSON.parse(data);
+                if (chunk.error) {
+                  throw new Error(chunk.error);
+                }
+                if (chunk.delta) {
+                  if (firstTokenTime === null) {
+                    firstTokenTime = Date.now();
+                  }
+                  fullContent += chunk.delta;
+                  tokenCount++;
+                  updateLastMessage(fullContent);
+                }
+              } catch (e) {
+                if (e.message !== 'Unexpected end of JSON input') {
+                  console.error('Parse error:', e);
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      const endTime = Date.now();
+      const ttft = firstTokenTime ? ((firstTokenTime - startTime) / 1000).toFixed(2) : '?';
+      const genTime = firstTokenTime ? (endTime - firstTokenTime) / 1000 : (endTime - startTime) / 1000;
+      const tokensPerSec = tokenCount > 0 && genTime > 0 ? (tokenCount / genTime).toFixed(1) : 0;
+
+      messages.push({ role: 'assistant', content: fullContent });
+      updateLastMessage(fullContent, `${tokenCount} tok | TTFT: ${ttft}s | ${tokensPerSec} tok/s`);
+      hideStatus();
+    }
+
+    function stopGeneration() {
+      if (abortController) {
+        abortController.abort();
+        showStatus('Generation stopped', 'error');
+      }
+    }
+
+    function clearChat() {
+      messages = [];
+      document.getElementById('chatMessages').innerHTML = '';
+      hideStatus();
+    }
+
+    // Check model status on load
+    async function checkModelStatus() {
+      try {
+        const response = await fetch(`${getApiUrl()}/llm/models`);
+        const data = await response.json();
+
+        if (data.available && data.available.length > 0) {
+          document.getElementById('modelName').textContent = data.available[0];
+        }
+
+        if (data.loaded && data.loaded.length > 0) {
+          document.getElementById('modelStatus').textContent = 'Loaded';
+        } else {
+          document.getElementById('modelStatus').textContent = 'Ready (will load on first use)';
+        }
+      } catch (error) {
+        document.getElementById('modelStatus').textContent = 'API unavailable';
+        console.error('Failed to check model status:', error);
+      }
+    }
+
+    checkModelStatus();
+  </script>
+</body>
+</html>

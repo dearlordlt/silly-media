@@ -120,6 +120,19 @@ async def lifespan(app: FastAPI):
         )
     logger.info(f"Registered img2img models: {Img2ImgRegistry.get_available_models()}")
 
+    # Register LLM models with VRAMManager
+    from .llm import LLMRegistry
+
+    for name in LLMRegistry.get_available_models():
+        model = LLMRegistry.get_model(name)
+        vram_manager.register(
+            name,
+            ModelType.LLM,
+            model,
+            estimated_vram_gb=getattr(model, "estimated_vram_gb", 10.0),
+        )
+    logger.info(f"Registered LLM models: {LLMRegistry.get_available_models()}")
+
     # Optionally preload the default model
     if settings.model_preload:
         logger.info(f"Preloading default model: {settings.default_model}")
@@ -162,6 +175,7 @@ from .routers.video import router as video_router  # noqa: E402
 from .routers.vision import router as vision_router  # noqa: E402
 from .routers.img2img import router as img2img_router  # noqa: E402
 from .routers.pixelart import router as pixelart_router  # noqa: E402
+from .routers.llm import router as llm_router  # noqa: E402
 
 app.include_router(actors_router)
 app.include_router(tts_router)
@@ -169,6 +183,7 @@ app.include_router(video_router)
 app.include_router(vision_router)
 app.include_router(img2img_router)
 app.include_router(pixelart_router)
+app.include_router(llm_router)
 
 
 @app.get("/health")
@@ -182,6 +197,7 @@ async def health_check():
         "available_video_models": vram_manager.get_available_models(ModelType.VIDEO),
         "available_vision_models": vram_manager.get_available_models(ModelType.VISION),
         "available_img2img_models": vram_manager.get_available_models(ModelType.IMG2IMG),
+        "available_llm_models": vram_manager.get_available_models(ModelType.LLM),
     }
 
 
@@ -227,6 +243,14 @@ async def list_models():
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
                 vram_manager.get_model_info(m).model_type == ModelType.IMG2IMG
+            ],
+        },
+        "llm": {
+            "available": vram_manager.get_available_models(ModelType.LLM),
+            "loaded": [
+                m for m in vram_manager.get_loaded_models()
+                if vram_manager.get_model_info(m) and
+                vram_manager.get_model_info(m).model_type == ModelType.LLM
             ],
         },
     }

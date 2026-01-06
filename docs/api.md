@@ -6,7 +6,7 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides six main capabilities:
+Silly Media provides seven main capabilities:
 
 - **Image Generation**: Text-to-image using diffusion models
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
@@ -14,6 +14,7 @@ Silly Media provides six main capabilities:
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
+- **LLM Text Generation**: Text completion and chat using large language models
 
 The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model can be active at a time.
 
@@ -54,6 +55,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | --------------- | ----------------- | ----- | ----------------------------------------------------- |
 | Qwen Image Edit | `qwen-image-edit` | ~20GB | AI-guided image editing with natural language prompts |
 
+### LLM Models
+
+| Model            | ID                 | VRAM  | Notes                                              |
+| ---------------- | ------------------ | ----- | -------------------------------------------------- |
+| Huihui Qwen3 4B  | `huihui-qwen3-4b`  | ~10GB | Abliterated Qwen3-4B, bfloat16, creative writing   |
+
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 **Model comparison:**
@@ -78,7 +85,8 @@ Check API and model status.
   "available_image_models": ["z-image-turbo", "ovis-image-7b"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["hunyuan-video"],
-  "available_vision_models": ["qwen3-vl-8b"]
+  "available_vision_models": ["qwen3-vl-8b"],
+  "available_llm_models": ["huihui-qwen3-4b"]
 }
 ```
 
@@ -104,6 +112,10 @@ List available and loaded models by type.
   },
   "vision": {
     "available": ["qwen3-vl-8b"],
+    "loaded": []
+  },
+  "llm": {
+    "available": ["huihui-qwen3-4b"],
     "loaded": []
   }
 }
@@ -1544,6 +1556,125 @@ Analyze an image with a text query using multipart file upload.
 
 ---
 
+## LLM Text Generation
+
+Generate text using large language models for creative writing, storytelling, chat, and more.
+
+### Features
+
+- **Chat & Completion modes**: Use chat messages or raw prompts
+- **Creative writing defaults**: Temperature 0.8, top_p 0.9 for varied output
+- **Streaming support**: SSE for real-time token streaming
+- **Thinking mode**: Qwen3-specific reasoning capability
+- **Full parameter control**: temperature, top_p, top_k, repetition_penalty, min_p
+
+### `GET /llm/models`
+
+List available LLM models.
+
+**Response**
+
+```json
+{
+  "available": ["huihui-qwen3-4b"],
+  "loaded": []
+}
+```
+
+### `POST /llm/generate`
+
+Generate text completion (non-streaming).
+
+**Request Body (Chat format)**
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "You are a creative storyteller."},
+    {"role": "user", "content": "Write a haiku about coding."}
+  ],
+  "temperature": 0.8,
+  "max_tokens": 2048
+}
+```
+
+**Request Body (Raw prompt)**
+
+```json
+{
+  "prompt": "Write a haiku about coding.",
+  "system_prompt": "You are a creative poet.",
+  "temperature": 0.8
+}
+```
+
+| Field               | Type    | Required | Default | Range       | Description                                    |
+| ------------------- | ------- | -------- | ------- | ----------- | ---------------------------------------------- |
+| `messages`          | array   | No*      | null    | -           | Chat messages (alternative to prompt)          |
+| `prompt`            | string  | No*      | null    | -           | Raw prompt text (alternative to messages)      |
+| `system_prompt`     | string  | No       | null    | -           | System prompt (only used with 'prompt' input)  |
+| `temperature`       | float   | No       | 0.8     | 0.0-2.0     | Sampling temperature                           |
+| `top_p`             | float   | No       | 0.9     | 0.0-1.0     | Nucleus sampling                               |
+| `top_k`             | int     | No       | 50      | 1-100       | Top-k sampling                                 |
+| `max_tokens`        | int     | No       | 32768   | 1-32768     | Maximum output tokens                          |
+| `repetition_penalty`| float   | No       | 1.1     | 1.0-2.0     | Repetition penalty                             |
+| `min_p`             | float   | No       | null    | 0.0-1.0     | Minimum probability sampling                   |
+| `seed`              | int     | No       | null    | -1 or 0+    | Random seed (-1 or null for random)            |
+| `enable_thinking`   | bool    | No       | false   | -           | Enable Qwen3 thinking mode                     |
+
+*Either `messages` or `prompt` must be provided, but not both.
+
+**Response**
+
+```json
+{
+  "text": "Fingers on the keys\nLogic flows like mountain streams\nBugs fade in the night",
+  "model": "Huihui Qwen3 4B",
+  "input_tokens": 25,
+  "output_tokens": 18,
+  "generation_time_seconds": 1.23,
+  "seed": null
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request (missing/conflicting input) |
+| 500 | Generation failed |
+
+### `POST /llm/stream`
+
+Generate text completion with streaming (SSE).
+
+Same request body as `/llm/generate`.
+
+**Response** (Server-Sent Events)
+
+```
+data: {"delta": "Fingers", "finish_reason": null}
+data: {"delta": " on", "finish_reason": null}
+data: {"delta": " the", "finish_reason": null}
+data: {"delta": " keys", "finish_reason": null}
+...
+data: {"delta": "", "finish_reason": "stop"}
+data: [DONE]
+```
+
+### Default Parameters
+
+The defaults are tuned for creative writing:
+
+| Parameter           | Default | Reasoning                                        |
+| ------------------- | ------- | ------------------------------------------------ |
+| `temperature`       | 0.8     | Creative but coherent - good for fiction         |
+| `top_p`             | 0.9     | Allows variety while avoiding low-prob tokens    |
+| `top_k`             | 50      | Standard diversity setting                       |
+| `repetition_penalty`| 1.1     | Gentle penalty to avoid loops                    |
+| `max_tokens`        | 32768   | Full native context (Qwen3-4B supports 32K)      |
+
+---
+
 ## Examples
 
 ### Pixel Art Generation
@@ -1767,6 +1898,79 @@ curl -X POST http://localhost:4201/tts/maya/generate \
 curl -X POST http://localhost:4201/tts/maya/actors \
   -F "name=Narrator Bob" \
   -F "voice_description=A deep, authoritative male voice with a calm, measured pace"
+```
+
+### LLM Text Generation
+
+#### Non-Streaming (curl)
+
+```bash
+curl -X POST http://localhost:4201/llm/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "system", "content": "You are a creative storyteller."},
+      {"role": "user", "content": "Write a short story about a robot learning to paint."}
+    ],
+    "temperature": 0.8,
+    "max_tokens": 1024
+  }'
+```
+
+#### Streaming (curl)
+
+```bash
+curl -X POST http://localhost:4201/llm/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Write a poem about the ocean.",
+    "system_prompt": "You are a poet.",
+    "temperature": 0.9
+  }'
+```
+
+#### Python Client (LLM)
+
+```python
+import requests
+
+# Non-streaming generation
+response = requests.post(
+    "http://localhost:4201/llm/generate",
+    json={
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Explain quantum computing in simple terms."},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 500,
+    },
+)
+result = response.json()
+print(f"Response: {result['text']}")
+print(f"Tokens: {result['input_tokens']} in, {result['output_tokens']} out")
+
+# Streaming generation
+response = requests.post(
+    "http://localhost:4201/llm/stream",
+    json={
+        "prompt": "Write a haiku about coding.",
+        "temperature": 0.8,
+    },
+    stream=True,
+)
+
+for line in response.iter_lines():
+    if line:
+        line = line.decode("utf-8")
+        if line.startswith("data: "):
+            data = line[6:]
+            if data != "[DONE]":
+                import json
+                chunk = json.loads(data)
+                if "delta" in chunk:
+                    print(chunk["delta"], end="", flush=True)
+print()  # Newline at end
 ```
 
 ### Python Client

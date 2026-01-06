@@ -25,6 +25,7 @@ class ModelType(Enum):
     VIDEO = "video"
     VISION = "vision"
     IMG2IMG = "img2img"
+    LLM = "llm"
 
 
 class Loadable(Protocol):
@@ -68,6 +69,7 @@ class VRAMManager:
         "maya": 16.0,
         "qwen3-vl-8b": 18.0,
         "qwen-image-edit": 20.0,
+        "huihui-qwen3-4b": 10.0,
     }
 
     def __new__(cls) -> "VRAMManager":
