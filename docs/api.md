@@ -24,10 +24,13 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 ### Image Models
 
-| Model         | ID              | Steps | Speed  | Notes                             |
-| ------------- | --------------- | ----- | ------ | --------------------------------- |
-| Z-Image Turbo | `z-image-turbo` | 9     | Fast   | Default, bilingual text rendering |
-| Ovis Image 7B | `ovis-image-7b` | 50    | Slower | Requires custom diffusers fork    |
+| Model           | ID                | Steps   | VRAM  | Notes                                        |
+| --------------- | ----------------- | ------- | ----- | -------------------------------------------- |
+| Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast      |
+| Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
+| Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
+
+\* With `use_lora: true`, Qwen Image 2512 uses 6 steps instead of 50.
 
 ### Audio Models
 
@@ -184,13 +187,15 @@ Generate an image using the specified model.
   "width": "int, optional (64-2048)",
   "height": "int, optional (64-2048)",
   "aspect_ratio": "string, optional",
-  "base_size": "int, optional (256-2048, default 1024)"
+  "base_size": "int, optional (256-2048, default 1024)",
+  "use_lora": "bool, optional (default false, only for qwen-image-2512)"
 }
 ```
 
 **Model-specific defaults:**
 
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
+- `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
 
 **Response**
@@ -1777,6 +1782,31 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
     "aspect_ratio": "16:9"
   }' \
   -o landscape.png
+```
+
+#### Qwen Image 2512 (Standard - 50 steps)
+
+```bash
+curl -X POST http://localhost:4201/generate/qwen-image-2512 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A detailed portrait of a woman in Renaissance style",
+    "aspect_ratio": "3:4"
+  }' \
+  -o portrait.png
+```
+
+#### Qwen Image 2512 with Turbo-LoRA (6 steps)
+
+```bash
+curl -X POST http://localhost:4201/generate/qwen-image-2512 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A detailed portrait of a woman in Renaissance style",
+    "aspect_ratio": "3:4",
+    "use_lora": true
+  }' \
+  -o portrait_fast.png
 ```
 
 ### Image Editing (Img2Img)

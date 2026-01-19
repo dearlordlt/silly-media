@@ -80,6 +80,12 @@ class GenerateRequest(BaseModel):
         int, Field(default=1024, ge=256, le=2048, description="Base size for aspect ratio calculation")
     ] = 1024
 
+    # LoRA option for models that support it (e.g., Qwen-Image-2512 with Turbo-LoRA)
+    use_lora: Annotated[
+        bool,
+        Field(default=False, description="Use Turbo LoRA for faster inference (model-dependent)"),
+    ] = False
+
     @model_validator(mode="after")
     def resolve_dimensions(self) -> "GenerateRequest":
         """Resolve final width/height from the provided options."""

@@ -6,7 +6,6 @@
 ```bash
 ./restart.sh    # Fast: copies Python files to container + restart (use this for code changes)
 ./build.sh      # Full rebuild with --no-cache (only needed for dependency changes)
-./dev.sh        # Development mode with hot reload
 ```
 
 ### restart.sh (Recommended for Code Changes)
@@ -18,10 +17,8 @@ Only needed when:
 - Changing Dockerfile
 - First time setup
 
-### dev.sh (Hot Reload)
+### Dev Mode (Hot Reload)
 ```bash
-./dev.sh
-# Or manually:
 docker compose --profile dev up silly-media-dev
 ```
 

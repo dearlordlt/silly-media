@@ -1675,7 +1675,17 @@
         <input type="text" id="apiUrl" value="http://localhost:4201">
 
         <label for="model">Model</label>
-        <input type="text" id="model" value="z-image-turbo">
+        <select id="model" onchange="onModelChange()">
+          <option value="z-image-turbo" selected>Z-Image Turbo</option>
+          <option value="qwen-image-2512">Qwen Image 2512</option>
+        </select>
+
+        <div id="loraOptions" style="display: none;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 8px;">
+            <input type="checkbox" id="useLora" onchange="onLoraChange()" style="width: auto; margin: 0;">
+            <span>Use Turbo LoRA (6 steps, faster)</span>
+          </label>
+        </div>
       </div>
 
       <button id="generateBtn" class="btn-primary" onclick="generate()">Generate</button>
@@ -2239,6 +2249,7 @@ Results:
         seed: document.getElementById('seed').value,
         apiUrl: document.getElementById('apiUrl').value,
         model: document.getElementById('model').value,
+        useLora: document.getElementById('useLora').checked,
         negativePrompt: document.getElementById('negativePrompt').value,
         batchJson: document.getElementById('batchJson').value,
         simpleBatchCount: document.getElementById('simpleBatchCount').value
@@ -2276,6 +2287,9 @@ Results:
         if (s.seed) document.getElementById('seed').value = s.seed;
         if (s.apiUrl) document.getElementById('apiUrl').value = s.apiUrl;
         if (s.model) document.getElementById('model').value = s.model;
+        if (s.useLora !== undefined) document.getElementById('useLora').checked = s.useLora;
+        // Update UI to show/hide LoRA options based on selected model (without triggering save)
+        updateLoraVisibility();
         if (s.negativePrompt) document.getElementById('negativePrompt').value = s.negativePrompt;
         if (s.batchJson) {
           document.getElementById('batchJson').value = s.batchJson;
@@ -2742,6 +2756,15 @@ Results:
       if (settings.seed === -1) delete settings.seed;
       if (!settings.negative_prompt) delete settings.negative_prompt;
 
+      // Add use_lora for models that support it
+      const model = document.getElementById('model').value;
+      if (model === 'qwen-image-2512') {
+        const useLora = document.getElementById('useLora').checked;
+        if (useLora) {
+          settings.use_lora = true;
+        }
+      }
+
       return settings;
     }
 
@@ -2761,6 +2784,66 @@ Results:
 
     function getModel() {
       return document.getElementById('model').value;
+    }
+
+    // Helper to update LoRA visibility without triggering save (used during load)
+    function updateLoraVisibility() {
+      const model = document.getElementById('model').value;
+      const loraOptions = document.getElementById('loraOptions');
+      loraOptions.style.display = model === 'qwen-image-2512' ? 'block' : 'none';
+    }
+
+    // Model change handler - show/hide LoRA options and update defaults
+    function onModelChange() {
+      const model = document.getElementById('model').value;
+      const loraOptions = document.getElementById('loraOptions');
+      const stepsInput = document.getElementById('steps');
+      const cfgInput = document.getElementById('cfgScale');
+      const cfgValue = document.getElementById('cfgScaleValue');
+
+      // Show LoRA option only for qwen-image-2512
+      if (model === 'qwen-image-2512') {
+        loraOptions.style.display = 'block';
+        // Check if LoRA is enabled and set defaults accordingly
+        const useLora = document.getElementById('useLora').checked;
+        if (useLora) {
+          stepsInput.value = 6;
+          cfgInput.value = 1.0;
+          if (cfgValue) cfgValue.textContent = '1.0';
+        } else {
+          stepsInput.value = 50;
+          cfgInput.value = 4.0;
+          if (cfgValue) cfgValue.textContent = '4.0';
+        }
+      } else {
+        loraOptions.style.display = 'none';
+        // Set defaults for z-image-turbo
+        if (model === 'z-image-turbo') {
+          stepsInput.value = 9;
+          cfgInput.value = 0.0;
+          if (cfgValue) cfgValue.textContent = '0.0';
+        }
+      }
+      saveSettings();
+    }
+
+    // LoRA checkbox change handler
+    function onLoraChange() {
+      const useLora = document.getElementById('useLora').checked;
+      const stepsInput = document.getElementById('steps');
+      const cfgInput = document.getElementById('cfgScale');
+      const cfgValue = document.getElementById('cfgScaleValue');
+
+      if (useLora) {
+        stepsInput.value = 6;
+        cfgInput.value = 1.0;
+        if (cfgValue) cfgValue.textContent = '1.0';
+      } else {
+        stepsInput.value = 50;
+        cfgInput.value = 4.0;
+        if (cfgValue) cfgValue.textContent = '4.0';
+      }
+      saveSettings();
     }
 
     // Progress polling (generation progress in preview container)

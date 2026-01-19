@@ -64,6 +64,7 @@ class VRAMManager:
     VRAM_ESTIMATES = {
         "z-image-turbo": 22.0,
         "ovis-image-7b": 20.0,
+        "qwen-image-2512": 15.0,  # GGUF Q5_K_M quantization
         "xtts-v2": 2.0,
         "demucs": 2.0,
         "maya": 16.0,
