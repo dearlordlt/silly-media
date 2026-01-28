@@ -26,6 +26,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 | Model           | ID                | Steps   | VRAM  | Notes                                        |
 | --------------- | ----------------- | ------- | ----- | -------------------------------------------- |
+| Z-Image         | `z-image`         | 30      | ~22GB | Full CFG support, negative prompts, high quality |
 | Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast      |
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
 | Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
@@ -85,7 +86,7 @@ Check API and model status.
 {
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
-  "available_image_models": ["z-image-turbo", "ovis-image-7b"],
+  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["hunyuan-video"],
   "available_vision_models": ["qwen3-vl-8b"],
@@ -102,7 +103,7 @@ List available and loaded models by type.
 ```json
 {
   "image": {
-    "available": ["z-image-turbo", "ovis-image-7b"],
+    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b"],
     "loaded": ["z-image-turbo"]
   },
   "audio": {
@@ -115,6 +116,10 @@ List available and loaded models by type.
   },
   "vision": {
     "available": ["qwen3-vl-8b"],
+    "loaded": []
+  },
+  "img2img": {
+    "available": ["qwen-image-edit"],
     "loaded": []
   },
   "llm": {
@@ -194,6 +199,7 @@ Generate an image using the specified model.
 
 **Model-specific defaults:**
 
+- `z-image`: 30 steps, cfg_scale 4.0 (supports 3.0-5.0, full CFG support)
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
@@ -1784,6 +1790,20 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
   -o landscape.png
 ```
 
+#### Z-Image (Standard - 30 steps, Full CFG)
+
+```bash
+curl -X POST http://localhost:4201/generate/z-image \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a detailed oil painting of a mountain landscape at sunset",
+    "negative_prompt": "blurry, low quality, watermark",
+    "aspect_ratio": "16:9",
+    "cfg_scale": 4.0
+  }' \
+  -o painting.png
+```
+
 #### Qwen Image 2512 (Standard - 50 steps)
 
 ```bash
@@ -2009,7 +2029,7 @@ print()  # Newline at end
 import base64
 import requests
 
-# Image generation
+# Image generation (Z-Image Turbo - fast, 9 steps)
 response = requests.post(
     "http://localhost:4201/generate/z-image-turbo",
     json={
@@ -2018,7 +2038,21 @@ response = requests.post(
         "seed": 42,
     },
 )
-with open("image.png", "wb") as f:
+with open("image_turbo.png", "wb") as f:
+    f.write(response.content)
+
+# Image generation (Z-Image - standard, 30 steps, full CFG)
+response = requests.post(
+    "http://localhost:4201/generate/z-image",
+    json={
+        "prompt": "a detailed oil painting of a serene lake at dawn",
+        "negative_prompt": "blurry, low quality, watermark",
+        "aspect_ratio": "16:9",
+        "cfg_scale": 4.5,
+        "seed": 42,
+    },
+)
+with open("image_standard.png", "wb") as f:
     f.write(response.content)
 
 # Image editing (img2img) - Base64 JSON

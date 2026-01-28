@@ -1,11 +1,12 @@
 """Model registry and base classes for image generation models."""
 
 from .base import BaseImageModel, ModelRegistry
-from .z_image import ZImageTurboModel
+from .z_image import ZImageModel, ZImageTurboModel
 
-__all__ = ["BaseImageModel", "ModelRegistry", "ZImageTurboModel"]
+__all__ = ["BaseImageModel", "ModelRegistry", "ZImageModel", "ZImageTurboModel"]
 
 # Register available models
+ModelRegistry.register("z-image", ZImageModel)
 ModelRegistry.register("z-image-turbo", ZImageTurboModel)
 
 # Qwen-Image-2512 with GGUF support

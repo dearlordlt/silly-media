@@ -62,6 +62,7 @@ class VRAMManager:
 
     # VRAM estimates (GB) - defaults for known models
     VRAM_ESTIMATES = {
+        "z-image": 22.0,
         "z-image-turbo": 22.0,
         "ovis-image-7b": 20.0,
         "qwen-image-2512": 15.0,  # GGUF Q5_K_M quantization

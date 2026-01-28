@@ -11,11 +11,25 @@
 ### restart.sh (Recommended for Code Changes)
 Copies local `src/silly_media/` files directly into the running container and restarts. Much faster than full rebuild - no need to re-download CUDA drivers.
 
+**Use for**:
+- Modifying Python code (adding/editing models, routes, logic)
+- Adding new model classes or registrations
+- Updating configurations in Python files
+- UI changes (ui.html is served statically)
+
+**How it works**:
+1. Checks if container is running
+2. Copies `src/silly_media/` to container via `docker cp`
+3. Restarts container with `docker compose restart`
+
 ### build.sh (Full Rebuild)
-Only needed when:
-- Changing dependencies (pyproject.toml)
+Full rebuild: runs `docker compose down && docker compose build --no-cache && docker compose up`
+
+**Only needed when**:
+- Changing dependencies in pyproject.toml
 - Changing Dockerfile
 - First time setup
+- Container doesn't exist yet
 
 ### Dev Mode (Hot Reload)
 ```bash
