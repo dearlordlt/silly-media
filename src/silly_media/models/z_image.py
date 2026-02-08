@@ -47,6 +47,7 @@ class ZImageTurboModel(BaseImageModel):
             low_cpu_mem_usage=False,
         )
         self._pipe.to("cuda")
+        self._pipe.vae.enable_tiling()
 
         self._loaded = True
         logger.info(f"{self.model_id} loaded successfully")
@@ -137,6 +138,7 @@ class ZImageModel(BaseImageModel):
             low_cpu_mem_usage=False,
         )
         self._pipe.to("cuda")
+        self._pipe.vae.enable_tiling()
 
         self._loaded = True
         logger.info(f"{self.model_id} loaded successfully")
