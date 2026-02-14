@@ -14,14 +14,18 @@ from .schemas import MusicGenerateRequest
 
 logger = logging.getLogger(__name__)
 
+# ACE-Step 1.5 repo root inside the Docker container
+ACE_STEP_ROOT = "/app/ace-step-1.5"
+
 
 class AceStepModel(BaseMusicModel):
-    """ACE-Step v1.5 - waveform-based VAE, much higher audio quality than v1.0."""
+    """ACE-Step v1.5 Turbo - 8-step inference, waveform-based VAE."""
 
     model_id = "ace-step"
-    display_name = "ACE-Step 1.5 (20 steps)"
+    display_name = "ACE-Step 1.5 Turbo (8 steps)"
     estimated_vram_gb = 6.0
-    default_steps = 20
+    default_steps = 8
+    config_path = "acestep-v15-turbo"
 
     def __init__(self) -> None:
         super().__init__()
@@ -44,16 +48,20 @@ class AceStepModel(BaseMusicModel):
         from acestep.handler import AceStepHandler
 
         self._dit_handler = AceStepHandler()
-        self._dit_handler.initialize_service()
+        status, ok = self._dit_handler.initialize_service(
+            project_root=ACE_STEP_ROOT,
+            config_path=self.config_path,
+        )
+        logger.info(f"ACE-Step init: {status} (ok={ok})")
+
+        if not ok:
+            self._dit_handler = None
+            raise RuntimeError(f"ACE-Step model failed to initialize: {status}")
 
         # LLM handler - create but don't initialize (DiT-only mode)
-        try:
-            from acestep.llm_inference import LLMHandler
+        from acestep.llm_inference import LLMHandler
 
-            self._llm_handler = LLMHandler()
-        except ImportError:
-            logger.warning("LLMHandler not available, using DiT-only mode")
-            self._llm_handler = None
+        self._llm_handler = LLMHandler()
 
         self._loaded = True
         logger.info(f"{self.display_name} loaded successfully")
@@ -62,7 +70,6 @@ class AceStepModel(BaseMusicModel):
         logger.info("Unloading ACE-Step 1.5 model...")
 
         if self._dit_handler is not None:
-            # Clear model components
             for attr in ("model", "vae", "text_encoder", "text_tokenizer"):
                 if hasattr(self._dit_handler, attr):
                     obj = getattr(self._dit_handler, attr)
@@ -184,9 +191,10 @@ class AceStepModel(BaseMusicModel):
 
 
 class AceStepQualityModel(AceStepModel):
-    """ACE-Step v1.5 Quality - 40-step inference for higher quality."""
+    """ACE-Step v1.5 SFT - 50-step inference, supports CFG for higher quality."""
 
     model_id = "ace-step-quality"
-    display_name = "ACE-Step 1.5 Quality (40 steps)"
+    display_name = "ACE-Step 1.5 Quality (50 steps)"
     estimated_vram_gb = 6.0
-    default_steps = 40
+    default_steps = 50
+    config_path = "acestep-v15-sft"

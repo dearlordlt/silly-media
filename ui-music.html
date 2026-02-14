@@ -294,17 +294,47 @@
       gap: 8px;
     }
 
+    /* History toolbar */
+    .history-toolbar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .history-toolbar .count {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-left: auto;
+    }
+
     /* History list */
     .history-item {
       background: var(--bg);
       border-radius: var(--radius);
-      padding: 12px;
-      margin-bottom: 8px;
-      cursor: pointer;
+      padding: 10px 12px;
+      margin-bottom: 6px;
       transition: border-color 0.2s;
       border: 1px solid transparent;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
     }
     .history-item:hover { border-color: var(--accent2); }
+    .history-item.selected { border-color: var(--accent); background: #e9456010; }
+    .history-item input[type="checkbox"] {
+      margin-top: 3px;
+      flex-shrink: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+      width: 16px;
+      height: 16px;
+    }
+    .history-content {
+      flex: 1;
+      min-width: 0;
+      cursor: pointer;
+    }
     .history-caption {
       font-size: 0.9rem;
       margin-bottom: 4px;
@@ -316,6 +346,25 @@
       font-size: 0.75rem;
       color: var(--text-dim);
     }
+    .history-actions {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .history-item:hover .history-actions { opacity: 1; }
+    .history-actions button {
+      padding: 3px 7px;
+      font-size: 0.7rem;
+      background: var(--surface2);
+      border: none;
+      border-radius: 4px;
+      color: var(--text-dim);
+      cursor: pointer;
+    }
+    .history-actions button:hover { color: var(--text); background: var(--accent2); }
+    .history-actions .delete-btn:hover { background: #dc2626; color: white; }
 
     /* Empty state */
     .empty-state {
@@ -357,8 +406,8 @@
       <!-- Model Selection -->
       <label for="modelSelect">Model</label>
       <select id="modelSelect">
-        <option value="ace-step">ACE-Step 1.5 (20 steps)</option>
-        <option value="ace-step-quality">ACE-Step 1.5 Quality (40 steps)</option>
+        <option value="ace-step">ACE-Step 1.5 Turbo (8 steps)</option>
+        <option value="ace-step-quality">ACE-Step 1.5 Quality (50 steps)</option>
       </select>
 
       <!-- Caption / Tags -->
@@ -453,17 +502,17 @@
           <div class="slider-container">
             <div class="slider-header">
               <label>Inference Steps</label>
-              <span class="slider-value" id="stepsValue">20</span>
+              <span class="slider-value" id="stepsValue">8</span>
             </div>
-            <input type="range" id="inferenceSteps" min="1" max="100" step="1" value="20">
+            <input type="range" id="inferenceSteps" min="1" max="100" step="1" value="8">
           </div>
 
           <div class="slider-container">
             <div class="slider-header">
               <label>Guidance Scale</label>
-              <span class="slider-value" id="guidanceValue">7.5</span>
+              <span class="slider-value" id="guidanceValue">7.0</span>
             </div>
-            <input type="range" id="guidanceScale" min="0" max="50" step="0.5" value="7.5">
+            <input type="range" id="guidanceScale" min="0" max="50" step="0.5" value="7">
           </div>
 
           <div class="row">
@@ -524,6 +573,12 @@
       <!-- History -->
       <div class="panel">
         <h2>History</h2>
+        <div class="history-toolbar" id="historyToolbar" style="display:none;">
+          <button type="button" class="btn-secondary btn-small" onclick="toggleSelectAll()">Select All</button>
+          <button type="button" class="btn-secondary btn-small" onclick="downloadSelected()">Download Selected</button>
+          <button type="button" class="btn-danger btn-small" onclick="deleteSelected()">Delete Selected</button>
+          <span class="count" id="selectionCount"></span>
+        </div>
         <div id="historyList">
           <div class="empty-state">
             <h3>No songs generated yet</h3>
@@ -604,8 +659,8 @@
       'Quick Draft': {
         model: 'ace-step',
         duration: 30,
-        inferenceSteps: 20,
-        guidanceScale: 7.5,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
         batchSize: 1,
         audioFormat: 'wav',
         instrumental: false,
@@ -613,8 +668,8 @@
       'High Quality': {
         model: 'ace-step-quality',
         duration: 60,
-        inferenceSteps: 40,
-        guidanceScale: 7.5,
+        inferenceSteps: 50,
+        guidanceScale: 7.0,
         batchSize: 1,
         audioFormat: 'flac',
         instrumental: false,
@@ -622,8 +677,8 @@
       'Long Track': {
         model: 'ace-step',
         duration: 180,
-        inferenceSteps: 20,
-        guidanceScale: 7.5,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
         batchSize: 1,
         audioFormat: 'wav',
         instrumental: false,
@@ -631,8 +686,8 @@
       'Instrumental Ambient': {
         model: 'ace-step-quality',
         duration: 60,
-        inferenceSteps: 40,
-        guidanceScale: 7.5,
+        inferenceSteps: 50,
+        guidanceScale: 7.0,
         batchSize: 1,
         audioFormat: 'flac',
         instrumental: true,
@@ -642,8 +697,8 @@
       'Vocal Pop': {
         model: 'ace-step',
         duration: 30,
-        inferenceSteps: 20,
-        guidanceScale: 7.5,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
         batchSize: 2,
         audioFormat: 'wav',
         instrumental: false,
@@ -672,7 +727,7 @@
       // Update steps default when model changes
       document.getElementById('modelSelect').addEventListener('change', (e) => {
         const isQuality = e.target.value === 'ace-step-quality';
-        const steps = isQuality ? 40 : 20;
+        const steps = isQuality ? 50 : 8;
         document.getElementById('inferenceSteps').value = steps;
         document.getElementById('stepsValue').textContent = steps;
       });
@@ -1109,8 +1164,10 @@
 
     function renderHistory() {
       const container = document.getElementById('historyList');
+      const toolbar = document.getElementById('historyToolbar');
 
       if (generationHistory.length === 0) {
+        toolbar.style.display = 'none';
         container.innerHTML = `
           <div class="empty-state">
             <h3>No songs generated yet</h3>
@@ -1120,30 +1177,150 @@
         return;
       }
 
+      toolbar.style.display = 'flex';
       container.innerHTML = '';
-      for (const entry of generationHistory) {
+
+      for (let idx = 0; idx < generationHistory.length; idx++) {
+        const entry = generationHistory[idx];
         const item = document.createElement('div');
         item.className = 'history-item';
-        item.onclick = () => loadHistoryItem(entry);
+        item.dataset.idx = idx;
 
         const date = new Date(entry.timestamp);
         const timeStr = date.toLocaleString();
 
         item.innerHTML = `
-          <div class="history-caption">${escapeHtml(entry.caption)}</div>
-          <div class="history-meta">
-            ${entry.model} | ${entry.duration}s | ${entry.elapsed}s gen time | ${timeStr}
+          <input type="checkbox" onclick="event.stopPropagation(); updateSelectionCount();" data-idx="${idx}">
+          <div class="history-content" onclick="loadHistoryItem(${idx})">
+            <div class="history-caption">${escapeHtml(entry.caption)}</div>
+            <div class="history-meta">
+              ${escapeHtml(entry.model)} | ${entry.duration}s | ${entry.elapsed}s gen time | ${timeStr}
+            </div>
+          </div>
+          <div class="history-actions">
+            <button type="button" onclick="event.stopPropagation(); downloadHistoryItem(${idx});" title="Download">DL</button>
+            <button type="button" class="delete-btn" onclick="event.stopPropagation(); deleteHistoryItem(${idx});" title="Delete">X</button>
           </div>
         `;
         container.appendChild(item);
       }
+      updateSelectionCount();
     }
 
-    function loadHistoryItem(entry) {
-      // Re-display the audio from this history item
-      if (entry.audios && entry.audios.length > 0) {
+    function loadHistoryItem(idx) {
+      const entry = generationHistory[idx];
+      if (entry && entry.audios && entry.audios.length > 0) {
         displayAudioResults(entry.jobId, { audios: entry.audios });
       }
+    }
+
+    // ========================
+    // History Selection
+    // ========================
+    function getSelectedIndices() {
+      return Array.from(document.querySelectorAll('#historyList input[type="checkbox"]:checked'))
+        .map(cb => parseInt(cb.dataset.idx));
+    }
+
+    function updateSelectionCount() {
+      const selected = getSelectedIndices();
+      const countEl = document.getElementById('selectionCount');
+      countEl.textContent = selected.length > 0 ? `${selected.length} selected` : '';
+      // Toggle selected styling
+      document.querySelectorAll('#historyList .history-item').forEach(item => {
+        const cb = item.querySelector('input[type="checkbox"]');
+        item.classList.toggle('selected', cb && cb.checked);
+      });
+    }
+
+    function toggleSelectAll() {
+      const checkboxes = document.querySelectorAll('#historyList input[type="checkbox"]');
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      checkboxes.forEach(cb => cb.checked = !allChecked);
+      updateSelectionCount();
+    }
+
+    // ========================
+    // Delete History Items
+    // ========================
+    function deleteHistoryItem(idx) {
+      const entry = generationHistory[idx];
+      if (!entry) return;
+      if (!confirm(`Delete "${entry.caption.substring(0, 60)}"?`)) return;
+
+      // Delete server-side files
+      fetch(`${API_URL}/music/${entry.jobId}`, { method: 'DELETE' }).catch(() => {});
+
+      generationHistory.splice(idx, 1);
+      localStorage.setItem('music-history', JSON.stringify(generationHistory));
+      renderHistory();
+      showStatus('Deleted 1 item', 'success');
+    }
+
+    function deleteSelected() {
+      const indices = getSelectedIndices();
+      if (indices.length === 0) {
+        showStatus('No items selected', 'error');
+        return;
+      }
+      if (!confirm(`Delete ${indices.length} item(s)?`)) return;
+
+      // Delete server-side (fire and forget)
+      for (const idx of indices) {
+        const entry = generationHistory[idx];
+        if (entry) {
+          fetch(`${API_URL}/music/${entry.jobId}`, { method: 'DELETE' }).catch(() => {});
+        }
+      }
+
+      // Remove from array (highest index first to avoid shifting)
+      for (const idx of indices.sort((a, b) => b - a)) {
+        generationHistory.splice(idx, 1);
+      }
+
+      localStorage.setItem('music-history', JSON.stringify(generationHistory));
+      renderHistory();
+      showStatus(`Deleted ${indices.length} item(s)`, 'success');
+    }
+
+    // ========================
+    // Download History Items
+    // ========================
+    function downloadHistoryItem(idx) {
+      const entry = generationHistory[idx];
+      if (!entry || !entry.audios) return;
+      for (const audio of entry.audios) {
+        triggerDownload(`${API_URL}${audio.download_url}`);
+      }
+    }
+
+    function downloadSelected() {
+      const indices = getSelectedIndices();
+      if (indices.length === 0) {
+        showStatus('No items selected', 'error');
+        return;
+      }
+
+      let count = 0;
+      for (const idx of indices) {
+        const entry = generationHistory[idx];
+        if (!entry || !entry.audios) continue;
+        for (const audio of entry.audios) {
+          triggerDownload(`${API_URL}${audio.download_url}`);
+          count++;
+        }
+      }
+      showStatus(`Downloading ${count} file(s)...`, 'success');
+    }
+
+    function triggerDownload(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
 
     function escapeHtml(text) {

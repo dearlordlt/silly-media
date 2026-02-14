@@ -12,8 +12,8 @@ class BaseMusicModel(ABC):
 
     model_id: str = ""
     display_name: str = ""
-    estimated_vram_gb: float = 8.0
-    default_steps: int = 20
+    estimated_vram_gb: float = 6.0
+    default_steps: int = 8
 
     def __init__(self) -> None:
         self._loaded = False

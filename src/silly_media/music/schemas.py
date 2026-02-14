@@ -74,13 +74,13 @@ class MusicGenerateRequest(BaseModel):
             default=None,
             ge=1,
             le=100,
-            description="Diffusion steps (None = model default: 20 fast, 40 quality)",
+            description="Diffusion steps (None = model default: 8 turbo, 50 quality)",
         ),
     ] = None
     guidance_scale: Annotated[
         float,
-        Field(default=7.5, ge=0.0, le=50.0, description="Classifier-free guidance scale"),
-    ] = 7.5
+        Field(default=7.0, ge=0.0, le=50.0, description="Classifier-free guidance scale"),
+    ] = 7.0
     seed: Annotated[
         int, Field(default=-1, ge=-1, description="Random seed (-1 for random)")
     ] = -1

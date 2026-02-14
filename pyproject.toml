@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "torch>=2.0.0",
-    "transformers>=4.45.0",
+    "transformers>=4.51.0,<5.0.0",  # ACE-Step 1.5 incompatible with transformers 5.x (meta tensors)
     "accelerate>=1.0.0",
     "safetensors>=0.4.0",
     "pillow>=10.0.0",
@@ -47,6 +47,11 @@ dependencies = [
     "fugashi[unidic-lite]",
     "datasets>=3.0.0",
     "num2words>=0.5.0",
+    "vector-quantize-pytorch>=1.27.15",
+    "einops>=0.8.1",
+    "numba>=0.63.1",
+    "toml",
+    "diskcache",
 ]
 
 [project.optional-dependencies]
