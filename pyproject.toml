@@ -35,9 +35,17 @@ dependencies = [
     "bitsandbytes>=0.41.0",  # Required for 4-bit quantized models (img2img)
     "rembg[cpu]>=2.0.50",  # AI background removal for pixel art (CPU to avoid VRAM conflicts)
     "gguf>=0.6.0",  # Required for GGUF quantized models (qwen-image-2512)
-    # Music generation (ace-step installed separately in Dockerfile with --no-deps
-    # to avoid diffusers version conflict)
+    # Music generation (ace-step itself installed in Dockerfile with --no-deps
+    # to avoid diffusers version conflict; its runtime deps listed here)
     "soundfile>=0.12.0",
+    "loguru>=0.7.0",
+    "pypinyin>=0.50.0",
+    "py3langid>=0.3.0",
+    "hangul-romanize>=0.1.0",
+    "spacy>=3.7.0",
+    "cutlet",
+    "fugashi[unidic-lite]",
+    "datasets>=3.0.0",
 ]
 
 [project.optional-dependencies]

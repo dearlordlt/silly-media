@@ -103,7 +103,7 @@ class AceStepTurboModel(BaseMusicModel):
         # Call the pipeline
         result = self._pipeline(
             prompt=prompt,
-            lyrics=lyrics if lyrics else None,
+            lyrics=lyrics or "",
             audio_duration=request.duration,
             infer_step=steps,
             guidance_scale=request.guidance_scale,
