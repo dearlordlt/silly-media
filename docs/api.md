@@ -70,8 +70,8 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 | Model                  | ID               | Steps | VRAM | Notes                                          |
 | ---------------------- | ---------------- | ----- | ---- | ---------------------------------------------- |
-| ACE-Step 1.5           | `ace-step`         | 20    | ~6GB | Fast generation, default model                 |
-| ACE-Step 1.5 Quality   | `ace-step-quality` | 40    | ~6GB | Higher quality, more steps                     |
+| ACE-Step 1.5 Turbo     | `ace-step`         | 8     | ~6GB | Fast generation, default model                 |
+| ACE-Step 1.5 Quality   | `ace-step-quality` | 50    | ~6GB | Higher quality, CFG support, more steps        |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
@@ -1727,7 +1727,7 @@ Generation is **asynchronous** - you start a job and poll for completion (typica
 | `timesignature`   | string | `""`        | 2/3/4/6     | Time signature                                 |
 | `duration`        | float  | `30.0`      | 10-600      | Duration in seconds                            |
 | `inference_steps` | int    | `null`      | 1-100       | Diffusion steps (null = model default)         |
-| `guidance_scale`  | float  | `7.5`       | 0-50        | Classifier-free guidance scale                 |
+| `guidance_scale`  | float  | `7.0`       | 0-50        | Classifier-free guidance scale                 |
 | `seed`            | int    | `-1`        | -1 or 0+    | Random seed (-1 = random)                      |
 | `audio_format`    | string | `"wav"`     | wav/flac/mp3| Output audio format                            |
 | `batch_size`      | int    | `1`         | 1-4         | Number of variations to generate               |
@@ -1744,16 +1744,16 @@ List available music generation models.
   "models": [
     {
       "id": "ace-step",
-      "name": "ACE-Step 1.5 (20 steps)",
+      "name": "ACE-Step 1.5 Turbo (8 steps)",
       "loaded": false,
-      "default_steps": 20,
+      "default_steps": 8,
       "estimated_vram_gb": 6.0
     },
     {
       "id": "ace-step-quality",
-      "name": "ACE-Step 1.5 Quality (40 steps)",
+      "name": "ACE-Step 1.5 Quality (50 steps)",
       "loaded": false,
-      "default_steps": 40,
+      "default_steps": 50,
       "estimated_vram_gb": 6.0
     }
   ]
@@ -1771,7 +1771,7 @@ Start music generation. Returns a job ID for status polling.
   "caption": "upbeat pop, catchy melody, female singer, synth, drums",
   "lyrics": "[Verse]\nWoke up this morning with a smile\n\n[Chorus]\nLiving for today!",
   "duration": 30.0,
-  "guidance_scale": 7.5,
+  "guidance_scale": 7.0,
   "seed": -1,
   "model": "ace-step"
 }
