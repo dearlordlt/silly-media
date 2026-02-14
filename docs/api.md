@@ -70,8 +70,8 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 | Model                  | ID               | Steps | VRAM | Notes                                          |
 | ---------------------- | ---------------- | ----- | ---- | ---------------------------------------------- |
-| ACE-Step 1.5 Turbo     | `ace-step-turbo` | 8     | ~8GB | Fast generation, default model                 |
-| ACE-Step 1.5 SFT       | `ace-step-sft`   | 50    | ~8GB | Higher quality, slower                         |
+| ACE-Step 1.5           | `ace-step`         | 20    | ~6GB | Fast generation, default model                 |
+| ACE-Step 1.5 Quality   | `ace-step-quality` | 40    | ~6GB | Higher quality, more steps                     |
 
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
@@ -99,7 +99,7 @@ Check API and model status.
   "available_video_models": ["hunyuan-video"],
   "available_vision_models": ["qwen3-vl-8b"],
   "available_llm_models": ["huihui-qwen3-4b"],
-  "available_music_models": ["ace-step-turbo", "ace-step-sft"]
+  "available_music_models": ["ace-step", "ace-step-quality"]
 }
 ```
 
@@ -136,7 +136,7 @@ List available and loaded models by type.
     "loaded": []
   },
   "music": {
-    "available": ["ace-step-turbo", "ace-step-sft"],
+    "available": ["ace-step", "ace-step-quality"],
     "loaded": []
   }
 }
@@ -1725,15 +1725,13 @@ Generation is **asynchronous** - you start a job and poll for completion (typica
 | `bpm`             | int    | `null`      | 30-300      | Tempo in BPM (null = auto)                     |
 | `keyscale`        | string | `""`        | -           | Musical key (e.g., "C Major", "Am")            |
 | `timesignature`   | string | `""`        | 2/3/4/6     | Time signature                                 |
-| `duration`        | float  | `30.0`      | 10-240      | Duration in seconds                            |
+| `duration`        | float  | `30.0`      | 10-600      | Duration in seconds                            |
 | `inference_steps` | int    | `null`      | 1-100       | Diffusion steps (null = model default)         |
-| `guidance_scale`  | float  | `15.0`      | 0-200       | Classifier-free guidance scale                 |
-| `scheduler_type`  | string | `"euler"`   | -           | Scheduler type                                 |
-| `omega_scale`     | float  | `10.0`      | 0-50        | APG omega scale                                |
+| `guidance_scale`  | float  | `7.5`       | 0-50        | Classifier-free guidance scale                 |
 | `seed`            | int    | `-1`        | -1 or 0+    | Random seed (-1 = random)                      |
 | `audio_format`    | string | `"wav"`     | wav/flac/mp3| Output audio format                            |
 | `batch_size`      | int    | `1`         | 1-4         | Number of variations to generate               |
-| `model`           | string | `"ace-step-turbo"` | -    | Model variant to use                           |
+| `model`           | string | `"ace-step"` | -           | Model variant to use                           |
 
 ### `GET /music/models`
 
@@ -1745,18 +1743,18 @@ List available music generation models.
 {
   "models": [
     {
-      "id": "ace-step-turbo",
-      "name": "ACE-Step 1.5 Turbo",
+      "id": "ace-step",
+      "name": "ACE-Step 1.5 (20 steps)",
       "loaded": false,
-      "default_steps": 8,
-      "estimated_vram_gb": 8.0
+      "default_steps": 20,
+      "estimated_vram_gb": 6.0
     },
     {
-      "id": "ace-step-sft",
-      "name": "ACE-Step 1.5 SFT (Quality)",
+      "id": "ace-step-quality",
+      "name": "ACE-Step 1.5 Quality (40 steps)",
       "loaded": false,
-      "default_steps": 50,
-      "estimated_vram_gb": 8.0
+      "default_steps": 40,
+      "estimated_vram_gb": 6.0
     }
   ]
 }
@@ -1773,9 +1771,9 @@ Start music generation. Returns a job ID for status polling.
   "caption": "upbeat pop, catchy melody, female singer, synth, drums",
   "lyrics": "[Verse]\nWoke up this morning with a smile\n\n[Chorus]\nLiving for today!",
   "duration": 30.0,
-  "guidance_scale": 15.0,
+  "guidance_scale": 7.5,
   "seed": -1,
-  "model": "ace-step-turbo"
+  "model": "ace-step"
 }
 ```
 
@@ -2483,7 +2481,7 @@ curl -X POST http://localhost:4201/music/generate \
     "caption": "upbeat pop, catchy melody, female singer, synth, drums",
     "lyrics": "[Verse]\nWoke up this morning with a smile\nSunshine through the window\n\n[Chorus]\nLiving for today!\nNothing gonna take this away!",
     "duration": 30.0,
-    "model": "ace-step-turbo"
+    "model": "ace-step"
   }'
 
 # Check status (replace JOB_ID with actual job ID)
@@ -2516,7 +2514,7 @@ curl -X POST http://localhost:4201/music/generate \
     "caption": "orchestral, cinematic, strings, dramatic",
     "instrumental": true,
     "duration": 120.0,
-    "model": "ace-step-sft",
+    "model": "ace-step-quality",
     "guidance_scale": 15.0
   }'
 ```
@@ -2534,7 +2532,7 @@ response = requests.post(
         "caption": "energetic rock, electric guitar, drums, bass",
         "lyrics": "[Verse]\nRiding down the highway\n\n[Chorus]\nWe're breaking free tonight!",
         "duration": 30.0,
-        "model": "ace-step-turbo",
+        "model": "ace-step",
         "batch_size": 2,
     },
 )

@@ -36,10 +36,12 @@ COPY src/ ./src/
 # Install the package
 RUN uv pip install -e .
 
-# Install ace-step from GitHub with --no-deps to avoid diffusers version conflict
-# (ace-step pins diffusers==0.32.2 but we use diffusers from git HEAD;
-#  PyPI package is also broken - missing requirements.txt in sdist)
-RUN uv pip install "ace-step @ git+https://github.com/ace-step/ACE-Step.git" --no-deps
+# Install ACE-Step 1.5 from GitHub with --no-deps (runtime deps in pyproject.toml)
+# Patch Python version requirement (1.5 pins ==3.11.* but works fine with 3.10)
+RUN git clone --depth 1 https://github.com/ace-step/ACE-Step-1.5.git /app/ace-step-1.5 && \
+    cd /app/ace-step-1.5 && \
+    sed -i 's/requires-python = "==3.11.\*"/requires-python = ">=3.10"/' pyproject.toml && \
+    uv pip install -e . --no-deps
 
 # Expose port
 EXPOSE 4201

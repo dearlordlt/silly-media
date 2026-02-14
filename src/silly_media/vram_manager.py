@@ -73,8 +73,8 @@ class VRAMManager:
         "qwen3-vl-8b": 18.0,
         "qwen-image-edit": 20.0,
         "huihui-qwen3-4b": 10.0,
-        "ace-step-fast": 8.0,
-        "ace-step-quality": 8.0,
+        "ace-step": 6.0,
+        "ace-step-quality": 6.0,
     }
 
     def __new__(cls) -> "VRAMManager":

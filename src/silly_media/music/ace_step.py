@@ -1,7 +1,6 @@
-"""ACE-Step music generation models (v1.0 - 3.5B DiT)."""
+"""ACE-Step 1.5 music generation models (hybrid LM + DiT)."""
 
 import gc
-import glob
 import logging
 import random
 import uuid
@@ -16,17 +15,18 @@ from .schemas import MusicGenerateRequest
 logger = logging.getLogger(__name__)
 
 
-class AceStepFastModel(BaseMusicModel):
-    """ACE-Step v1 Fast - 27-step inference (~1.7s per minute of audio)."""
+class AceStepModel(BaseMusicModel):
+    """ACE-Step v1.5 - waveform-based VAE, much higher audio quality than v1.0."""
 
-    model_id = "ace-step-fast"
-    display_name = "ACE-Step Fast (27 steps)"
-    estimated_vram_gb = 8.0
-    default_steps = 27
+    model_id = "ace-step"
+    display_name = "ACE-Step 1.5 (20 steps)"
+    estimated_vram_gb = 6.0
+    default_steps = 20
 
     def __init__(self) -> None:
         super().__init__()
-        self._pipeline = None
+        self._dit_handler = None
+        self._llm_handler = None
         self._music_dir = Path("data/music")
         self._music_dir.mkdir(parents=True, exist_ok=True)
 
@@ -39,42 +39,60 @@ class AceStepFastModel(BaseMusicModel):
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 
-        from acestep.pipeline_ace_step import ACEStepPipeline
+        logger.info(f"Loading {self.display_name}...")
 
-        logger.info(f"Loading ACE-Step pipeline ({self.display_name})...")
-        self._pipeline = ACEStepPipeline(
-            checkpoint_dir=None,  # Auto-downloads ACE-Step-v1-3.5B to HF cache
-            device_id=0,
-            dtype="bfloat16",
-            torch_compile=False,
-            cpu_offload=False,
-        )
+        from acestep.handler import AceStepHandler
+
+        self._dit_handler = AceStepHandler()
+        self._dit_handler.initialize_service()
+
+        # LLM handler - create but don't initialize (DiT-only mode)
+        try:
+            from acestep.llm_inference import LLMHandler
+
+            self._llm_handler = LLMHandler()
+        except ImportError:
+            logger.warning("LLMHandler not available, using DiT-only mode")
+            self._llm_handler = None
 
         self._loaded = True
         logger.info(f"{self.display_name} loaded successfully")
 
     def unload(self) -> None:
-        logger.info("Unloading ACE-Step model...")
+        logger.info("Unloading ACE-Step 1.5 model...")
 
-        if self._pipeline is not None:
-            del self._pipeline
-            self._pipeline = None
+        if self._dit_handler is not None:
+            # Clear model components
+            for attr in ("model", "vae", "text_encoder", "text_tokenizer"):
+                if hasattr(self._dit_handler, attr):
+                    obj = getattr(self._dit_handler, attr)
+                    if obj is not None:
+                        del obj
+                        setattr(self._dit_handler, attr, None)
+            del self._dit_handler
+            self._dit_handler = None
+
+        if self._llm_handler is not None:
+            del self._llm_handler
+            self._llm_handler = None
 
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         self._loaded = False
-        logger.info("ACE-Step model unloaded")
+        logger.info("ACE-Step 1.5 model unloaded")
 
     def generate(
         self,
         request: MusicGenerateRequest,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> list[dict]:
-        """Generate music using ACE-Step pipeline."""
-        if not self._loaded or self._pipeline is None:
+        """Generate music using ACE-Step 1.5 pipeline."""
+        if not self._loaded or self._dit_handler is None:
             raise RuntimeError("Model not loaded")
+
+        from acestep.inference import GenerationConfig, GenerationParams, generate_music
 
         steps = request.inference_steps or self.default_steps
         seed = request.seed if request.seed >= 0 else random.randint(0, 2**32 - 1)
@@ -83,68 +101,80 @@ class AceStepFastModel(BaseMusicModel):
         save_dir = self._music_dir / job_id
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # ACE-Step v1.0 expects comma-separated tags as the prompt
-        # The caption from the user should already be in tag format
-        # We append musical metadata as additional tags
-        prompt = request.caption
-        if request.bpm:
-            prompt += f", {request.bpm} bpm"
-        if request.keyscale:
-            prompt += f", {request.keyscale}"
-
-        # Handle lyrics
+        # Build lyrics
         lyrics = request.lyrics or ""
         if request.instrumental and not lyrics:
-            lyrics = "[instrumental]"
+            lyrics = "[Instrumental]"
 
         logger.info(
-            f"Generating music: prompt='{prompt[:100]}', "
+            f"Generating music: caption='{request.caption[:100]}', "
             f"duration={request.duration}s, steps={steps}, seed={seed}, "
             f"guidance_scale={request.guidance_scale}"
         )
 
-        # Call the pipeline with all supported parameters
-        result = self._pipeline(
-            prompt=prompt,
+        params = GenerationParams(
+            caption=request.caption,
             lyrics=lyrics,
-            audio_duration=request.duration,
-            infer_step=steps,
+            instrumental=request.instrumental,
+            duration=request.duration,
+            inference_steps=steps,
             guidance_scale=request.guidance_scale,
-            scheduler_type=request.scheduler_type,
-            cfg_type="apg",
-            omega_scale=request.omega_scale,
-            guidance_interval=0.5,
-            guidance_interval_decay=0.0,
-            min_guidance_scale=3.0,
-            manual_seeds=[seed + i for i in range(request.batch_size)],
-            use_erg_tag=True,
-            use_erg_lyric=True,
-            use_erg_diffusion=True,
-            format=request.audio_format.value,
-            save_path=str(save_dir),
-            batch_size=request.batch_size,
+            seed=seed,
+            thinking=False,  # DiT-only mode (no LLM needed)
         )
 
-        # Collect output audio files
+        # Set optional musical metadata
+        if request.bpm is not None:
+            params.bpm = request.bpm
+        if request.keyscale:
+            params.keyscale = request.keyscale
+        if request.timesignature:
+            params.timesignature = request.timesignature
+
+        config = GenerationConfig(
+            batch_size=request.batch_size,
+            audio_format=request.audio_format.value,
+        )
+
+        result = generate_music(
+            dit_handler=self._dit_handler,
+            llm_handler=self._llm_handler,
+            params=params,
+            config=config,
+            save_dir=str(save_dir),
+        )
+
+        if not result.success:
+            raise RuntimeError(f"Generation failed: {result.error}")
+
+        # Collect results
         audios = []
-        audio_ext = f".{request.audio_format.value}"
-        audio_files = sorted(glob.glob(str(save_dir / f"*{audio_ext}")))
-
-        if not audio_files:
-            # Fallback: look for any audio files
-            for ext in [".wav", ".flac", ".mp3"]:
-                audio_files = sorted(glob.glob(str(save_dir / f"*{ext}")))
-                if audio_files:
-                    break
-
-        for i, audio_path in enumerate(audio_files):
+        for i, audio in enumerate(result.audios):
+            audio_path = audio.get("path", "")
+            if not audio_path:
+                continue
             audios.append({
                 "path": audio_path,
                 "index": i,
                 "seed": seed + i,
-                "sample_rate": 48000,
+                "sample_rate": audio.get("sample_rate", 48000),
                 "job_id": job_id,
             })
+
+        if not audios:
+            # Fallback: scan save_dir for audio files
+            for ext in (".wav", ".flac", ".mp3"):
+                found = sorted(save_dir.glob(f"*{ext}"))
+                if found:
+                    for i, f in enumerate(found):
+                        audios.append({
+                            "path": str(f),
+                            "index": i,
+                            "seed": seed + i,
+                            "sample_rate": 48000,
+                            "job_id": job_id,
+                        })
+                    break
 
         if not audios:
             raise RuntimeError("No audio files generated")
@@ -153,10 +183,10 @@ class AceStepFastModel(BaseMusicModel):
         return audios
 
 
-class AceStepQualityModel(AceStepFastModel):
-    """ACE-Step v1 Quality - 60-step inference (~3.8s per minute of audio)."""
+class AceStepQualityModel(AceStepModel):
+    """ACE-Step v1.5 Quality - 40-step inference for higher quality."""
 
     model_id = "ace-step-quality"
-    display_name = "ACE-Step Quality (60 steps)"
-    estimated_vram_gb = 8.0
-    default_steps = 60
+    display_name = "ACE-Step 1.5 Quality (40 steps)"
+    estimated_vram_gb = 6.0
+    default_steps = 40

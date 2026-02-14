@@ -7,9 +7,9 @@ from pydantic import BaseModel, Field
 
 
 class MusicModelVariant(str, Enum):
-    """Available ACE-Step model variants."""
+    """Available ACE-Step 1.5 model variants."""
 
-    FAST = "ace-step-fast"
+    FAST = "ace-step"
     QUALITY = "ace-step-quality"
 
 
@@ -64,7 +64,7 @@ class MusicGenerateRequest(BaseModel):
     ] = ""
     duration: Annotated[
         float,
-        Field(default=30.0, ge=10.0, le=240.0, description="Duration in seconds"),
+        Field(default=30.0, ge=10.0, le=600.0, description="Duration in seconds"),
     ] = 30.0
 
     # DiT inference settings
@@ -74,21 +74,13 @@ class MusicGenerateRequest(BaseModel):
             default=None,
             ge=1,
             le=100,
-            description="Diffusion steps (None = model default: 8 turbo, 50 sft)",
+            description="Diffusion steps (None = model default: 20 fast, 40 quality)",
         ),
     ] = None
     guidance_scale: Annotated[
         float,
-        Field(default=15.0, ge=0.0, le=200.0, description="Classifier-free guidance scale"),
-    ] = 15.0
-    scheduler_type: Annotated[
-        str,
-        Field(default="euler", description="Scheduler type (euler)"),
-    ] = "euler"
-    omega_scale: Annotated[
-        float,
-        Field(default=10.0, ge=0.0, le=50.0, description="APG omega scale"),
-    ] = 10.0
+        Field(default=7.5, ge=0.0, le=50.0, description="Classifier-free guidance scale"),
+    ] = 7.5
     seed: Annotated[
         int, Field(default=-1, ge=-1, description="Random seed (-1 for random)")
     ] = -1

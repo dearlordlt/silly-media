@@ -34,9 +34,9 @@ class MusicRegistry:
 
 
 def _register_models() -> None:
-    from .ace_step import AceStepFastModel, AceStepQualityModel
+    from .ace_step import AceStepModel, AceStepQualityModel
 
-    MusicRegistry.register("ace-step-fast", AceStepFastModel)
+    MusicRegistry.register("ace-step", AceStepModel)
     MusicRegistry.register("ace-step-quality", AceStepQualityModel)
 
 
