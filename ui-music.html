@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Silly Media - Music Generator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --surface2: #0f3460;
+      --accent: #e94560;
+      --accent2: #533483;
+      --text: #eee;
+      --text-dim: #888;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --radius: 8px;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1500px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 20px;
+      height: calc(100vh - 40px);
+    }
+    @media (max-width: 1000px) {
+      .container { grid-template-columns: 1fr; height: auto; }
+      .controls { max-height: none !important; position: static !important; }
+    }
+
+    h1 { font-size: 1.5rem; margin-bottom: 16px; color: var(--accent); }
+    h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .panel {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .controls {
+      position: sticky;
+      top: 20px;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+    .controls::-webkit-scrollbar { width: 6px; }
+    .controls::-webkit-scrollbar-track { background: transparent; }
+    .controls::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+    textarea, input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+      font-family: inherit;
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; min-width: 0; }
+
+    button {
+      padding: 8px 14px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: var(--accent); color: white; font-weight: 600; }
+    .btn-primary:hover { filter: brightness(1.1); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface2); color: var(--text); }
+    .btn-secondary:hover { background: var(--accent2); }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-small { padding: 4px 10px; font-size: 0.75rem; }
+    .btn-generate {
+      width: 100%;
+      padding: 14px;
+      font-size: 1.1rem;
+      margin-top: 8px;
+    }
+
+    /* Section dividers */
+    .section {
+      border-top: 1px solid var(--surface2);
+      margin-top: 16px;
+      padding-top: 16px;
+    }
+
+    /* Slider styling */
+    .slider-container { margin-bottom: 12px; }
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .slider-value { font-size: 0.85rem; color: var(--accent); font-weight: 600; }
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      background: var(--surface2);
+      border-radius: 3px;
+      margin-bottom: 12px;
+      padding: 0;
+      border: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--accent);
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    /* Toggle switch */
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .toggle { position: relative; width: 48px; height: 24px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--surface2);
+      border-radius: 12px;
+      transition: 0.3s;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px; width: 18px;
+      left: 3px; bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(24px); }
+
+    /* Genre template chips */
+    .genre-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .genre-chip {
+      padding: 5px 12px;
+      background: var(--surface2);
+      border: 1px solid transparent;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      color: var(--text);
+    }
+    .genre-chip:hover { border-color: var(--accent); background: var(--accent2); }
+    .genre-chip.active { background: var(--accent); border-color: var(--accent); }
+
+    /* Lyrics section tag buttons */
+    .tag-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    .tag-btn {
+      padding: 3px 8px;
+      font-size: 0.7rem;
+      background: var(--accent2);
+      border: none;
+      border-radius: 4px;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tag-btn:hover { background: var(--accent); }
+
+    /* Profile bar */
+    .profile-bar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .profile-bar select {
+      flex: 1;
+      margin-bottom: 0;
+      padding: 7px 10px;
+      font-size: 0.85rem;
+    }
+
+    /* Status indicator */
+    .status-bar {
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      font-size: 0.85rem;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .status-bar.visible { display: block; }
+    .status-bar.error { background: #dc262633; color: #fca5a5; }
+    .status-bar.success { background: #16a34a33; color: var(--success); }
+    .status-bar.loading { background: var(--surface2); color: var(--text-dim); }
+
+    /* Right panel - output */
+    .output-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    /* Progress */
+    .progress-section {
+      display: none;
+    }
+    .progress-section.active { display: block; }
+    .progress-bar-outer {
+      width: 100%;
+      height: 8px;
+      background: var(--surface2);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .progress-bar-inner {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent2), var(--accent));
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+
+    /* Audio result cards */
+    .audio-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      border: 1px solid var(--surface2);
+    }
+    .audio-card audio {
+      width: 100%;
+      margin: 10px 0;
+      border-radius: var(--radius);
+    }
+    .audio-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+    .audio-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* History list */
+    .history-item {
+      background: var(--bg);
+      border-radius: var(--radius);
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      border: 1px solid transparent;
+    }
+    .history-item:hover { border-color: var(--accent2); }
+    .history-caption {
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .history-meta {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-dim);
+    }
+    .empty-state h3 { font-size: 1.2rem; margin-bottom: 8px; color: var(--text); }
+
+    /* Collapsible sections */
+    .collapsible-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .collapsible-header:hover h2 { color: var(--text); }
+    .collapse-icon { font-size: 0.8rem; color: var(--text-dim); transition: transform 0.2s; }
+    .collapsible-body { overflow: hidden; transition: max-height 0.3s ease; }
+    .collapsible-body.collapsed { max-height: 0 !important; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Left Panel: Controls -->
+    <div class="panel controls">
+      <h1>Music Generator</h1>
+
+      <!-- Profile Bar -->
+      <div class="profile-bar">
+        <select id="profileSelect" onchange="loadProfile(this.value)">
+          <option value="">-- Select Profile --</option>
+        </select>
+        <button class="btn-secondary btn-small" onclick="saveProfile()">Save</button>
+        <button class="btn-danger btn-small" onclick="deleteProfile()">Del</button>
+      </div>
+
+      <!-- Model Selection -->
+      <label for="modelSelect">Model</label>
+      <select id="modelSelect">
+        <option value="ace-step-turbo">ACE-Step 1.5 Turbo (Fast)</option>
+        <option value="ace-step-sft">ACE-Step 1.5 SFT (Quality)</option>
+      </select>
+
+      <!-- Caption / Tags -->
+      <label for="caption">Caption / Tags</label>
+      <textarea id="caption" rows="3" placeholder="Describe the music style, instruments, mood...&#10;e.g., upbeat pop, catchy melody, female singer, synth, drums"></textarea>
+
+      <!-- Genre Templates -->
+      <div class="section">
+        <div class="collapsible-header" onclick="toggleSection('genreBody')">
+          <h2>Genre Templates</h2>
+          <span class="collapse-icon" id="genreBody-icon">&#9660;</span>
+        </div>
+        <div class="collapsible-body" id="genreBody">
+          <div class="genre-grid" id="genreGrid"></div>
+        </div>
+      </div>
+
+      <!-- Lyrics -->
+      <div class="section">
+        <label>Lyrics</label>
+        <div class="tag-buttons">
+          <button class="tag-btn" onclick="insertTag('[Intro]')">[Intro]</button>
+          <button class="tag-btn" onclick="insertTag('[Verse]')">[Verse]</button>
+          <button class="tag-btn" onclick="insertTag('[Pre-Chorus]')">[Pre-Chorus]</button>
+          <button class="tag-btn" onclick="insertTag('[Chorus]')">[Chorus]</button>
+          <button class="tag-btn" onclick="insertTag('[Bridge]')">[Bridge]</button>
+          <button class="tag-btn" onclick="insertTag('[Hook]')">[Hook]</button>
+          <button class="tag-btn" onclick="insertTag('[Outro]')">[Outro]</button>
+          <button class="tag-btn" onclick="insertTag('[Instrumental]')">[Instrumental]</button>
+          <button class="tag-btn" onclick="insertTag('[Break]')">[Break]</button>
+        </div>
+        <textarea id="lyrics" rows="8" placeholder="[Verse]&#10;Write your lyrics here...&#10;&#10;[Chorus]&#10;The catchy chorus goes here..."></textarea>
+      </div>
+
+      <!-- Musical Metadata -->
+      <div class="section">
+        <div class="collapsible-header" onclick="toggleSection('musicMetaBody')">
+          <h2>Musical Settings</h2>
+          <span class="collapse-icon" id="musicMetaBody-icon">&#9660;</span>
+        </div>
+        <div class="collapsible-body" id="musicMetaBody">
+          <div class="slider-container">
+            <div class="slider-header">
+              <label>Duration (seconds)</label>
+              <span class="slider-value" id="durationValue">30</span>
+            </div>
+            <input type="range" id="duration" min="10" max="240" step="5" value="30">
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="bpm">BPM (empty = auto)</label>
+              <input type="number" id="bpm" placeholder="120" min="30" max="300">
+            </div>
+            <div>
+              <label for="keyscale">Key / Scale</label>
+              <input type="text" id="keyscale" placeholder="e.g., C Major">
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="timesignature">Time Signature</label>
+              <select id="timesignature">
+                <option value="">Auto</option>
+                <option value="2">2/4</option>
+                <option value="3">3/4</option>
+                <option value="4" selected>4/4</option>
+                <option value="6">6/8</option>
+              </select>
+            </div>
+            <div>
+              <label for="vocalLanguage">Vocal Language</label>
+              <select id="vocalLanguage">
+                <option value="unknown">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="pt">Portuguese</option>
+                <option value="it">Italian</option>
+                <option value="ru">Russian</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="toggle-container">
+            <label>Instrumental (no vocals)</label>
+            <label class="toggle">
+              <input type="checkbox" id="instrumental">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Generation Settings -->
+      <div class="section">
+        <div class="collapsible-header" onclick="toggleSection('genSettingsBody')">
+          <h2>Generation Settings</h2>
+          <span class="collapse-icon" id="genSettingsBody-icon">&#9660;</span>
+        </div>
+        <div class="collapsible-body" id="genSettingsBody">
+          <div class="slider-container">
+            <div class="slider-header">
+              <label>Inference Steps</label>
+              <span class="slider-value" id="stepsValue">8</span>
+            </div>
+            <input type="range" id="inferenceSteps" min="1" max="100" step="1" value="8">
+          </div>
+
+          <div class="slider-container">
+            <div class="slider-header">
+              <label>Guidance Scale</label>
+              <span class="slider-value" id="guidanceValue">7.0</span>
+            </div>
+            <input type="range" id="guidanceScale" min="0" max="50" step="0.5" value="7">
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="seed">Seed (-1 = random)</label>
+              <input type="number" id="seed" value="-1" min="-1">
+            </div>
+            <div>
+              <label for="batchSize">Variations</label>
+              <select id="batchSize">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label for="audioFormat">Audio Format</label>
+              <select id="audioFormat">
+                <option value="wav">WAV</option>
+                <option value="flac">FLAC</option>
+                <option value="mp3">MP3</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LM / Thinking Settings -->
+      <div class="section">
+        <div class="collapsible-header" onclick="toggleSection('thinkingBody')">
+          <h2>LM Thinking</h2>
+          <span class="collapse-icon" id="thinkingBody-icon">&#9660;</span>
+        </div>
+        <div class="collapsible-body" id="thinkingBody">
+          <div class="toggle-container">
+            <label>Enable Chain-of-Thought</label>
+            <label class="toggle">
+              <input type="checkbox" id="thinking" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="slider-container">
+            <div class="slider-header">
+              <label>LM Temperature</label>
+              <span class="slider-value" id="lmTempValue">0.85</span>
+            </div>
+            <input type="range" id="lmTemperature" min="0" max="2" step="0.05" value="0.85">
+          </div>
+
+          <div class="slider-container">
+            <div class="slider-header">
+              <label>LM CFG Scale</label>
+              <span class="slider-value" id="lmCfgValue">2.0</span>
+            </div>
+            <input type="range" id="lmCfgScale" min="0" max="10" step="0.5" value="2">
+          </div>
+        </div>
+      </div>
+
+      <!-- Generate Button -->
+      <button id="generateBtn" class="btn-primary btn-generate" onclick="startGeneration()">
+        Generate Music
+      </button>
+
+      <div id="statusBar" class="status-bar"></div>
+    </div>
+
+    <!-- Right Panel: Output -->
+    <div class="output-panel">
+      <!-- Progress Section -->
+      <div class="panel progress-section" id="progressSection">
+        <h2>Generating...</h2>
+        <div class="progress-bar-outer">
+          <div class="progress-bar-inner" id="progressBar"></div>
+        </div>
+        <div class="progress-info">
+          <span id="progressSteps">Step 0 / 0</span>
+          <span id="progressTime">0s elapsed</span>
+        </div>
+        <button class="btn-danger btn-small" onclick="cancelGeneration()" style="margin-top: 8px;">Cancel</button>
+      </div>
+
+      <!-- Audio Results -->
+      <div id="audioResults"></div>
+
+      <!-- History -->
+      <div class="panel">
+        <h2>History</h2>
+        <div id="historyList">
+          <div class="empty-state">
+            <h3>No songs generated yet</h3>
+            <p>Configure your settings and hit Generate!</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:4201';
+    let currentJobId = null;
+    let pollInterval = null;
+    let generationHistory = [];
+
+    // ========================
+    // Genre Templates
+    // ========================
+    const GENRE_TEMPLATES = {
+      'Rock': {
+        caption: 'energetic rock, electric guitar, drums, bass, powerful vocals, driving rhythm',
+        lyrics: '[Verse]\nRiding down the highway, wind against my face\nNothing gonna stop me, I\'m leaving this place\nThe engine\'s roaring louder as I press the gas\nLooking in the rearview, leaving behind the past\n\n[Chorus]\nWe\'re breaking free tonight\nUnder the neon lights\nWith the volume up so high\nWe\'re gonna touch the sky\n\n[Verse]\nThe city lights are fading in the dust behind\nA brand new world is waiting, one of a kind\nWith every mile I travel, I feel more alive\nThis is what it means to finally thrive\n\n[Chorus]\nWe\'re breaking free tonight\nUnder the neon lights\nWith the volume up so high\nWe\'re gonna touch the sky',
+      },
+      'Metal': {
+        caption: 'heavy metal, distorted guitar, double bass drum, aggressive vocals, heavy riffs, intense energy',
+        lyrics: '[Intro]\n[Instrumental]\n\n[Verse]\nFrom the ashes of a broken world we rise\nThrough the fire and the darkness, no compromise\nSteel and thunder in our veins tonight\nWe stand united, ready for the fight\n\n[Chorus]\nUnbreakable, we are the storm\nUnshakeable, we will transform\nThrough the chaos we will reign\nNothing left but blood and flame\n\n[Bridge]\n[Instrumental]\n\n[Verse]\nEvery scar upon our skin tells a tale\nOf battles fought through fire, wind, and hail\nWe are the ones who never bend or break\nThis is war, and everything\'s at stake\n\n[Chorus]\nUnbreakable, we are the storm\nUnshakeable, we will transform\nThrough the chaos we will reign\nNothing left but blood and flame',
+      },
+      'Pop': {
+        caption: 'catchy pop, upbeat, synth, vocal harmonies, modern production, infectious melody',
+        lyrics: '[Verse]\nWoke up this morning with a smile on my face\nSunshine through the window, what a beautiful day\nGot my favorite song playing on repeat\nDancing in the kitchen, moving to the beat\n\n[Pre-Chorus]\nCan you feel it? The magic in the air\nEverything is golden everywhere\n\n[Chorus]\nLiving for the moment, living for today\nNothing\'s gonna take this feeling away\nTurn the music up and let your body sway\nWe\'re gonna make it, make it all okay\n\n[Verse]\nCall up all my friends, it\'s time to celebrate\nLife is way too short to sit around and wait\nEvery second counts, let\'s make it matter now\nWe\'ll figure out the rest somehow\n\n[Chorus]\nLiving for the moment, living for today\nNothing\'s gonna take this feeling away\nTurn the music up and let your body sway\nWe\'re gonna make it, make it all okay',
+      },
+      'Jazz': {
+        caption: 'smooth jazz, saxophone, piano, walking bass, brushed drums, warm tone, sophisticated harmony',
+        lyrics: '[Instrumental]',
+        instrumental: true,
+      },
+      'Electronic': {
+        caption: 'electronic dance music, heavy bass, synth leads, 4-on-the-floor beat, build-up, drop, energetic',
+        lyrics: '[Intro]\n[Instrumental]\n\n[Verse]\nLost in the sound, the bass is underground\nLasers painting colors all around\nHeartbeat syncing to the kick drum pound\nIn this moment, we are finally found\n\n[Chorus]\nFeel the rhythm take control\nLet the music fill your soul\nHands up high, don\'t let go\nLet the energy overflow\n\n[Break]\n[Instrumental]\n\n[Chorus]\nFeel the rhythm take control\nLet the music fill your soul\nHands up high, don\'t let go\nLet the energy overflow',
+      },
+      'Classical': {
+        caption: 'orchestral, strings, woodwinds, brass, classical composition, elegant, dynamic, cinematic',
+        lyrics: '[Instrumental]',
+        instrumental: true,
+      },
+      'Hip-Hop': {
+        caption: 'hip-hop, trap beat, 808 bass, hi-hats, snare rolls, confident flow, modern rap',
+        lyrics: '[Verse]\nStarting from the bottom, now I\'m climbing to the top\nEvery single day I grind, I never gonna stop\nHaters throwing shade but I just let the music drop\nBeat so hard it make the whole damn building rock\n\n[Chorus]\nRise up, we don\'t stop\nFrom the basement to the rooftop\nStack it up, non-stop\nTill we sitting at the tippy top\n\n[Verse]\nCame up from nothing, built it all from scratch\nEvery single move I make, I\'m playing my own match\nNo shortcuts taken, every win I catch\nLight it up and watch the fire attach\n\n[Chorus]\nRise up, we don\'t stop\nFrom the basement to the rooftop\nStack it up, non-stop\nTill we sitting at the tippy top',
+      },
+      'Country': {
+        caption: 'country, acoustic guitar, pedal steel, fiddle, warm vocals, storytelling, americana',
+        lyrics: '[Verse]\nDust road stretching out for miles ahead\nOld truck rattling, holding on by a thread\nSunset painting gold across the land\nCold beer waiting in my weathered hand\n\n[Chorus]\nOut here where the stars shine bright\nWhere the crickets sing through the summer night\nAin\'t much but it\'s mine, it feels just right\nSmall town heart, big open sky tonight\n\n[Verse]\nFront porch memories of younger days\nMama\'s cooking, daddy\'s worn-out ways\nRiver running where we used to swim\nLife was simple back there on a whim\n\n[Chorus]\nOut here where the stars shine bright\nWhere the crickets sing through the summer night\nAin\'t much but it\'s mine, it feels just right\nSmall town heart, big open sky tonight',
+      },
+      'R&B': {
+        caption: 'r&b, smooth vocals, neo-soul, groove, bass guitar, Rhodes piano, sensual, modern R&B',
+        lyrics: '[Verse]\nMoonlight spilling through the windowpane\nYour perfume lingering like sweet champagne\nEvery word you whisper pulls me closer still\nThis magnetic feeling, I can\'t get my fill\n\n[Chorus]\nStay with me tonight\nLet the world fade out of sight\nIn your arms everything\'s right\nStay with me tonight\n\n[Verse]\nSilk and shadows dancing on the wall\nYour laughter echoing down the hall\nTime stands still when I\'m here next to you\nEverything I need is in this room for two\n\n[Chorus]\nStay with me tonight\nLet the world fade out of sight\nIn your arms everything\'s right\nStay with me tonight',
+      },
+      'Ambient': {
+        caption: 'ambient, atmospheric pads, ethereal textures, reverb, spacious, dreamy, meditation, calm',
+        lyrics: '[Instrumental]',
+        instrumental: true,
+      },
+      'Folk': {
+        caption: 'folk, acoustic guitar, harmonica, warm vocals, fingerpicking, storytelling, organic sound',
+        lyrics: '[Verse]\nDown by the river where the willows grow\nThere\'s a story that the old folks know\nAbout a traveler from a distant shore\nWho came seeking what he\'d lost before\n\n[Chorus]\nSing me a song of days gone by\nOf open roads beneath the sky\nWhere every stranger was a friend\nAnd every journey had no end\n\n[Verse]\nHe carried nothing but a worn guitar\nAnd a map of every wishing star\nFrom town to town he\'d play his tune\nUnder the pale and silver moon\n\n[Chorus]\nSing me a song of days gone by\nOf open roads beneath the sky\nWhere every stranger was a friend\nAnd every journey had no end',
+      },
+      'Reggae': {
+        caption: 'reggae, offbeat guitar, bass groove, ska rhythm, warm vocals, sunshine vibes, island feel',
+        lyrics: '[Verse]\nSun is rising over the bay\nGolden morning, brand new day\nFeel the rhythm in the breeze\nSwaying gently through the trees\n\n[Chorus]\nOne love, one heart\nLet\'s come together from the start\nNo matter where you are\nThe music brings us close, near and far\n\n[Verse]\nChildren playing in the sand\nMusic flowing through the land\nEvery soul deserves to be free\nJust like the waves upon the sea\n\n[Chorus]\nOne love, one heart\nLet\'s come together from the start\nNo matter where you are\nThe music brings us close, near and far',
+      },
+    };
+
+    // ========================
+    // Built-in Profiles
+    // ========================
+    const BUILTIN_PROFILES = {
+      'Quick Draft': {
+        model: 'ace-step-turbo',
+        duration: 15,
+        inferenceSteps: 8,
+        guidanceScale: 5.0,
+        thinking: false,
+        batchSize: 1,
+        audioFormat: 'wav',
+        instrumental: false,
+        lmTemperature: 0.85,
+        lmCfgScale: 2.0,
+      },
+      'High Quality': {
+        model: 'ace-step-sft',
+        duration: 60,
+        inferenceSteps: 50,
+        guidanceScale: 15.0,
+        thinking: true,
+        batchSize: 1,
+        audioFormat: 'flac',
+        instrumental: false,
+        lmTemperature: 0.85,
+        lmCfgScale: 2.0,
+      },
+      'Long Track': {
+        model: 'ace-step-turbo',
+        duration: 180,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
+        thinking: true,
+        batchSize: 1,
+        audioFormat: 'wav',
+        instrumental: false,
+        lmTemperature: 0.85,
+        lmCfgScale: 2.0,
+      },
+      'Instrumental Ambient': {
+        model: 'ace-step-turbo',
+        duration: 60,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
+        thinking: true,
+        batchSize: 1,
+        audioFormat: 'flac',
+        instrumental: true,
+        lmTemperature: 0.85,
+        lmCfgScale: 2.0,
+        caption: 'ambient, atmospheric pads, ethereal textures, reverb, spacious, dreamy',
+        lyrics: '[Instrumental]',
+      },
+      'Vocal Pop': {
+        model: 'ace-step-turbo',
+        duration: 30,
+        inferenceSteps: 8,
+        guidanceScale: 7.0,
+        thinking: true,
+        batchSize: 2,
+        audioFormat: 'wav',
+        instrumental: false,
+        lmTemperature: 0.85,
+        lmCfgScale: 2.0,
+      },
+    };
+
+    // ========================
+    // Initialization
+    // ========================
+    function init() {
+      // Build genre grid
+      const grid = document.getElementById('genreGrid');
+      for (const genre of Object.keys(GENRE_TEMPLATES)) {
+        const chip = document.createElement('button');
+        chip.className = 'genre-chip';
+        chip.textContent = genre;
+        chip.onclick = () => applyGenre(genre, chip);
+        grid.appendChild(chip);
+      }
+
+      // Wire up all sliders
+      wireSlider('duration', 'durationValue');
+      wireSlider('inferenceSteps', 'stepsValue');
+      wireSlider('guidanceScale', 'guidanceValue');
+      wireSlider('lmTemperature', 'lmTempValue');
+      wireSlider('lmCfgScale', 'lmCfgValue');
+
+      // Update steps default when model changes
+      document.getElementById('modelSelect').addEventListener('change', (e) => {
+        const steps = e.target.value === 'ace-step-sft' ? 50 : 8;
+        document.getElementById('inferenceSteps').value = steps;
+        document.getElementById('stepsValue').textContent = steps;
+      });
+
+      // Load profiles
+      refreshProfileList();
+
+      // Load history from localStorage
+      generationHistory = JSON.parse(localStorage.getItem('music-history') || '[]');
+      renderHistory();
+
+      // Check API connectivity
+      checkApiStatus();
+    }
+
+    function wireSlider(sliderId, valueId) {
+      const slider = document.getElementById(sliderId);
+      const display = document.getElementById(valueId);
+      slider.addEventListener('input', () => {
+        display.textContent = slider.value;
+      });
+    }
+
+    // ========================
+    // Genre Templates
+    // ========================
+    function applyGenre(genre, chipEl) {
+      const template = GENRE_TEMPLATES[genre];
+      if (!template) return;
+
+      document.getElementById('caption').value = template.caption;
+      document.getElementById('lyrics').value = template.lyrics || '';
+      document.getElementById('instrumental').checked = !!template.instrumental;
+
+      // Highlight active chip
+      document.querySelectorAll('.genre-chip').forEach(c => c.classList.remove('active'));
+      chipEl.classList.add('active');
+    }
+
+    // ========================
+    // Lyrics Tag Insertion
+    // ========================
+    function insertTag(tag) {
+      const textarea = document.getElementById('lyrics');
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+
+      const before = text.substring(0, start);
+      const after = text.substring(end);
+      const needsNewline = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+
+      textarea.value = before + needsNewline + tag + '\n' + after;
+      textarea.focus();
+      const newPos = start + needsNewline.length + tag.length + 1;
+      textarea.setSelectionRange(newPos, newPos);
+    }
+
+    // ========================
+    // Collapsible Sections
+    // ========================
+    function toggleSection(bodyId) {
+      const body = document.getElementById(bodyId);
+      const icon = document.getElementById(bodyId + '-icon');
+      body.classList.toggle('collapsed');
+      icon.style.transform = body.classList.contains('collapsed') ? 'rotate(-90deg)' : '';
+    }
+
+    // ========================
+    // Profile System
+    // ========================
+    function getUserProfiles() {
+      return JSON.parse(localStorage.getItem('music-profiles') || '{}');
+    }
+
+    function saveUserProfiles(profiles) {
+      localStorage.setItem('music-profiles', JSON.stringify(profiles));
+    }
+
+    function refreshProfileList() {
+      const select = document.getElementById('profileSelect');
+      select.innerHTML = '<option value="">-- Select Profile --</option>';
+
+      // Built-in profiles
+      const builtinGroup = document.createElement('optgroup');
+      builtinGroup.label = 'Built-in';
+      for (const name of Object.keys(BUILTIN_PROFILES)) {
+        const opt = document.createElement('option');
+        opt.value = 'builtin:' + name;
+        opt.textContent = name;
+        builtinGroup.appendChild(opt);
+      }
+      select.appendChild(builtinGroup);
+
+      // User profiles
+      const userProfiles = getUserProfiles();
+      const userKeys = Object.keys(userProfiles);
+      if (userKeys.length > 0) {
+        const userGroup = document.createElement('optgroup');
+        userGroup.label = 'Custom';
+        for (const name of userKeys) {
+          const opt = document.createElement('option');
+          opt.value = 'user:' + name;
+          opt.textContent = name;
+          userGroup.appendChild(opt);
+        }
+        select.appendChild(userGroup);
+      }
+    }
+
+    function getCurrentSettings() {
+      return {
+        model: document.getElementById('modelSelect').value,
+        caption: document.getElementById('caption').value,
+        lyrics: document.getElementById('lyrics').value,
+        instrumental: document.getElementById('instrumental').checked,
+        bpm: document.getElementById('bpm').value,
+        keyscale: document.getElementById('keyscale').value,
+        timesignature: document.getElementById('timesignature').value,
+        vocalLanguage: document.getElementById('vocalLanguage').value,
+        duration: parseFloat(document.getElementById('duration').value),
+        inferenceSteps: parseInt(document.getElementById('inferenceSteps').value),
+        guidanceScale: parseFloat(document.getElementById('guidanceScale').value),
+        seed: parseInt(document.getElementById('seed').value),
+        batchSize: parseInt(document.getElementById('batchSize').value),
+        audioFormat: document.getElementById('audioFormat').value,
+        thinking: document.getElementById('thinking').checked,
+        lmTemperature: parseFloat(document.getElementById('lmTemperature').value),
+        lmCfgScale: parseFloat(document.getElementById('lmCfgScale').value),
+      };
+    }
+
+    function applySettings(settings) {
+      if (settings.model) {
+        document.getElementById('modelSelect').value = settings.model;
+      }
+      if (settings.caption !== undefined) {
+        document.getElementById('caption').value = settings.caption;
+      }
+      if (settings.lyrics !== undefined) {
+        document.getElementById('lyrics').value = settings.lyrics;
+      }
+      if (settings.instrumental !== undefined) {
+        document.getElementById('instrumental').checked = settings.instrumental;
+      }
+      if (settings.bpm !== undefined) {
+        document.getElementById('bpm').value = settings.bpm;
+      }
+      if (settings.keyscale !== undefined) {
+        document.getElementById('keyscale').value = settings.keyscale;
+      }
+      if (settings.timesignature !== undefined) {
+        document.getElementById('timesignature').value = settings.timesignature;
+      }
+      if (settings.vocalLanguage !== undefined) {
+        document.getElementById('vocalLanguage').value = settings.vocalLanguage;
+      }
+      if (settings.duration !== undefined) {
+        document.getElementById('duration').value = settings.duration;
+        document.getElementById('durationValue').textContent = settings.duration;
+      }
+      if (settings.inferenceSteps !== undefined) {
+        document.getElementById('inferenceSteps').value = settings.inferenceSteps;
+        document.getElementById('stepsValue').textContent = settings.inferenceSteps;
+      }
+      if (settings.guidanceScale !== undefined) {
+        document.getElementById('guidanceScale').value = settings.guidanceScale;
+        document.getElementById('guidanceValue').textContent = settings.guidanceScale;
+      }
+      if (settings.seed !== undefined) {
+        document.getElementById('seed').value = settings.seed;
+      }
+      if (settings.batchSize !== undefined) {
+        document.getElementById('batchSize').value = settings.batchSize;
+      }
+      if (settings.audioFormat !== undefined) {
+        document.getElementById('audioFormat').value = settings.audioFormat;
+      }
+      if (settings.thinking !== undefined) {
+        document.getElementById('thinking').checked = settings.thinking;
+      }
+      if (settings.lmTemperature !== undefined) {
+        document.getElementById('lmTemperature').value = settings.lmTemperature;
+        document.getElementById('lmTempValue').textContent = settings.lmTemperature;
+      }
+      if (settings.lmCfgScale !== undefined) {
+        document.getElementById('lmCfgScale').value = settings.lmCfgScale;
+        document.getElementById('lmCfgValue').textContent = settings.lmCfgScale;
+      }
+    }
+
+    function loadProfile(value) {
+      if (!value) return;
+
+      const [type, name] = value.split(':');
+      let settings;
+
+      if (type === 'builtin') {
+        settings = BUILTIN_PROFILES[name];
+      } else {
+        const profiles = getUserProfiles();
+        settings = profiles[name];
+      }
+
+      if (settings) {
+        applySettings(settings);
+        showStatus(`Loaded profile: ${name}`, 'success');
+      }
+    }
+
+    function saveProfile() {
+      const name = prompt('Profile name:');
+      if (!name || !name.trim()) return;
+
+      const profiles = getUserProfiles();
+      profiles[name.trim()] = getCurrentSettings();
+      saveUserProfiles(profiles);
+      refreshProfileList();
+      showStatus(`Saved profile: ${name.trim()}`, 'success');
+    }
+
+    function deleteProfile() {
+      const select = document.getElementById('profileSelect');
+      const value = select.value;
+      if (!value) return;
+
+      const [type, name] = value.split(':');
+      if (type === 'builtin') {
+        showStatus('Cannot delete built-in profiles', 'error');
+        return;
+      }
+
+      if (!confirm(`Delete profile "${name}"?`)) return;
+
+      const profiles = getUserProfiles();
+      delete profiles[name];
+      saveUserProfiles(profiles);
+      refreshProfileList();
+      showStatus(`Deleted profile: ${name}`, 'success');
+    }
+
+    // ========================
+    // Status Bar
+    // ========================
+    function showStatus(message, type = 'loading') {
+      const bar = document.getElementById('statusBar');
+      bar.textContent = message;
+      bar.className = 'status-bar visible ' + type;
+      if (type === 'success') {
+        setTimeout(() => { bar.className = 'status-bar'; }, 3000);
+      }
+    }
+
+    function hideStatus() {
+      document.getElementById('statusBar').className = 'status-bar';
+    }
+
+    // ========================
+    // Music Generation
+    // ========================
+    async function startGeneration() {
+      const caption = document.getElementById('caption').value.trim();
+      if (!caption) {
+        showStatus('Please enter a caption / music description', 'error');
+        return;
+      }
+
+      const request = {
+        caption: caption,
+        lyrics: document.getElementById('lyrics').value,
+        instrumental: document.getElementById('instrumental').checked,
+        duration: parseFloat(document.getElementById('duration').value),
+        guidance_scale: parseFloat(document.getElementById('guidanceScale').value),
+        seed: parseInt(document.getElementById('seed').value),
+        thinking: document.getElementById('thinking').checked,
+        lm_temperature: parseFloat(document.getElementById('lmTemperature').value),
+        lm_cfg_scale: parseFloat(document.getElementById('lmCfgScale').value),
+        audio_format: document.getElementById('audioFormat').value,
+        batch_size: parseInt(document.getElementById('batchSize').value),
+        model: document.getElementById('modelSelect').value,
+        inference_steps: parseInt(document.getElementById('inferenceSteps').value),
+        vocal_language: document.getElementById('vocalLanguage').value,
+      };
+
+      const bpm = document.getElementById('bpm').value;
+      if (bpm) request.bpm = parseInt(bpm);
+
+      const keyscale = document.getElementById('keyscale').value.trim();
+      if (keyscale) request.keyscale = keyscale;
+
+      const timesig = document.getElementById('timesignature').value;
+      if (timesig) request.timesignature = timesig;
+
+      // Disable button
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+
+      showStatus('Submitting generation request...', 'loading');
+
+      try {
+        const response = await fetch(`${API_URL}/music/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.detail || 'Generation failed');
+        }
+
+        const data = await response.json();
+        currentJobId = data.job_id;
+
+        // Show progress
+        const progressSection = document.getElementById('progressSection');
+        progressSection.classList.add('active');
+
+        showStatus(`Job ${data.job_id} started. Estimated: ~${Math.round(data.estimated_time_seconds)}s`, 'loading');
+
+        // Start polling
+        pollInterval = setInterval(() => pollJobStatus(data.job_id), 1500);
+
+      } catch (error) {
+        showStatus('Error: ' + error.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Generate Music';
+      }
+    }
+
+    async function pollJobStatus(jobId) {
+      try {
+        const response = await fetch(`${API_URL}/music/status/${jobId}`);
+        if (!response.ok) throw new Error('Failed to get status');
+
+        const status = await response.json();
+
+        // Update progress bar
+        if (status.total_steps > 0) {
+          const percent = ((status.current_step || 0) / status.total_steps) * 100;
+          document.getElementById('progressBar').style.width = percent + '%';
+          document.getElementById('progressSteps').textContent =
+            `Step ${status.current_step || 0} / ${status.total_steps}`;
+        }
+
+        if (status.elapsed_seconds) {
+          document.getElementById('progressTime').textContent =
+            `${Math.round(status.elapsed_seconds)}s elapsed`;
+        }
+
+        if (status.status === 'completed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+
+          document.getElementById('progressSection').classList.remove('active');
+          showStatus(`Generation complete in ${Math.round(status.elapsed_seconds)}s!`, 'success');
+
+          // Show audio results
+          displayAudioResults(jobId, status);
+
+          // Add to history
+          addToHistory(jobId, status);
+
+          resetGenerateButton();
+
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+
+          document.getElementById('progressSection').classList.remove('active');
+          showStatus('Generation failed: ' + (status.error || 'Unknown error'), 'error');
+
+          resetGenerateButton();
+        }
+      } catch (error) {
+        console.error('Poll error:', error);
+      }
+    }
+
+    function cancelGeneration() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      document.getElementById('progressSection').classList.remove('active');
+      showStatus('Generation cancelled', 'error');
+      resetGenerateButton();
+    }
+
+    function resetGenerateButton() {
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = false;
+      btn.textContent = 'Generate Music';
+    }
+
+    // ========================
+    // Audio Results Display
+    // ========================
+    function displayAudioResults(jobId, status) {
+      const container = document.getElementById('audioResults');
+      container.innerHTML = '';
+
+      if (!status.audios || status.audios.length === 0) {
+        container.innerHTML = '<div class="panel"><p>No audio files generated.</p></div>';
+        return;
+      }
+
+      for (const audio of status.audios) {
+        const card = document.createElement('div');
+        card.className = 'audio-card';
+
+        const audioUrl = `${API_URL}${audio.download_url}`;
+
+        card.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong>Variation ${audio.index + 1}</strong>
+            <span style="font-size:0.8rem; color:var(--text-dim);">Seed: ${audio.seed}</span>
+          </div>
+          <audio controls preload="auto">
+            <source src="${audioUrl}" type="audio/wav">
+            Your browser does not support the audio element.
+          </audio>
+          <div class="audio-meta">
+            <span>${audio.sample_rate / 1000}kHz</span>
+            <div class="audio-actions">
+              <a href="${audioUrl}" download class="btn-secondary btn-small" style="text-decoration:none;">Download</a>
+            </div>
+          </div>
+        `;
+
+        container.appendChild(card);
+      }
+    }
+
+    // ========================
+    // History
+    // ========================
+    function addToHistory(jobId, status) {
+      const entry = {
+        jobId: jobId,
+        caption: document.getElementById('caption').value.trim(),
+        duration: parseFloat(document.getElementById('duration').value),
+        model: document.getElementById('modelSelect').value,
+        elapsed: status.elapsed_seconds ? Math.round(status.elapsed_seconds) : 0,
+        audios: status.audios || [],
+        timestamp: Date.now(),
+      };
+
+      generationHistory.unshift(entry);
+      // Keep last 50
+      if (generationHistory.length > 50) generationHistory = generationHistory.slice(0, 50);
+      localStorage.setItem('music-history', JSON.stringify(generationHistory));
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const container = document.getElementById('historyList');
+
+      if (generationHistory.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <h3>No songs generated yet</h3>
+            <p>Configure your settings and hit Generate!</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = '';
+      for (const entry of generationHistory) {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.onclick = () => loadHistoryItem(entry);
+
+        const date = new Date(entry.timestamp);
+        const timeStr = date.toLocaleString();
+
+        item.innerHTML = `
+          <div class="history-caption">${escapeHtml(entry.caption)}</div>
+          <div class="history-meta">
+            ${entry.model} | ${entry.duration}s | ${entry.elapsed}s gen time | ${timeStr}
+          </div>
+        `;
+        container.appendChild(item);
+      }
+    }
+
+    function loadHistoryItem(entry) {
+      // Re-display the audio from this history item
+      if (entry.audios && entry.audios.length > 0) {
+        displayAudioResults(entry.jobId, { audios: entry.audios });
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ========================
+    // API Status Check
+    // ========================
+    async function checkApiStatus() {
+      try {
+        const response = await fetch(`${API_URL}/music/models`);
+        const data = await response.json();
+
+        if (data.models && data.models.length > 0) {
+          // Update model select with actual available models
+          const select = document.getElementById('modelSelect');
+          select.innerHTML = '';
+          for (const model of data.models) {
+            const opt = document.createElement('option');
+            opt.value = model.id;
+            opt.textContent = `${model.name}${model.loaded ? ' (Loaded)' : ''}`;
+            select.appendChild(opt);
+          }
+        }
+      } catch (error) {
+        showStatus('API unavailable - is the server running on port 4201?', 'error');
+      }
+    }
+
+    // ========================
+    // Start
+    // ========================
+    init();
+  </script>
+</body>
+</html>

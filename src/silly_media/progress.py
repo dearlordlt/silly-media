@@ -41,3 +41,4 @@ class GenerationProgress:
 # Global progress trackers
 progress = GenerationProgress()
 img2img_progress = GenerationProgress()
+music_progress = GenerationProgress()

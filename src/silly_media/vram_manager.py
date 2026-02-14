@@ -26,6 +26,7 @@ class ModelType(Enum):
     VISION = "vision"
     IMG2IMG = "img2img"
     LLM = "llm"
+    MUSIC = "music"
 
 
 class Loadable(Protocol):
@@ -72,6 +73,8 @@ class VRAMManager:
         "qwen3-vl-8b": 18.0,
         "qwen-image-edit": 20.0,
         "huihui-qwen3-4b": 10.0,
+        "ace-step-turbo": 8.0,
+        "ace-step-sft": 8.0,
     }
 
     def __new__(cls) -> "VRAMManager":

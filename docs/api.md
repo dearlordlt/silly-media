@@ -6,7 +6,7 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides seven main capabilities:
+Silly Media provides eight main capabilities:
 
 - **Image Generation**: Text-to-image using diffusion models
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
@@ -15,6 +15,7 @@ Silly Media provides seven main capabilities:
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
 - **LLM Text Generation**: Text completion and chat using large language models
+- **Music Generation**: Text-to-music using ACE-Step 1.5 with lyrics, genre tags, and vocal support
 
 The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model can be active at a time.
 
@@ -65,6 +66,13 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | ---------------- | ------------------ | ----- | -------------------------------------------------- |
 | Huihui Qwen3 4B  | `huihui-qwen3-4b`  | ~10GB | Abliterated Qwen3-4B, bfloat16, creative writing   |
 
+### Music Models
+
+| Model                  | ID               | Steps | VRAM | Notes                                          |
+| ---------------------- | ---------------- | ----- | ---- | ---------------------------------------------- |
+| ACE-Step 1.5 Turbo     | `ace-step-turbo` | 8     | ~8GB | Fast generation, default model                 |
+| ACE-Step 1.5 SFT       | `ace-step-sft`   | 50    | ~8GB | Higher quality, slower                         |
+
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 **Model comparison:**
@@ -90,7 +98,8 @@ Check API and model status.
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["hunyuan-video"],
   "available_vision_models": ["qwen3-vl-8b"],
-  "available_llm_models": ["huihui-qwen3-4b"]
+  "available_llm_models": ["huihui-qwen3-4b"],
+  "available_music_models": ["ace-step-turbo", "ace-step-sft"]
 }
 ```
 
@@ -124,6 +133,10 @@ List available and loaded models by type.
   },
   "llm": {
     "available": ["huihui-qwen3-4b"],
+    "loaded": []
+  },
+  "music": {
+    "available": ["ace-step-turbo", "ace-step-sft"],
     "loaded": []
   }
 }
@@ -1686,6 +1699,194 @@ The defaults are tuned for creative writing:
 
 ---
 
+## Music Generation
+
+Generate music from text descriptions and lyrics using ACE-Step 1.5. Supports vocals in 50+ languages, instrumental generation, and configurable musical parameters (BPM, key, time signature).
+
+Generation is **asynchronous** - you start a job and poll for completion (typically 5-60 seconds depending on model and duration).
+
+### Features
+
+- **Text-to-Music**: Describe genre, instruments, mood, and style
+- **Lyrics support**: Add lyrics with section tags (`[Verse]`, `[Chorus]`, `[Bridge]`, etc.)
+- **Instrumental mode**: Generate music without vocals
+- **Musical control**: Set BPM, key/scale, time signature
+- **LM Chain-of-Thought**: Optional planning phase for better adherence to prompts
+- **Batch generation**: Generate multiple variations in one request
+- **Multiple output formats**: WAV, FLAC, MP3
+
+### Music Parameters
+
+| Parameter         | Type   | Default     | Range       | Description                                    |
+| ----------------- | ------ | ----------- | ----------- | ---------------------------------------------- |
+| `caption`         | string | required    | 1-512 chars | Music description/tags                         |
+| `lyrics`          | string | `""`        | 0-4096 chars| Lyrics with section tags                       |
+| `instrumental`    | bool   | `false`     | -           | Force instrumental (no vocals)                 |
+| `bpm`             | int    | `null`      | 30-300      | Tempo in BPM (null = auto)                     |
+| `keyscale`        | string | `""`        | -           | Musical key (e.g., "C Major", "Am")            |
+| `timesignature`   | string | `""`        | 2/3/4/6     | Time signature                                 |
+| `duration`        | float  | `30.0`      | 10-240      | Duration in seconds                            |
+| `vocal_language`  | string | `"unknown"` | -           | Vocal language (en, zh, ja, ko, es, fr, etc.)  |
+| `inference_steps` | int    | `null`      | 1-100       | Diffusion steps (null = model default)         |
+| `guidance_scale`  | float  | `7.0`       | 0-200       | Classifier-free guidance scale                 |
+| `seed`            | int    | `-1`        | -1 or 0+    | Random seed (-1 = random)                      |
+| `thinking`        | bool   | `true`      | -           | Enable LM chain-of-thought planning            |
+| `lm_temperature`  | float  | `0.85`      | 0.0-2.0     | LM sampling temperature                        |
+| `lm_cfg_scale`    | float  | `2.0`       | 0.0-10.0    | LM classifier-free guidance                    |
+| `audio_format`    | string | `"wav"`     | wav/flac/mp3| Output audio format                            |
+| `batch_size`      | int    | `1`         | 1-4         | Number of variations to generate               |
+| `model`           | string | `"ace-step-turbo"` | -    | Model variant to use                           |
+
+### `GET /music/models`
+
+List available music generation models.
+
+**Response**
+
+```json
+{
+  "models": [
+    {
+      "id": "ace-step-turbo",
+      "name": "ACE-Step 1.5 Turbo",
+      "loaded": false,
+      "default_steps": 8,
+      "estimated_vram_gb": 8.0
+    },
+    {
+      "id": "ace-step-sft",
+      "name": "ACE-Step 1.5 SFT (Quality)",
+      "loaded": false,
+      "default_steps": 50,
+      "estimated_vram_gb": 8.0
+    }
+  ]
+}
+```
+
+### `POST /music/generate`
+
+Start music generation. Returns a job ID for status polling.
+
+**Request Body**
+
+```json
+{
+  "caption": "upbeat pop, catchy melody, female singer, synth, drums",
+  "lyrics": "[Verse]\nWoke up this morning with a smile\n\n[Chorus]\nLiving for today!",
+  "duration": 30.0,
+  "guidance_scale": 7.0,
+  "seed": -1,
+  "thinking": true,
+  "model": "ace-step-turbo"
+}
+```
+
+**Response**
+
+```json
+{
+  "job_id": "abc12345",
+  "status": "queued",
+  "estimated_time_seconds": 17.0
+}
+```
+
+### `GET /music/status/{job_id}`
+
+Get music generation job status. Poll this endpoint to track progress.
+
+**Response (processing)**
+
+```json
+{
+  "job_id": "abc12345",
+  "status": "processing",
+  "progress": 0.5,
+  "current_step": 4,
+  "total_steps": 8,
+  "elapsed_seconds": 12.3,
+  "audios": null,
+  "error": null
+}
+```
+
+**Response (completed)**
+
+```json
+{
+  "job_id": "abc12345",
+  "status": "completed",
+  "progress": 1.0,
+  "current_step": 8,
+  "total_steps": 8,
+  "elapsed_seconds": 24.5,
+  "audios": [
+    {
+      "index": 0,
+      "seed": 42,
+      "sample_rate": 48000,
+      "download_url": "/music/download/abc12345/0"
+    }
+  ],
+  "error": null
+}
+```
+
+**Status values:**
+| Status | Description |
+|--------|-------------|
+| `queued` | Job is waiting to start |
+| `processing` | Currently generating |
+| `completed` | Audio ready for download |
+| `failed` | Generation failed (see `error`) |
+
+### `GET /music/progress`
+
+Get current music generation progress (simple alternative to job polling).
+
+**Response (when generating)**
+
+```json
+{
+  "active": true,
+  "step": 4,
+  "total_steps": 8,
+  "percent": 50,
+  "elapsed": 12.3
+}
+```
+
+### `GET /music/download/{job_id}/{audio_index}`
+
+Download a generated audio file.
+
+**Path Parameters**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `job_id` | string | Job ID from generation request |
+| `audio_index` | int | Audio variation index (0-based) |
+
+**Response**
+
+- Content-Type: `audio/wav`, `audio/flac`, or `audio/mpeg`
+- Body: Raw audio bytes
+
+### `DELETE /music/{job_id}`
+
+Delete a music job and its generated files.
+
+**Response**
+
+```json
+{
+  "status": "deleted",
+  "job_id": "abc12345"
+}
+```
+
+---
+
 ## Examples
 
 ### Pixel Art Generation
@@ -2271,6 +2472,97 @@ with open("document.png", "rb") as f:
         data={"query": "Extract all text from this image"},
     )
 print(response.json()["response"])
+```
+
+### Music Generation
+
+#### Generate Music (curl)
+
+```bash
+# Start music generation
+curl -X POST http://localhost:4201/music/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "caption": "upbeat pop, catchy melody, female singer, synth, drums",
+    "lyrics": "[Verse]\nWoke up this morning with a smile\nSunshine through the window\n\n[Chorus]\nLiving for today!\nNothing gonna take this away!",
+    "duration": 30.0,
+    "model": "ace-step-turbo"
+  }'
+
+# Check status (replace JOB_ID with actual job ID)
+curl http://localhost:4201/music/status/JOB_ID
+
+# Download when complete
+curl http://localhost:4201/music/download/JOB_ID/0 -o song.wav
+```
+
+#### Instrumental Music
+
+```bash
+curl -X POST http://localhost:4201/music/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "caption": "smooth jazz, saxophone, piano, walking bass",
+    "instrumental": true,
+    "duration": 60.0,
+    "bpm": 90,
+    "keyscale": "Bb Major"
+  }'
+```
+
+#### High Quality with SFT Model
+
+```bash
+curl -X POST http://localhost:4201/music/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "caption": "orchestral, cinematic, strings, dramatic",
+    "instrumental": true,
+    "duration": 120.0,
+    "model": "ace-step-sft",
+    "guidance_scale": 15.0
+  }'
+```
+
+#### Python Client (Music)
+
+```python
+import requests
+import time
+
+# Start music generation
+response = requests.post(
+    "http://localhost:4201/music/generate",
+    json={
+        "caption": "energetic rock, electric guitar, drums, bass",
+        "lyrics": "[Verse]\nRiding down the highway\n\n[Chorus]\nWe're breaking free tonight!",
+        "duration": 30.0,
+        "model": "ace-step-turbo",
+        "batch_size": 2,
+    },
+)
+job_id = response.json()["job_id"]
+print(f"Started job: {job_id}")
+
+# Poll for completion
+while True:
+    status = requests.get(f"http://localhost:4201/music/status/{job_id}").json()
+    print(f"Status: {status['status']}, Progress: {status.get('progress', 0)*100:.0f}%")
+    if status["status"] == "completed":
+        break
+    elif status["status"] == "failed":
+        print(f"Error: {status['error']}")
+        break
+    time.sleep(2)
+
+# Download all variations
+if status["status"] == "completed":
+    for audio in status["audios"]:
+        response = requests.get(f"http://localhost:4201{audio['download_url']}")
+        filename = f"song_variation_{audio['index']}.wav"
+        with open(filename, "wb") as f:
+            f.write(response.content)
+        print(f"Downloaded: {filename} (seed: {audio['seed']})")
 ```
 
 ---
