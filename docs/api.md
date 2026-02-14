@@ -1726,13 +1726,11 @@ Generation is **asynchronous** - you start a job and poll for completion (typica
 | `keyscale`        | string | `""`        | -           | Musical key (e.g., "C Major", "Am")            |
 | `timesignature`   | string | `""`        | 2/3/4/6     | Time signature                                 |
 | `duration`        | float  | `30.0`      | 10-240      | Duration in seconds                            |
-| `vocal_language`  | string | `"unknown"` | -           | Vocal language (en, zh, ja, ko, es, fr, etc.)  |
 | `inference_steps` | int    | `null`      | 1-100       | Diffusion steps (null = model default)         |
-| `guidance_scale`  | float  | `7.0`       | 0-200       | Classifier-free guidance scale                 |
+| `guidance_scale`  | float  | `15.0`      | 0-200       | Classifier-free guidance scale                 |
+| `scheduler_type`  | string | `"euler"`   | -           | Scheduler type                                 |
+| `omega_scale`     | float  | `10.0`      | 0-50        | APG omega scale                                |
 | `seed`            | int    | `-1`        | -1 or 0+    | Random seed (-1 = random)                      |
-| `thinking`        | bool   | `true`      | -           | Enable LM chain-of-thought planning            |
-| `lm_temperature`  | float  | `0.85`      | 0.0-2.0     | LM sampling temperature                        |
-| `lm_cfg_scale`    | float  | `2.0`       | 0.0-10.0    | LM classifier-free guidance                    |
 | `audio_format`    | string | `"wav"`     | wav/flac/mp3| Output audio format                            |
 | `batch_size`      | int    | `1`         | 1-4         | Number of variations to generate               |
 | `model`           | string | `"ace-step-turbo"` | -    | Model variant to use                           |
@@ -1775,9 +1773,8 @@ Start music generation. Returns a job ID for status polling.
   "caption": "upbeat pop, catchy melody, female singer, synth, drums",
   "lyrics": "[Verse]\nWoke up this morning with a smile\n\n[Chorus]\nLiving for today!",
   "duration": 30.0,
-  "guidance_scale": 7.0,
+  "guidance_scale": 15.0,
   "seed": -1,
-  "thinking": true,
   "model": "ace-step-turbo"
 }
 ```

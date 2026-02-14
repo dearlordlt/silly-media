@@ -9,24 +9,8 @@ from pydantic import BaseModel, Field
 class MusicModelVariant(str, Enum):
     """Available ACE-Step model variants."""
 
-    TURBO = "ace-step-turbo"
-    SFT = "ace-step-sft"
-
-
-class VocalLanguage(str, Enum):
-    """Supported vocal languages."""
-
-    UNKNOWN = "unknown"
-    EN = "en"
-    ZH = "zh"
-    RU = "ru"
-    ES = "es"
-    JA = "ja"
-    DE = "de"
-    FR = "fr"
-    PT = "pt"
-    IT = "it"
-    KO = "ko"
+    FAST = "ace-step-fast"
+    QUALITY = "ace-step-quality"
 
 
 class AudioFormat(str, Enum):
@@ -82,9 +66,6 @@ class MusicGenerateRequest(BaseModel):
         float,
         Field(default=30.0, ge=10.0, le=240.0, description="Duration in seconds"),
     ] = 30.0
-    vocal_language: Annotated[
-        VocalLanguage, Field(default=VocalLanguage.UNKNOWN, description="Language for vocals")
-    ] = VocalLanguage.UNKNOWN
 
     # DiT inference settings
     inference_steps: Annotated[
@@ -98,24 +79,19 @@ class MusicGenerateRequest(BaseModel):
     ] = None
     guidance_scale: Annotated[
         float,
-        Field(default=7.0, ge=0.0, le=200.0, description="Classifier-free guidance scale"),
-    ] = 7.0
+        Field(default=15.0, ge=0.0, le=200.0, description="Classifier-free guidance scale"),
+    ] = 15.0
+    scheduler_type: Annotated[
+        str,
+        Field(default="euler", description="Scheduler type (euler)"),
+    ] = "euler"
+    omega_scale: Annotated[
+        float,
+        Field(default=10.0, ge=0.0, le=50.0, description="APG omega scale"),
+    ] = 10.0
     seed: Annotated[
         int, Field(default=-1, ge=-1, description="Random seed (-1 for random)")
     ] = -1
-
-    # LM (thinking/planning) settings
-    thinking: Annotated[
-        bool, Field(default=True, description="Enable LM chain-of-thought planning")
-    ] = True
-    lm_temperature: Annotated[
-        float,
-        Field(default=0.85, ge=0.0, le=2.0, description="LM sampling temperature"),
-    ] = 0.85
-    lm_cfg_scale: Annotated[
-        float,
-        Field(default=2.0, ge=0.0, le=10.0, description="LM classifier-free guidance"),
-    ] = 2.0
 
     # Output
     audio_format: Annotated[
@@ -129,8 +105,8 @@ class MusicGenerateRequest(BaseModel):
     # Model selection
     model: Annotated[
         MusicModelVariant,
-        Field(default=MusicModelVariant.TURBO, description="Model variant to use"),
-    ] = MusicModelVariant.TURBO
+        Field(default=MusicModelVariant.FAST, description="Model variant to use"),
+    ] = MusicModelVariant.FAST
 
 
 class MusicJobResponse(BaseModel):

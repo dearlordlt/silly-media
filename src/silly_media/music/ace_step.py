@@ -1,4 +1,4 @@
-"""ACE-Step 1.5 music generation models."""
+"""ACE-Step music generation models (v1.0 - 3.5B DiT)."""
 
 import gc
 import glob
@@ -16,13 +16,13 @@ from .schemas import MusicGenerateRequest
 logger = logging.getLogger(__name__)
 
 
-class AceStepTurboModel(BaseMusicModel):
-    """ACE-Step 1.5 Turbo - fast 8-step inference."""
+class AceStepFastModel(BaseMusicModel):
+    """ACE-Step v1 Fast - 27-step inference (~1.7s per minute of audio)."""
 
-    model_id = "ace-step-turbo"
-    display_name = "ACE-Step 1.5 Turbo"
+    model_id = "ace-step-fast"
+    display_name = "ACE-Step Fast (27 steps)"
     estimated_vram_gb = 8.0
-    default_steps = 8
+    default_steps = 27
 
     def __init__(self) -> None:
         super().__init__()
@@ -41,9 +41,9 @@ class AceStepTurboModel(BaseMusicModel):
 
         from acestep.pipeline_ace_step import ACEStepPipeline
 
-        logger.info("Loading ACE-Step pipeline (Turbo)...")
+        logger.info(f"Loading ACE-Step pipeline ({self.display_name})...")
         self._pipeline = ACEStepPipeline(
-            checkpoint_dir=None,  # Auto-downloads to HF cache
+            checkpoint_dir=None,  # Auto-downloads ACE-Step-v1-3.5B to HF cache
             device_id=0,
             dtype="bfloat16",
             torch_compile=False,
@@ -51,7 +51,7 @@ class AceStepTurboModel(BaseMusicModel):
         )
 
         self._loaded = True
-        logger.info("ACE-Step Turbo loaded successfully")
+        logger.info(f"{self.display_name} loaded successfully")
 
     def unload(self) -> None:
         logger.info("Unloading ACE-Step model...")
@@ -83,31 +83,43 @@ class AceStepTurboModel(BaseMusicModel):
         save_dir = self._music_dir / job_id
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build prompt from caption + musical metadata
+        # ACE-Step v1.0 expects comma-separated tags as the prompt
+        # The caption from the user should already be in tag format
+        # We append musical metadata as additional tags
         prompt = request.caption
         if request.bpm:
-            prompt = f"bpm: {request.bpm}, {prompt}"
+            prompt += f", {request.bpm} bpm"
         if request.keyscale:
-            prompt = f"key: {request.keyscale}, {prompt}"
+            prompt += f", {request.keyscale}"
 
         # Handle lyrics
-        lyrics = request.lyrics
+        lyrics = request.lyrics or ""
         if request.instrumental and not lyrics:
-            lyrics = "[Instrumental]"
+            lyrics = "[instrumental]"
 
         logger.info(
-            f"Generating music: prompt='{prompt[:80]}...', "
-            f"duration={request.duration}s, steps={steps}, seed={seed}"
+            f"Generating music: prompt='{prompt[:100]}', "
+            f"duration={request.duration}s, steps={steps}, seed={seed}, "
+            f"guidance_scale={request.guidance_scale}"
         )
 
-        # Call the pipeline
+        # Call the pipeline with all supported parameters
         result = self._pipeline(
             prompt=prompt,
-            lyrics=lyrics or "",
+            lyrics=lyrics,
             audio_duration=request.duration,
             infer_step=steps,
             guidance_scale=request.guidance_scale,
+            scheduler_type=request.scheduler_type,
+            cfg_type="apg",
+            omega_scale=request.omega_scale,
+            guidance_interval=0.5,
+            guidance_interval_decay=0.0,
+            min_guidance_scale=3.0,
             manual_seeds=[seed + i for i in range(request.batch_size)],
+            use_erg_tag=True,
+            use_erg_lyric=True,
+            use_erg_diffusion=True,
             format=request.audio_format.value,
             save_path=str(save_dir),
             batch_size=request.batch_size,
@@ -141,10 +153,10 @@ class AceStepTurboModel(BaseMusicModel):
         return audios
 
 
-class AceStepSFTModel(AceStepTurboModel):
-    """ACE-Step 1.5 SFT - higher quality, 50 steps."""
+class AceStepQualityModel(AceStepFastModel):
+    """ACE-Step v1 Quality - 60-step inference (~3.8s per minute of audio)."""
 
-    model_id = "ace-step-sft"
-    display_name = "ACE-Step 1.5 SFT (Quality)"
+    model_id = "ace-step-quality"
+    display_name = "ACE-Step Quality (60 steps)"
     estimated_vram_gb = 8.0
-    default_steps = 50
+    default_steps = 60
