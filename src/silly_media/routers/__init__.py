@@ -1,6 +1,7 @@
 """API routers module."""
 
 from .actors import router as actors_router
+from .comfyui import router as comfyui_router
 from .llm import router as llm_router
 from .music import router as music_router
 from .pixelart import router as pixelart_router
@@ -9,6 +10,7 @@ from .vision import router as vision_router
 
 __all__ = [
     "actors_router",
+    "comfyui_router",
     "llm_router",
     "music_router",
     "pixelart_router",

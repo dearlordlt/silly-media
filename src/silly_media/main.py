@@ -183,7 +183,7 @@ app.add_middleware(
 )
 
 # Include routers (imported here after app is created)
-from .routers import actors_router, tts_router  # noqa: E402
+from .routers import actors_router, comfyui_router, tts_router  # noqa: E402
 from .routers.video import router as video_router  # noqa: E402
 from .routers.vision import router as vision_router  # noqa: E402
 from .routers.img2img import router as img2img_router  # noqa: E402
@@ -199,6 +199,7 @@ app.include_router(img2img_router)
 app.include_router(pixelart_router)
 app.include_router(llm_router)
 app.include_router(music_router)
+app.include_router(comfyui_router)
 
 
 @app.get("/health")

@@ -16,6 +16,7 @@ Silly Media provides eight main capabilities:
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
 - **LLM Text Generation**: Text completion and chat using large language models
 - **Music Generation**: Text-to-music using ACE-Step 1.5 with lyrics, genre tags, and vocal support
+- **ComfyUI Compatibility**: Drop-in ComfyUI API so third-party clients can generate images without a real ComfyUI install
 
 The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model can be active at a time.
 
@@ -2558,6 +2559,351 @@ if status["status"] == "completed":
         with open(filename, "wb") as f:
             f.write(response.content)
         print(f"Downloaded: {filename} (seed: {audio['seed']})")
+```
+
+---
+
+## ComfyUI-Compatible API
+
+A drop-in ComfyUI API layer that lets any software expecting a ComfyUI backend generate images via Silly Media's **z-image-turbo** model instead. No real ComfyUI install needed.
+
+### How It Works
+
+1. Client submits a standard ComfyUI workflow JSON to `POST /prompt`
+2. The workflow is parsed — prompt text, negative prompt, dimensions, steps, seed, and CFG are extracted from the node graph
+3. Image is generated using z-image-turbo in the background
+4. Client polls `GET /history/{prompt_id}` or listens on the WebSocket for completion
+5. Client downloads the image via `GET /view?filename=...`
+
+All other nodes (CheckpointLoaderSimple, VAEDecode, etc.) are accepted but ignored — generation always uses z-image-turbo.
+
+### Supported Nodes (Workflow Parsing)
+
+The workflow parser extracts parameters from these node types:
+
+| Node Type | What's Extracted |
+|-----------|-----------------|
+| `KSampler` / `KSamplerAdvanced` | `steps`, `cfg`, `seed` |
+| `CLIPTextEncode` | Positive and negative prompt `text` |
+| `EmptyLatentImage` | `width`, `height` |
+| `SaveImage` / `PreviewImage` | Output node ID (for history response) |
+| `CheckpointLoaderSimple` | Ignored (always uses z-image-turbo) |
+
+**Defaults when nodes are missing:** 1024×1024, 9 steps, cfg 0.0, random seed.
+
+### `POST /prompt`
+
+Submit a ComfyUI workflow for execution.
+
+**Request Body**
+
+```json
+{
+  "prompt": {
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 42, "steps": 9, "cfg": 0, "sampler_name": "euler",
+        "scheduler": "normal", "denoise": 1.0,
+        "model": ["4", 0], "positive": ["6", 0],
+        "negative": ["7", 0], "latent_image": ["5", 0]
+      }
+    },
+    "4": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": { "ckpt_name": "z-image-turbo.safetensors" }
+    },
+    "5": {
+      "class_type": "EmptyLatentImage",
+      "inputs": { "width": 1024, "height": 1024, "batch_size": 1 }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": { "text": "a red panda eating bamboo", "clip": ["4", 1] }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": { "text": "ugly, blurry", "clip": ["4", 1] }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": { "samples": ["3", 0], "vae": ["4", 2] }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": { "images": ["8", 0], "filename_prefix": "ComfyUI" }
+    }
+  },
+  "client_id": "optional-client-id"
+}
+```
+
+**Response**
+
+```json
+{
+  "prompt_id": "c56ac5b67e97",
+  "number": 0
+}
+```
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Missing/invalid `prompt` field or unparseable workflow |
+
+### `GET /history/{prompt_id}`
+
+Get the result of a completed job. Returns empty `{}` while the job is still running (ComfyUI convention).
+
+**Response (completed)**
+
+```json
+{
+  "c56ac5b67e97": {
+    "prompt": [0, "c56ac5b67e97", {"...workflow..."}, {}, ["9"]],
+    "outputs": {
+      "9": {
+        "images": [
+          { "filename": "ComfyUI_00001_.png", "subfolder": "", "type": "output" }
+        ]
+      }
+    },
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": []
+    }
+  }
+}
+```
+
+**Response (failed)**
+
+```json
+{
+  "c56ac5b67e97": {
+    "outputs": {},
+    "status": {
+      "status_str": "error",
+      "completed": true,
+      "messages": [["execution_error", {"message": "error details"}]]
+    }
+  }
+}
+```
+
+### `GET /history`
+
+Get history of all completed/failed jobs. Same format as above but with multiple entries.
+
+### `POST /history`
+
+Clear history. Send `{"clear": true}` to remove all entries, or `{"delete": ["prompt_id1", ...]}` to remove specific ones.
+
+### `GET /view`
+
+Download a generated image.
+
+**Query Parameters**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `filename` | string | required | Image filename (e.g., `ComfyUI_00001_.png`) |
+| `subfolder` | string | `""` | Subfolder (usually empty) |
+| `type` | string | `"output"` | Image type (`output`, `temp`, `input`) |
+
+**Response**
+
+- Content-Type: `image/png`
+- Body: Raw PNG bytes
+
+### `GET /queue`
+
+Get the current execution queue.
+
+**Response**
+
+```json
+{
+  "queue_running": [[0, "prompt_id", {"...workflow..."}, {}, ["9"]]],
+  "queue_pending": []
+}
+```
+
+### `POST /queue`
+
+Clear queue items. Send `{"clear": true}` to clear all, or `{"delete": ["prompt_id", ...]}`.
+
+### `GET /system_stats`
+
+Return GPU and system info.
+
+**Response**
+
+```json
+{
+  "system": {
+    "os": "linux",
+    "python_version": "3.10.12",
+    "embedded_python": false,
+    "comfyui_version": "0.0.1"
+  },
+  "devices": [
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "type": "cuda",
+      "index": 0,
+      "vram_total": 25249579008,
+      "vram_free": 2948268032,
+      "torch_vram_total": 25249579008,
+      "torch_vram_free": 2948268032
+    }
+  ]
+}
+```
+
+### `GET /object_info`
+
+Return available node type definitions. Returns a minimal set of nodes: `CheckpointLoaderSimple`, `KSampler`, `CLIPTextEncode`, `EmptyLatentImage`, `VAEDecode`, `SaveImage`, `PreviewImage`.
+
+### `GET /object_info/{node_class}`
+
+Return definition for a specific node type.
+
+### `GET /embeddings`
+
+Returns `[]` (stub).
+
+### `WebSocket /ws`
+
+Real-time progress updates. Connect with an optional `clientId` query parameter.
+
+**Connection**
+
+```
+ws://localhost:4201/ws?clientId=my-client
+```
+
+**Messages sent by server:**
+
+```json
+{"type": "status", "data": {"status": {"exec_info": {"queue_remaining": 1}}}}
+{"type": "execution_start", "data": {"prompt_id": "abc123"}}
+{"type": "progress", "data": {"value": 5, "max": 9, "prompt_id": "abc123"}}
+{"type": "executed", "data": {"node": "9", "output": {"images": [{"filename": "ComfyUI_00001_.png", "subfolder": "", "type": "output"}]}, "prompt_id": "abc123"}}
+```
+
+### Examples
+
+#### Full Workflow (curl)
+
+```bash
+# 1. Submit workflow
+RESPONSE=$(curl -s -X POST http://localhost:4201/prompt \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":{"3":{"class_type":"KSampler","inputs":{"seed":42,"steps":9,"cfg":0,"sampler_name":"euler","scheduler":"normal","denoise":1.0,"model":["4",0],"positive":["6",0],"negative":["7",0],"latent_image":["5",0]}},"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"z-image-turbo.safetensors"}},"5":{"class_type":"EmptyLatentImage","inputs":{"width":1024,"height":1024,"batch_size":1}},"6":{"class_type":"CLIPTextEncode","inputs":{"text":"a red panda eating bamboo","clip":["4",1]}},"7":{"class_type":"CLIPTextEncode","inputs":{"text":"ugly, blurry","clip":["4",1]}},"8":{"class_type":"VAEDecode","inputs":{"samples":["3",0],"vae":["4",2]}},"9":{"class_type":"SaveImage","inputs":{"images":["8",0],"filename_prefix":"ComfyUI"}}}}')
+
+PROMPT_ID=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin)['prompt_id'])")
+echo "Prompt ID: $PROMPT_ID"
+
+# 2. Poll until done
+while true; do
+  HISTORY=$(curl -s "http://localhost:4201/history/$PROMPT_ID")
+  STATUS=$(echo $HISTORY | python3 -c "import sys,json; d=json.load(sys.stdin); print('done' if d else 'waiting')")
+  if [ "$STATUS" = "done" ]; then break; fi
+  echo "Waiting..."
+  sleep 2
+done
+
+# 3. Get filename and download
+FILENAME=$(echo $HISTORY | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+outputs = list(d.values())[0]['outputs']
+node = list(outputs.values())[0]
+print(node['images'][0]['filename'])
+")
+curl -s "http://localhost:4201/view?filename=$FILENAME&type=output" -o result.png
+echo "Saved: result.png"
+```
+
+#### Python Client
+
+```python
+import json
+import time
+import requests
+
+SERVER = "http://localhost:4201"
+
+# Standard ComfyUI workflow
+workflow = {
+    "3": {
+        "class_type": "KSampler",
+        "inputs": {
+            "seed": 42, "steps": 9, "cfg": 0,
+            "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0,
+            "model": ["4", 0], "positive": ["6", 0],
+            "negative": ["7", 0], "latent_image": ["5", 0],
+        },
+    },
+    "4": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "model.safetensors"}},
+    "5": {"class_type": "EmptyLatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+    "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "a beautiful sunset over mountains", "clip": ["4", 1]}},
+    "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "ugly, blurry", "clip": ["4", 1]}},
+    "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
+    "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "ComfyUI"}},
+}
+
+# Submit
+resp = requests.post(f"{SERVER}/prompt", json={"prompt": workflow})
+prompt_id = resp.json()["prompt_id"]
+print(f"Submitted: {prompt_id}")
+
+# Poll
+while True:
+    history = requests.get(f"{SERVER}/history/{prompt_id}").json()
+    if history:
+        break
+    print("Generating...")
+    time.sleep(2)
+
+# Download
+entry = history[prompt_id]
+if entry["status"]["status_str"] == "success":
+    for node_id, output in entry["outputs"].items():
+        for img in output["images"]:
+            data = requests.get(f"{SERVER}/view", params=img).content
+            with open(img["filename"], "wb") as f:
+                f.write(data)
+            print(f"Saved: {img['filename']}")
+else:
+    print(f"Failed: {entry['status']['messages']}")
+```
+
+#### WebSocket Progress (Python)
+
+```python
+import json
+import websocket
+
+def on_message(ws, message):
+    msg = json.loads(message)
+    if msg["type"] == "progress":
+        d = msg["data"]
+        print(f"Step {d['value']}/{d['max']}")
+    elif msg["type"] == "executed":
+        print(f"Done! Output: {msg['data']['output']}")
+        ws.close()
+    elif msg["type"] == "status":
+        remaining = msg["data"]["status"]["exec_info"]["queue_remaining"]
+        print(f"Queue remaining: {remaining}")
+
+ws = websocket.WebSocketApp(
+    "ws://localhost:4201/ws?clientId=my-app",
+    on_message=on_message,
+)
+ws.run_forever()
 ```
 
 ---
