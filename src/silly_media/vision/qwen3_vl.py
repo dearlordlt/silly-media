@@ -51,6 +51,8 @@ class Qwen3VLModel(BaseVisionModel):
 
         logger.info(f"Unloading {self.display_name}...")
 
+        if self._model is not None:
+            self._model.to("cpu")
         del self._model
         del self._processor
         self._model = None

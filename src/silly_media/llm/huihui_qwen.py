@@ -55,6 +55,8 @@ class HuihuiQwen3Model(BaseLLMModel):
 
         logger.info(f"Unloading {self.display_name}...")
 
+        if self._model is not None:
+            self._model.to("cpu")
         del self._model
         del self._tokenizer
         self._model = None

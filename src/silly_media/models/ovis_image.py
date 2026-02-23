@@ -48,10 +48,15 @@ class OvisImageModel(BaseImageModel):
             return
 
         if self._pipe is not None:
+            self._pipe.to("cpu")
             del self._pipe
             self._pipe = None
 
+        import gc
+        gc.collect()
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
         self._loaded = False
         logger.info(f"{self.model_id} unloaded")
 
