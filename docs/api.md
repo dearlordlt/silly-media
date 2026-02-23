@@ -99,6 +99,7 @@ Check API and model status.
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["hunyuan-video"],
   "available_vision_models": ["qwen3-vl-8b"],
+  "available_img2img_models": ["qwen-image-edit"],
   "available_llm_models": ["huihui-qwen3-4b"],
   "available_music_models": ["ace-step", "ace-step-quality"]
 }
@@ -201,7 +202,7 @@ Generate an image using the specified model.
   "prompt": "string, required",
   "negative_prompt": "string, optional",
   "num_inference_steps": "int, optional (default varies by model)",
-  "cfg_scale": "float, optional (1.0-20.0, default 5.0)",
+  "cfg_scale": "float, optional (0.0-20.0, default varies by model)",
   "seed": "int, optional (-1 or omit for random)",
   "width": "int, optional (64-2048)",
   "height": "int, optional (64-2048)",
@@ -356,9 +357,16 @@ Generate a pixel art icon from a text prompt.
 
 **Prompt Enhancement**
 
-Your prompt is automatically enhanced for pixel art style:
+Your prompt is automatically enhanced based on the mode:
+
+*Sprites* (`remove_background: true`):
 ```
-{your prompt}, pixel art style, pixelated, 8-bit, retro game sprite, clean white background, isometric view, single object
+{your prompt}, pixel art style, thick dark outlines, high contrast, minimalist, isometric view, white background, centered, full shot, single object
+```
+
+*Tiles* (`remove_background: false`):
+```
+texture of {your prompt}, pixel art style, top down view, flat 2d, seamless pattern, filling the frame, edge to edge, no border, no outlines
 ```
 
 **Response**
@@ -1247,9 +1255,9 @@ Generation is **asynchronous** - you start a job and poll for completion (~60-90
 | `prompt`              | string | required | 1-2000 chars          | Text description of video         |
 | `resolution`          | enum   | `"480p"` | `480p`, `720p`        | Output resolution                 |
 | `aspect_ratio`        | enum   | `"16:9"` | `16:9`, `9:16`, `1:1` | Video aspect ratio                |
-| `num_frames`          | int    | `61`     | 25-121                | Number of frames (~1-5s at 24fps) |
-| `num_inference_steps` | int    | `50`     | 8-100                 | Quality steps                     |
-| `guidance_scale`      | float  | `6.0`    | 1.0-15.0              | Prompt adherence                  |
+| `num_frames`          | int    | `45`     | 25-85                 | Number of frames (~1-3.5s at 24fps) |
+| `num_inference_steps` | int    | `6`      | 1-100                 | Quality steps (6 for distilled, 50 for standard) |
+| `guidance_scale`      | float  | `1.0`    | 1.0-15.0              | Prompt adherence (1.0 for distilled, 6.0 for standard) |
 | `seed`                | int    | `-1`     | -1 or 0+              | Random seed (-1 = random)         |
 | `fps`                 | int    | `24`     | 12-30                 | Output video FPS                  |
 
@@ -1298,9 +1306,9 @@ Start text-to-video generation.
   "prompt": "A red panda eating bamboo in a bamboo forest",
   "resolution": "480p",
   "aspect_ratio": "16:9",
-  "num_frames": 61,
-  "num_inference_steps": 50,
-  "guidance_scale": 6.0,
+  "num_frames": 45,
+  "num_inference_steps": 6,
+  "guidance_scale": 1.0,
   "seed": -1,
   "fps": 24
 }
@@ -1333,9 +1341,9 @@ Start image-to-video generation.
   "image": "base64_encoded_image_data...",
   "resolution": "480p",
   "aspect_ratio": "16:9",
-  "num_frames": 61,
-  "num_inference_steps": 50,
-  "guidance_scale": 6.0,
+  "num_frames": 45,
+  "num_inference_steps": 6,
+  "guidance_scale": 1.0,
   "seed": -1,
   "fps": 24
 }
@@ -1712,7 +1720,6 @@ Generation is **asynchronous** - you start a job and poll for completion (typica
 - **Lyrics support**: Add lyrics with section tags (`[Verse]`, `[Chorus]`, `[Bridge]`, etc.)
 - **Instrumental mode**: Generate music without vocals
 - **Musical control**: Set BPM, key/scale, time signature
-- **LM Chain-of-Thought**: Optional planning phase for better adherence to prompts
 - **Batch generation**: Generate multiple variations in one request
 - **Multiple output formats**: WAV, FLAC, MP3
 
@@ -2328,7 +2335,7 @@ response = requests.post(
     json={
         "prompt": "A red panda eating bamboo in a bamboo forest",
         "resolution": "480p",
-        "num_frames": 61,
+        "num_frames": 45,
     },
 )
 job_id = response.json()["job_id"]
@@ -2364,7 +2371,7 @@ curl -X POST http://localhost:4201/video/t2v/hunyuan-video \
   -d '{
     "prompt": "A red panda eating bamboo in a bamboo forest",
     "resolution": "480p",
-    "num_frames": 61
+    "num_frames": 45
   }'
 
 # Check status (replace JOB_ID with actual job ID)
@@ -2387,7 +2394,7 @@ curl -X POST http://localhost:4201/video/i2v/hunyuan-video \
     \"prompt\": \"The panda starts eating, head moving slowly\",
     \"image\": \"$IMAGE_B64\",
     \"resolution\": \"480p\",
-    \"num_frames\": 61
+    \"num_frames\": 45
   }"
 ```
 

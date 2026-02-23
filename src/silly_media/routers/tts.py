@@ -246,10 +246,11 @@ async def generate_speech_maya(request: MayaTTSRequest):
     Example voice_description: "A young woman with a warm, friendly tone"
 
     Supports inline emotion tags in text:
-    [laugh] [chuckle] [sigh] [gasp] [cough] [clear throat]
-    [sniffle] [groan] [yawn] [whisper] [shout]
+    <laugh> <laugh_harder> <sigh> <chuckle> <gasp> <angry> <excited>
+    <whisper> <cry> <scream> <sing> <snort> <exhale> <gulp> <giggle>
+    <sarcastic> <curious>
 
-    Example: "Hello! [laugh] That's so funny!"
+    Example: "Hello! <laugh> That's so funny!"
     """
     try:
         # Acquire GPU and generate with Maya

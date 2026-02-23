@@ -87,7 +87,7 @@ class MayaTTSRequest(BaseModel):
     """Request schema for Maya TTS generation.
 
     Maya uses natural language voice descriptions instead of reference audio.
-    Supports inline emotion tags: [laugh], [sigh], [whisper], [shout], etc.
+    Supports inline emotion tags: <laugh>, <sigh>, <whisper>, <scream>, etc.
     """
 
     text: Annotated[
