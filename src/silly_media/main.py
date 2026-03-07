@@ -26,6 +26,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class _QuietAccessFilter(logging.Filter):
+    """Suppress noisy /progress and /health polling from access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "/progress" in msg or "/health" in msg:
+            return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietAccessFilter())
+
+
 def handle_shutdown(signum, frame):
     """Handle shutdown signals gracefully."""
     logger.info("Shutdown signal received, unloading models...")
