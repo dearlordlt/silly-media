@@ -834,8 +834,18 @@
 
           <!-- Composition chips -->
           <div class="preset-section">
-            <h4>Composition & Location <button class="btn-secondary btn-small" onclick="toggleAllCompositions()">All</button></h4>
+            <h4>Composition <button class="btn-secondary btn-small" onclick="toggleAllCompositions()">All</button></h4>
             <div class="preset-chips" id="compositionChips"></div>
+          </div>
+
+          <!-- Location chips -->
+          <div class="preset-section">
+            <h4>Location <button class="btn-secondary btn-small" onclick="toggleAllLocations()">All</button></h4>
+            <div class="preset-chips" id="locationChips"></div>
+            <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+              <input type="text" id="customLocation" placeholder="Custom location..." style="margin:0; flex:1; padding:4px 8px; font-size:0.8rem;">
+              <button class="btn-secondary btn-small" onclick="applyCustomLocation()">Use</button>
+            </div>
           </div>
 
           <!-- Outfit chips -->
@@ -1007,9 +1017,11 @@
 
     // =================== PRESETS ===================
     const EDIT_EMOTIONS = [
-      { id: 'happy', label: 'Happy', prompt: 'Make the person look happy and smiling' },
+      { id: 'smiling', label: 'Smiling', prompt: 'Make the person smiling warmly, gentle smile' },
+      { id: 'happy', label: 'Happy', prompt: 'Make the person look happy and joyful' },
       { id: 'sad', label: 'Sad', prompt: 'Make the person look sad and melancholic' },
       { id: 'angry', label: 'Angry', prompt: 'Make the person look angry and intense' },
+      { id: 'serious', label: 'Serious', prompt: 'Make the person look serious and focused' },
       { id: 'surprised', label: 'Surprised', prompt: 'Make the person look surprised and shocked' },
       { id: 'scared', label: 'Scared', prompt: 'Make the person look scared and fearful' },
       { id: 'disgusted', label: 'Disgusted', prompt: 'Make the person look disgusted' },
@@ -1018,11 +1030,15 @@
       { id: 'shy', label: 'Shy', prompt: 'Make the person look shy and embarrassed' },
       { id: 'tired', label: 'Tired', prompt: 'Make the person look tired and sleepy' },
       { id: 'seductive', label: 'Seductive', prompt: 'Make the person look seductive and alluring' },
+      { id: 'flirty', label: 'Flirty', prompt: 'Make the person look flirty, biting lip, bedroom eyes' },
+      { id: 'winking', label: 'Winking', prompt: 'Make the person winking playfully' },
       { id: 'laughing', label: 'Laughing', prompt: 'Make the person laughing joyfully' },
       { id: 'crying', label: 'Crying', prompt: 'Make the person crying emotionally' },
-      { id: 'serious', label: 'Serious', prompt: 'Make the person look serious and focused' },
+      { id: 'bored', label: 'Bored', prompt: 'Make the person look bored and unimpressed' },
       { id: 'playful', label: 'Playful', prompt: 'Make the person look playful and mischievous' },
       { id: 'curious', label: 'Curious', prompt: 'Make the person look curious and inquisitive' },
+      { id: 'dreamy', label: 'Dreamy', prompt: 'Make the person look dreamy and lost in thought, soft gaze' },
+      { id: 'fierce', label: 'Fierce', prompt: 'Make the person look fierce and powerful, intense stare' },
       { id: 'relaxed', label: 'Relaxed', prompt: 'Make the person look relaxed and calm' },
       { id: 'desperate', label: 'Desperate', prompt: 'Make the person look desperate and anxious' },
     ];
@@ -1056,17 +1072,37 @@
       { id: 'from-below', label: 'From Below', prompt: 'Change camera angle to looking up from below, low angle shot' },
       { id: 'side-view', label: 'Side View', prompt: 'Change to a side profile view' },
       { id: 'from-behind', label: 'From Behind', prompt: 'Change to a rear view, seen from behind' },
+      { id: 'golden-hour', label: 'Golden Hour', prompt: 'Change lighting to warm golden hour sunset lighting' },
+      { id: 'night', label: 'Night', prompt: 'Change lighting to nighttime, dark ambient mood lighting' },
+    ];
+
+    const EDIT_LOCATIONS = [
       { id: 'beach', label: 'Beach', prompt: 'Change location to a tropical beach with sand and ocean' },
       { id: 'bedroom', label: 'Bedroom', prompt: 'Change location to a cozy bedroom interior' },
-      { id: 'forest', label: 'Forest', prompt: 'Change location to a lush green forest' },
-      { id: 'city-street', label: 'City Street', prompt: 'Change location to a busy city street' },
-      { id: 'office', label: 'Office', prompt: 'Change location to a modern office interior' },
-      { id: 'bathroom', label: 'Bathroom', prompt: 'Change location to a bathroom with bathtub or shower' },
+      { id: 'bathroom', label: 'Bathroom', prompt: 'Change location to a luxurious bathroom with bathtub' },
+      { id: 'shower', label: 'Shower', prompt: 'Change location to a steamy shower, wet skin, water droplets' },
       { id: 'pool', label: 'Pool', prompt: 'Change location to a swimming pool area' },
-      { id: 'studio', label: 'Studio', prompt: 'Change location to a photo studio with professional lighting' },
-      { id: 'outdoors', label: 'Outdoors', prompt: 'Change location to an outdoor natural setting' },
-      { id: 'night', label: 'Night', prompt: 'Change lighting to nighttime, dark ambient mood lighting' },
-      { id: 'golden-hour', label: 'Golden Hour', prompt: 'Change lighting to warm golden hour sunset lighting' },
+      { id: 'hot-tub', label: 'Hot Tub', prompt: 'Change location to a hot tub, steamy water, relaxing' },
+      { id: 'forest', label: 'Forest', prompt: 'Change location to a lush green forest' },
+      { id: 'garden', label: 'Garden', prompt: 'Change location to a beautiful garden with flowers' },
+      { id: 'city-street', label: 'City Street', prompt: 'Change location to a busy city street' },
+      { id: 'rooftop', label: 'Rooftop', prompt: 'Change location to a city rooftop with skyline view' },
+      { id: 'cafe', label: 'Cafe', prompt: 'Change location to a cozy cafe interior' },
+      { id: 'bar', label: 'Bar', prompt: 'Change location to a dimly lit bar, moody atmosphere' },
+      { id: 'office', label: 'Office', prompt: 'Change location to a modern office interior' },
+      { id: 'library', label: 'Library', prompt: 'Change location to a library with bookshelves' },
+      { id: 'studio', label: 'Photo Studio', prompt: 'Change location to a photo studio with professional lighting' },
+      { id: 'gym', label: 'Gym', prompt: 'Change location to a gym, workout equipment' },
+      { id: 'kitchen', label: 'Kitchen', prompt: 'Change location to a modern kitchen interior' },
+      { id: 'living-room', label: 'Living Room', prompt: 'Change location to a stylish living room with couch' },
+      { id: 'balcony', label: 'Balcony', prompt: 'Change location to a balcony with scenic view' },
+      { id: 'yacht', label: 'Yacht', prompt: 'Change location to a luxury yacht on the ocean' },
+      { id: 'hotel-room', label: 'Hotel Room', prompt: 'Change location to a luxury hotel room with large bed' },
+      { id: 'park', label: 'Park', prompt: 'Change location to a public park with trees and grass' },
+      { id: 'mountain', label: 'Mountain', prompt: 'Change location to a mountain landscape with scenic views' },
+      { id: 'snow', label: 'Snow', prompt: 'Change location to a snowy winter landscape' },
+      { id: 'desert', label: 'Desert', prompt: 'Change location to a sandy desert with dunes' },
+      { id: 'castle', label: 'Castle', prompt: 'Change location to an elegant castle interior' },
     ];
 
     const EDIT_OUTFITS = [
@@ -1098,6 +1134,7 @@
     let selectedEmotions = new Set();
     let selectedPoses = new Set();
     let selectedCompositions = new Set();
+    let selectedLocations = new Set();
     let selectedOutfits = new Set();
     let composeMode = true;  // true = combine chips into one prompt, false = each chip = separate image
     let currentOriginalId = null;  // Selected original in sidebar (null = all)
@@ -1431,6 +1468,7 @@
         { el: 'emotionChips', items: EDIT_EMOTIONS, selected: selectedEmotions, type: 'emotion' },
         { el: 'poseChips', items: EDIT_POSES, selected: selectedPoses, type: 'pose' },
         { el: 'compositionChips', items: EDIT_COMPOSITIONS, selected: selectedCompositions, type: 'composition' },
+        { el: 'locationChips', items: EDIT_LOCATIONS, selected: selectedLocations, type: 'location' },
         { el: 'outfitChips', items: EDIT_OUTFITS, selected: selectedOutfits, type: 'outfit' },
       ];
       for (const cat of categories) {
@@ -1442,7 +1480,7 @@
     }
 
     function toggleChip(type, id) {
-      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, outfit: selectedOutfits };
+      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, outfit: selectedOutfits };
       const set = setMap[type];
       if (composeMode) {
         // In compose mode: single-select per category (clicking another deselects the previous)
@@ -1478,6 +1516,33 @@
       renderChips();
     }
 
+    function toggleAllLocations() {
+      if (selectedLocations.size === EDIT_LOCATIONS.length) selectedLocations.clear();
+      else EDIT_LOCATIONS.forEach(l => selectedLocations.add(l.id));
+      renderChips();
+    }
+
+    function applyCustomLocation() {
+      const input = document.getElementById('customLocation');
+      const text = input.value.trim();
+      if (!text) return;
+
+      // Deselect any preset location
+      selectedLocations.clear();
+
+      // Add as a temporary custom entry
+      const customId = 'custom-location';
+      // Remove old custom if exists
+      const existingIdx = EDIT_LOCATIONS.findIndex(l => l.id === customId);
+      if (existingIdx >= 0) EDIT_LOCATIONS.splice(existingIdx, 1);
+
+      // Add custom location at the beginning
+      EDIT_LOCATIONS.unshift({ id: customId, label: text, prompt: `Change location to ${text}` });
+      selectedLocations.add(customId);
+      renderChips();
+      input.value = '';
+    }
+
     function toggleAllOutfits() {
       if (selectedOutfits.size === EDIT_OUTFITS.length) selectedOutfits.clear();
       else EDIT_OUTFITS.forEach(o => selectedOutfits.add(o.id));
@@ -1493,7 +1558,7 @@
 
       // In compose mode, trim selections to max 1 per category
       if (composeMode) {
-        for (const set of [selectedEmotions, selectedPoses, selectedCompositions, selectedOutfits]) {
+        for (const set of [selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedOutfits]) {
           if (set.size > 1) {
             const first = set.values().next().value;
             set.clear();
@@ -1521,6 +1586,7 @@
         [EDIT_EMOTIONS, selectedEmotions],
         [EDIT_POSES, selectedPoses],
         [EDIT_COMPOSITIONS, selectedCompositions],
+        [EDIT_LOCATIONS, selectedLocations],
         [EDIT_OUTFITS, selectedOutfits],
       ]) {
         for (const item of items) {
@@ -1605,6 +1671,7 @@
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
+          { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
         ];
 
@@ -1638,6 +1705,7 @@
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
+          { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
         ];
 
