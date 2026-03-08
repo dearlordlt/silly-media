@@ -848,6 +848,12 @@
             </div>
           </div>
 
+          <!-- Body / Nudity chips -->
+          <div class="preset-section">
+            <h4>Body</h4>
+            <div class="preset-chips" id="bodyChips"></div>
+          </div>
+
           <!-- Outfit chips -->
           <div class="preset-section">
             <h4>Outfits <button class="btn-secondary btn-small" onclick="toggleAllOutfits()">All</button></h4>
@@ -1105,12 +1111,17 @@
       { id: 'castle', label: 'Castle', prompt: 'Change location to an elegant castle interior' },
     ];
 
-    const EDIT_OUTFITS = [
+    const EDIT_BODY = [
       { id: 'naked', label: 'Naked', prompt: 'Completely naked, nude, no clothes, exposed breasts with visible nipples, anatomically correct vulva, visible pussy, realistic female genitalia, full frontal nudity' },
-      { id: 'topless', label: 'Topless', prompt: 'Topless, no top, bare breasts with visible nipples, areolas visible, wearing only bottoms' },
+      { id: 'topless', label: 'Topless', prompt: 'Topless, no top, bare breasts with visible nipples, areolas visible' },
+      { id: 'bottomless', label: 'Bottomless', prompt: 'Bottomless, no pants, no skirt, no underwear, exposed lower body, visible pussy' },
+      { id: 'see-through', label: 'See-Through', prompt: 'Wearing see-through transparent clothing, nipples visible through fabric' },
+    ];
+
+    const EDIT_OUTFITS = [
       { id: 'bikini', label: 'Bikini', prompt: 'Wearing a skimpy bikini swimsuit' },
       { id: 'lingerie', label: 'Lingerie', prompt: 'Wearing sexy lingerie with lace bra and panties' },
-      { id: 'stockings', label: 'Stockings & Garter', prompt: 'Wearing thigh-high stockings with garter belt and lingerie' },
+      { id: 'stockings', label: 'Stockings & Garter', prompt: 'Wearing thigh-high stockings with garter belt' },
       { id: 'schoolgirl', label: 'Schoolgirl', prompt: 'Wearing a schoolgirl uniform with plaid skirt, white blouse, knee-high socks' },
       { id: 'maid', label: 'Maid', prompt: 'Wearing a French maid uniform with frilly apron and headband' },
       { id: 'skimpy-maid', label: 'Skimpy Maid', prompt: 'Wearing a skimpy French maid outfit with very short skirt, stockings, exposed cleavage' },
@@ -1135,6 +1146,7 @@
     let selectedPoses = new Set();
     let selectedCompositions = new Set();
     let selectedLocations = new Set();
+    let selectedBody = new Set();
     let selectedOutfits = new Set();
     let composeMode = true;  // true = combine chips into one prompt, false = each chip = separate image
     let currentOriginalId = null;  // Selected original in sidebar (null = all)
@@ -1469,6 +1481,7 @@
         { el: 'poseChips', items: EDIT_POSES, selected: selectedPoses, type: 'pose' },
         { el: 'compositionChips', items: EDIT_COMPOSITIONS, selected: selectedCompositions, type: 'composition' },
         { el: 'locationChips', items: EDIT_LOCATIONS, selected: selectedLocations, type: 'location' },
+        { el: 'bodyChips', items: EDIT_BODY, selected: selectedBody, type: 'body' },
         { el: 'outfitChips', items: EDIT_OUTFITS, selected: selectedOutfits, type: 'outfit' },
       ];
       for (const cat of categories) {
@@ -1480,7 +1493,7 @@
     }
 
     function toggleChip(type, id) {
-      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, outfit: selectedOutfits };
+      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits };
       const set = setMap[type];
       if (composeMode) {
         // In compose mode: single-select per category (clicking another deselects the previous)
@@ -1558,7 +1571,7 @@
 
       // In compose mode, trim selections to max 1 per category
       if (composeMode) {
-        for (const set of [selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedOutfits]) {
+        for (const set of [selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits]) {
           if (set.size > 1) {
             const first = set.values().next().value;
             set.clear();
@@ -1587,6 +1600,7 @@
         [EDIT_POSES, selectedPoses],
         [EDIT_COMPOSITIONS, selectedCompositions],
         [EDIT_LOCATIONS, selectedLocations],
+        [EDIT_BODY, selectedBody],
         [EDIT_OUTFITS, selectedOutfits],
       ]) {
         for (const item of items) {
@@ -1672,6 +1686,7 @@
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
           { items: EDIT_LOCATIONS, selected: selectedLocations },
+          { items: EDIT_BODY, selected: selectedBody },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
         ];
 
@@ -1684,9 +1699,9 @@
         }
 
         if (parts.length > 0) {
-          // Check if outfit is "Naked" type to adjust negative prompt
-          const outfitSel = getSelectedItems(EDIT_OUTFITS, selectedOutfits);
-          const isNaked = outfitSel.some(o => o.id === 'naked' || o.id === 'topless');
+          // Check if body is "Naked" type to adjust negative prompt
+          const bodySel = getSelectedItems(EDIT_BODY, selectedBody);
+          const isNaked = bodySel.some(b => b.id === 'naked' || b.id === 'topless' || b.id === 'bottomless');
           const neg = isNaked ? `${negative_prompt}, ${CLOTHES_NEGATIVE}` : negative_prompt;
 
           prompts.push({
@@ -1706,6 +1721,7 @@
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
           { items: EDIT_LOCATIONS, selected: selectedLocations },
+          { items: EDIT_BODY, selected: selectedBody },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
         ];
 
@@ -1716,8 +1732,8 @@
         }
 
         for (const item of allSelected) {
-          // Check if this is a naked-type outfit
-          const isNaked = EDIT_OUTFITS.some(o => (o.id === 'naked' || o.id === 'topless') && o.prompt === item.prompt);
+          // Check if this is a naked-type body option
+          const isNaked = EDIT_BODY.some(b => (b.id === 'naked' || b.id === 'topless' || b.id === 'bottomless') && b.prompt === item.prompt);
           const neg = isNaked ? `${negative_prompt}, ${CLOTHES_NEGATIVE}` : negative_prompt;
 
           prompts.push({
