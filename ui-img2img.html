@@ -1452,7 +1452,17 @@
       const reader = new FileReader();
       reader.onload = (e) => {
         sourceImageData = e.target.result;
+        // This is a new image (paste/upload/drop), not from sidebar
+        currentOriginalId = null;
+        document.getElementById('originalName').value = '';
         showSourceImage();
+        // Hide old results and clear sidebar selection
+        document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+        document.getElementById('sidebarAll').classList.remove('active');
+        document.getElementById('resultsSection').style.display = 'none';
+        document.getElementById('resultsGrid').innerHTML = '';
+        selectedEdits.clear();
+        updateBulkBar();
       };
       reader.readAsDataURL(file);
     }
@@ -1467,11 +1477,14 @@
 
     function clearSource() {
       sourceImageData = null;
+      currentOriginalId = null;
       document.getElementById('dropZone').style.display = 'block';
       document.getElementById('sourcePreview').style.display = 'none';
       document.getElementById('nameInput').style.display = 'none';
       document.getElementById('editControls').style.display = 'none';
       document.getElementById('originalName').value = '';
+      document.getElementById('resultsSection').style.display = 'none';
+      document.getElementById('resultsGrid').innerHTML = '';
     }
 
     // =================== CHIPS ===================
