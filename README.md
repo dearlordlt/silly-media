@@ -1,14 +1,22 @@
 # Silly Media
 
-A Python API service for text-to-image generation and text-to-speech with zero-shot voice cloning.
+A self-hosted FastAPI service for multimodal media generation on a single GPU.
+
+It exposes one API for image generation, image editing, pixel art, text-to-speech, voice cloning, video generation, vision analysis, LLM text generation, music generation, and ComfyUI-compatible image workflows. The service uses a VRAM manager to load and unload large models automatically so one machine can run several heavyweight workloads without manual orchestration.
 
 ## Features
 
-- **Image Generation**: Fast text-to-image with Z-Image Turbo (9 steps)
-- **Text-to-Speech**: XTTS-v2 with 17 languages and voice cloning
-- **Voice Cloning**: Zero-shot cloning from 6+ seconds of reference audio
-- **Smart VRAM Manager**: Automatic GPU memory coordination between models
-- **Actor System**: Save and reuse voice profiles
+- **Image Generation**: Multiple text-to-image models including fast and quality-oriented options
+- **Image Editing**: Img2img editing with natural-language instructions
+- **Pixel Art**: Small icon/pixel art generation with background removal
+- **Text-to-Speech**: XTTS voice cloning and Maya description-based TTS
+- **Actor System**: Save reusable voice profiles from uploaded audio or YouTube extraction
+- **Video Generation**: Text-to-video and image-to-video jobs
+- **Vision Analysis**: OCR, image Q&A, and visual understanding
+- **LLM Text Generation**: Local text generation and streaming
+- **Music Generation**: Prompt-to-music generation with job polling
+- **ComfyUI Compatibility**: API endpoints that mimic ComfyUI for client compatibility
+- **Smart VRAM Manager**: Automatic model swapping and idle unloading
 
 ## Quick Start
 
@@ -37,120 +45,98 @@ curl -X POST http://localhost:4201/tts/generate \
   -o speech.wav
 ```
 
-## Models
+## Capabilities
 
 ### Image Models
 
-| Model | ID | Steps | Notes |
-|-------|-----|-------|-------|
-| Z-Image Turbo | `z-image-turbo` | 9 | Default, fast, bilingual text |
-| Ovis Image 7B | `ovis-image-7b` | 50 | Higher quality, slower |
+| Model | ID | Notes |
+|-------|----|-------|
+| Z-Image | `z-image` | Full image model, higher quality |
+| Z-Image Turbo | `z-image-turbo` | Fast default model |
+| Qwen Image 2512 | `qwen-image-2512` | GGUF image model with optional LoRA turbo mode |
+| Ovis Image 7B | `ovis-image-7b` | Higher quality, slower |
 
 ### Audio Models
 
-| Model | ID | VRAM | Notes |
-|-------|-----|------|-------|
-| XTTS v2 | `xtts-v2` | ~2GB | 17 languages, voice cloning |
+| Model | ID | Notes |
+|-------|----|-------|
+| XTTS v2 | `xtts-v2` | Multi-language zero-shot voice cloning |
+| Maya TTS | `maya` | English TTS from voice description and emotion tags |
+| Demucs | `demucs` | Vocal separation for voice extraction workflows |
 
-**Note:** Only one model loads at a time. The VRAM manager automatically swaps models.
+### Other Model Families
 
-## API Endpoints
+| Type | Model | ID |
+|------|-------|----|
+| Video | HunyuanVideo 1.5 | `hunyuan-video` |
+| Vision | Qwen3-VL 8B | `qwen3-vl-8b` |
+| Img2Img | Qwen Image Edit | `qwen-image-edit` |
+| LLM | Huihui Qwen3 4B | `huihui-qwen3-4b` |
+| Music | ACE-Step 1.5 Turbo / Quality | `ace-step`, `ace-step-quality` |
 
-### Health & Status
+Only one large model is active at a time. The VRAM manager automatically unloads and swaps models between requests.
+
+## API Overview
+
+### Core
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Service health and loaded models |
-| `/models` | GET | Available image and audio models |
-| `/progress` | GET | Current image generation progress |
+| `/health` | GET | Service health and available models by type |
+| `/models` | GET | Available and currently loaded models |
+| `/progress` | GET | Current text-to-image progress |
+| `/aspect-ratios` | GET | Image aspect-ratio presets |
+| `/generate/{model}` | POST | Text-to-image generation |
+
+### TTS And Actors
+
+| Endpoint Group | Description |
+|----------------|-------------|
+| `/tts/*` | Batch TTS, streaming TTS, one-shot audio cloning, Maya actors, history |
+| `/actors/*` | Actor CRUD, audio file management, actor creation from YouTube |
+
+### Video, Vision, Img2Img, LLM, Music
+
+| Endpoint Group | Description |
+|----------------|-------------|
+| `/video/*` | Text-to-video, image-to-video, job status, downloads, history |
+| `/vision/*` | Image analysis from upload or base64 payload |
+| `/img2img/*` | Image editing and model/progress endpoints |
+| `/llm/*` | Text generation, streaming, model listing |
+| `/music/*` | Music generation jobs, progress, downloads |
+| `/comfy/*` | ComfyUI-compatible endpoints |
+
+Full endpoint details live in [docs/api.md](docs/api.md).
+
+## Examples
 
 ### Image Generation
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/generate/{model}` | POST | Generate image from text |
-| `/aspect-ratios` | GET | Available aspect ratio presets |
-
-### Text-to-Speech
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/tts/generate` | POST | Generate speech (batch) |
-| `/tts/stream` | POST | Generate speech (streaming) |
-| `/tts/generate-with-audio` | POST | One-shot TTS with uploaded audio |
-| `/tts/languages` | GET | Supported languages |
-
-### Actor Management
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/actors` | GET | List all actors |
-| `/actors` | POST | Create actor with audio files |
-| `/actors/{name}` | GET | Get actor details |
-| `/actors/{name}` | DELETE | Delete actor |
-| `/actors/{name}/audio` | POST | Add audio to actor |
-| `/actors/{name}/audio` | GET | List actor's audio files |
-
-See [docs/api.md](docs/api.md) for full API documentation.
-
-## Image Generation
-
 ```bash
-# Basic generation
 curl -X POST http://localhost:4201/generate/z-image-turbo \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "a sunset over mountains"}' \
+  -d '{"prompt": "a sunset over mountains", "aspect_ratio": "16:9"}' \
   -o image.png
-
-# With aspect ratio
-curl -X POST http://localhost:4201/generate/z-image-turbo \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "portrait photo", "aspect_ratio": "4:5"}' \
-  -o portrait.png
-
-# With explicit dimensions
-curl -X POST http://localhost:4201/generate/z-image-turbo \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "landscape", "width": 1344, "height": 768}' \
-  -o landscape.png
 ```
 
-**Aspect Ratios:** `1:1`, `4:5`, `3:4`, `2:3`, `9:16`, `5:4`, `4:3`, `3:2`, `16:9`, `21:9`
-
-## Text-to-Speech
-
-### 1. Create an Actor
+### Text To Speech
 
 ```bash
+# Create an actor
 curl -X POST http://localhost:4201/actors \
   -F "name=Morgan" \
   -F "language=en" \
   -F "description=Deep narrator voice" \
   -F "audio_files=@voice_sample.wav"
-```
 
-**Audio Requirements:**
-- Duration: 6-30 seconds (minimum 6s)
-- Format: WAV, MP3, FLAC, OGG
-- Quality: Clean audio, minimal background noise
-
-### 2. Generate Speech
-
-```bash
-# Batch (returns complete audio)
+# Generate speech
 curl -X POST http://localhost:4201/tts/generate \
   -H "Content-Type: application/json" \
   -d '{"text": "Hello world!", "actor": "Morgan"}' \
   -o speech.wav
-
-# Streaming (lower latency)
-curl -X POST http://localhost:4201/tts/stream \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Long text here...", "actor": "Morgan"}' \
-  -o streamed.wav
 ```
 
-### 3. One-Shot (No Actor)
+### One-Shot Voice Cloning
 
 ```bash
 curl -X POST http://localhost:4201/tts/generate-with-audio \
@@ -159,30 +145,43 @@ curl -X POST http://localhost:4201/tts/generate-with-audio \
   -o output.wav
 ```
 
-### Supported Languages
+### Vision Analysis
 
-| Code | Language | Code | Language |
-|------|----------|------|----------|
-| `en` | English | `ru` | Russian |
-| `es` | Spanish | `nl` | Dutch |
-| `fr` | French | `cs` | Czech |
-| `de` | German | `ar` | Arabic |
-| `it` | Italian | `zh-cn` | Chinese |
-| `pt` | Portuguese | `ja` | Japanese |
-| `pl` | Polish | `ko` | Korean |
-| `tr` | Turkish | `hi` | Hindi |
-| `hu` | Hungarian | | |
+```bash
+curl -X POST http://localhost:4201/vision/analyze/upload \
+  -F "image=@image.png" \
+  -F "query=Describe this image in detail"
+```
+
+### Music Generation
+
+```bash
+curl -X POST http://localhost:4201/music/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"energetic synthwave track with female vocals","model":"ace-step"}'
+```
+
+### Video Generation
+
+```bash
+curl -X POST http://localhost:4201/video/t2v/hunyuan-video \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"a cinematic drone shot over snowy mountains"}'
+```
 
 ## Configuration
 
-Environment variables (see `.env.example`):
+Environment variables are loaded from `.env` (see [.env.example](.env.example)).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HF_TOKEN` | - | HuggingFace token (optional) |
-| `MODEL_PRELOAD` | `true` | Load model on startup |
-| `MODEL_IDLE_TIMEOUT` | `30` | Seconds before unloading idle model |
+| `HF_TOKEN` | - | Hugging Face token, optional but useful for gated models |
+| `MODEL_PRELOAD` | `true` | Load the default model on startup |
+| `MODEL_IDLE_TIMEOUT` | `300` | Seconds before unloading an idle model |
 | `DEFAULT_MODEL` | `z-image-turbo` | Model to preload |
+| `PORT` | `4201` | API port |
+| `DB_PATH` | `./data/db/silly_media.db` | SQLite database path |
+| `ACTORS_STORAGE_PATH` | `./data/actors` | Stored actor audio directory |
 
 ## Development
 
@@ -197,105 +196,69 @@ docker compose logs -f
 docker compose build --no-cache
 ```
 
+The app is packaged as a Python project via [pyproject.toml](pyproject.toml) and the main entrypoint is [src/silly_media/main.py](src/silly_media/main.py).
+
 ## Project Structure
 
-```
+```text
 silly-media/
 ├── docker-compose.yml
-├── Dockerfile
 ├── pyproject.toml
-├── test-generate.sh
-├── data/
-│   ├── db/                    # SQLite database
-│   │   └── silly_media.db
-│   └── actors/                # Actor audio files
-│       └── <actor_id>/
 ├── docs/
-│   ├── api.md                 # Full API documentation
+│   ├── api.md
 │   ├── setup.md
-│   └── test-prompts.md        # Example commands
+│   └── test-prompts.md
+├── data/
+│   ├── actors/
+│   ├── comfy/
+│   ├── db/
+│   ├── music/
+│   ├── tts_history/
+│   └── videos/
 └── src/silly_media/
-    ├── main.py                # FastAPI app
-    ├── config.py              # Settings
-    ├── schemas.py             # Image request schemas
-    ├── db.py                  # SQLite database
-    ├── vram_manager.py        # GPU memory manager
-    ├── models/
-    │   ├── base.py            # BaseImageModel
-    │   └── z_image.py         # Z-Image Turbo
+    ├── main.py
+    ├── config.py
+    ├── db.py
+    ├── progress.py
+    ├── vram_manager.py
     ├── audio/
-    │   ├── base.py            # BaseAudioModel
-    │   ├── xtts.py            # XTTS-v2 implementation
-    │   └── schemas.py         # TTS request schemas
-    └── routers/
-        ├── actors.py          # Actor CRUD endpoints
-        └── tts.py             # TTS generation endpoints
+    ├── comfyui/
+    ├── img2img/
+    ├── llm/
+    ├── models/
+    ├── music/
+    ├── routers/
+    ├── utils/
+    ├── video/
+    └── vision/
 ```
 
-## How VRAM Management Works
+## VRAM Management
 
-The service runs on a single GPU (designed for RTX 4090 with 24GB VRAM). Since image models use ~22GB and TTS uses ~2GB, only one model type can be loaded at a time.
+The service is designed around a single GPU host. Large models are registered by type and acquired through a central lock. When a request for a different model family arrives, the current model is unloaded, CUDA memory is cleared, and the requested model is loaded on demand. Idle models are unloaded automatically after the configured timeout.
 
-```
-Request arrives (TTS or Image)
-         │
-         ▼
-   ┌─────────────────┐
-   │  Acquire Lock   │  ← Blocks if another request is using GPU
-   └────────┬────────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Unload current  │  ← Image model unloaded before TTS loads
-   │ model (if any)  │  ← TTS unloaded before Image loads
-   └────────┬────────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Clear VRAM      │  ← gc.collect() + torch.cuda.empty_cache()
-   └────────┬────────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Load requested  │  ← Model loads into GPU
-   │ model           │
-   └────────┬────────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Process request │  ← Generate image or speech
-   └────────┬────────┘
-            │
-            ▼
-   ┌─────────────────┐
-   │ Reset idle      │  ← After timeout, model auto-unloads
-   │ timer           │
-   └─────────────────┘
-```
+This lets one machine serve image, audio, video, vision, and text workloads without keeping every model resident in VRAM.
 
 ## Hardware Requirements
 
-- NVIDIA GPU with 24GB VRAM (RTX 4090 recommended)
+- NVIDIA GPU with substantial VRAM; 24GB is the practical target for the larger image and video workflows
 - Docker with NVIDIA Container Toolkit
-- 50GB+ disk space for models
+- Significant disk space for model weights and generated media
 
-## Web UI
+## Web UIs
 
-Open the HTML files directly in your browser (no server needed):
+The repository includes simple static HTML clients you can open directly in a browser:
 
-- **[ui.html](ui.html)** - Image generation UI
-- **[ui-audio.html](ui-audio.html)** - Text-to-speech UI with actor management
-
-Features of the TTS UI:
-- Create and manage voice actors
-- Upload reference audio files via drag & drop
-- Test TTS with all settings (speed, temperature, language)
-- Audio playback with history
-- Download generated audio
+- `ui.html` for text-to-image
+- `ui-audio.html` for TTS and actor management
+- `ui-video.html` for video generation
+- `ui-img2img.html` for image editing
+- `ui-music.html` for music generation
+- `llm.html` for local LLM interaction
 
 ## Documentation
 
-- [API Reference](docs/api.md) - Full endpoint documentation
-- [Test Prompts](docs/test-prompts.md) - Example commands for testing
-- [Setup Guide](docs/setup.md) - Installation instructions
-- [Swagger UI](http://localhost:4201/docs) - Interactive API docs (when running)
+- [docs/api.md](docs/api.md) for endpoint details
+- [docs/setup.md](docs/setup.md) for setup notes
+- [docs/test-prompts.md](docs/test-prompts.md) for example prompts
+- `http://localhost:4201/docs` for Swagger UI when the service is running

@@ -1,5 +1,8 @@
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
+# Only mount compute/utility driver libs (skip display/graphics like libnvidia-gtk3)
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -40,7 +43,7 @@ RUN uv pip install -e .
 # Patch Python version requirement (1.5 pins ==3.11.* but works fine with 3.10)
 RUN git clone --depth 1 https://github.com/ace-step/ACE-Step-1.5.git /app/ace-step-1.5 && \
     cd /app/ace-step-1.5 && \
-    sed -i 's/requires-python = "==3.11.\*"/requires-python = ">=3.10"/' pyproject.toml && \
+    sed -i 's/requires-python = "[^"]*"/requires-python = ">=3.10"/' pyproject.toml && \
     uv pip install -e . --no-deps
 
 # Expose port

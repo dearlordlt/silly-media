@@ -12,13 +12,9 @@ services:
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_VISIBLE_DEVICES=all
+    runtime: nvidia
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4201/health"]
       interval: 30s
@@ -41,13 +37,9 @@ services:
     environment:
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NVIDIA_VISIBLE_DEVICES=all
+    runtime: nvidia
     command: ["python", "-m", "uvicorn", "silly_media.main:app", "--host", "0.0.0.0", "--port", "4201", "--reload", "--reload-dir", "/app/src"]
     profiles:
       - dev
