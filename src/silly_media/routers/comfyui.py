@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from ..comfyui.node_info import NODE_INFO
@@ -101,6 +101,11 @@ async def _run_comfy_job(prompt_id: str, gen_request: GenerateRequest) -> None:
         "type": "execution_start",
         "data": {"prompt_id": prompt_id},
     })
+    # ComfyUI-compatible execution event for clients that track node state.
+    await _broadcast_ws({
+        "type": "executing",
+        "data": {"node": job.save_node_id, "prompt_id": prompt_id},
+    })
 
     def progress_callback(pipe, step_index, timestep, callback_kwargs):
         job.current_step = step_index + 1
@@ -150,6 +155,12 @@ async def _run_comfy_job(prompt_id: str, gen_request: GenerateRequest) -> None:
                 "prompt_id": prompt_id,
             },
         })
+        # Open WebUI and other ComfyUI clients use `executing` with `node: null`
+        # as the terminal completion signal.
+        await _broadcast_ws({
+            "type": "executing",
+            "data": {"node": None, "prompt_id": prompt_id},
+        })
 
         logger.info(
             "ComfyUI job %s completed in %.1fs -> %s",
@@ -163,6 +174,20 @@ async def _run_comfy_job(prompt_id: str, gen_request: GenerateRequest) -> None:
         job.status = "failed"
         job.error = str(e)
         job.completed_at = time.time()
+        await _broadcast_ws({
+            "type": "execution_error",
+            "data": {
+                "prompt_id": prompt_id,
+                "node_id": job.save_node_id,
+                "node_type": "SaveImage",
+                "exception_message": str(e),
+                "exception_type": type(e).__name__,
+            },
+        })
+        await _broadcast_ws({
+            "type": "executing",
+            "data": {"node": None, "prompt_id": prompt_id},
+        })
 
     # Notify WS: status update (queue now empty)
     remaining = sum(1 for j in _jobs.values() if j.status in ("queued", "processing"))
@@ -177,9 +202,17 @@ async def _run_comfy_job(prompt_id: str, gen_request: GenerateRequest) -> None:
 # ---------------------------------------------------------------------------
 
 @router.post("/prompt")
-async def submit_prompt(request: dict) -> dict:
+async def submit_prompt(request: Request) -> dict:
     """Submit a ComfyUI workflow for execution."""
-    workflow = request.get("prompt")
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, {"error": "Request body must be valid JSON", "node_errors": {}})
+
+    if not isinstance(payload, dict):
+        raise HTTPException(400, {"error": "Request body must be a JSON object", "node_errors": {}})
+
+    workflow = payload.get("prompt")
     if not workflow or not isinstance(workflow, dict):
         raise HTTPException(400, {"error": "Missing or invalid 'prompt' field", "node_errors": {}})
 
@@ -199,15 +232,20 @@ async def submit_prompt(request: dict) -> dict:
     )
     _jobs[prompt_id] = job
 
+    client_id = payload.get("client_id") or payload.get("clientId")
+
     # Launch generation in background
     asyncio.create_task(_run_comfy_job(prompt_id, gen_request))
 
     # Notify WS: queue updated
     remaining = sum(1 for j in _jobs.values() if j.status in ("queued", "processing"))
-    await _broadcast_ws({
+    status_message = {
         "type": "status",
         "data": {"status": {"exec_info": {"queue_remaining": remaining}}},
-    })
+    }
+    if client_id:
+        status_message["data"]["sid"] = client_id
+    await _broadcast_ws(status_message)
 
     return {"prompt_id": prompt_id, "number": remaining - 1}
 

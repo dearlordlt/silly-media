@@ -8,9 +8,10 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Path
+from fastapi import FastAPI, HTTPException, Path, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from .config import settings
 from .models import ModelRegistry
@@ -213,6 +214,36 @@ app.include_router(pixelart_router)
 app.include_router(llm_router)
 app.include_router(music_router)
 app.include_router(comfyui_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log request validation failures with the incoming body for debugging."""
+    try:
+        body = await request.body()
+        body_text = body.decode("utf-8", errors="replace")
+    except Exception:
+        body_text = "<failed to read request body>"
+
+    logger.error(
+        "Request validation failed: %s %s errors=%s body=%s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+        body_text,
+    )
+
+    safe_errors = []
+    for error in exc.errors():
+        safe_error = dict(error)
+        if "input" in safe_error and isinstance(safe_error["input"], (bytes, bytearray)):
+            safe_error["input"] = body_text
+        safe_errors.append(safe_error)
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": safe_errors},
+    )
 
 
 @app.get("/health")

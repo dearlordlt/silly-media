@@ -2796,9 +2796,15 @@ ws://localhost:4201/ws?clientId=my-client
 ```json
 {"type": "status", "data": {"status": {"exec_info": {"queue_remaining": 1}}}}
 {"type": "execution_start", "data": {"prompt_id": "abc123"}}
+{"type": "executing", "data": {"node": "9", "prompt_id": "abc123"}}
 {"type": "progress", "data": {"value": 5, "max": 9, "prompt_id": "abc123"}}
 {"type": "executed", "data": {"node": "9", "output": {"images": [{"filename": "ComfyUI_00001_.png", "subfolder": "", "type": "output"}]}, "prompt_id": "abc123"}}
+{"type": "executing", "data": {"node": null, "prompt_id": "abc123"}}
 ```
+
+- `executed` carries the output image metadata.
+- `executing` with `"node": null` is emitted on completion for better compatibility with ComfyUI clients such as Open WebUI.
+- If generation fails, the server emits `execution_error` and then `executing` with `"node": null`.
 
 ### Examples
 
@@ -2901,6 +2907,8 @@ def on_message(ws, message):
         print(f"Step {d['value']}/{d['max']}")
     elif msg["type"] == "executed":
         print(f"Done! Output: {msg['data']['output']}")
+    elif msg["type"] == "executing" and msg["data"]["node"] is None:
+        print("Execution finished")
         ws.close()
     elif msg["type"] == "status":
         remaining = msg["data"]["status"]["exec_info"]["queue_remaining"]
