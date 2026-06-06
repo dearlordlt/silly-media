@@ -513,7 +513,7 @@
         <div class="upload-zone" id="uploadZone">
           <input type="file" id="imageInput" accept="image/*">
           <div class="upload-icon">🖼️</div>
-          <div class="upload-text">Drop image here or click to browse</div>
+          <div class="upload-text">Drop image here, paste, or click to browse</div>
           <div class="upload-hint">PNG, JPG - Will be resized automatically</div>
         </div>
         <div class="image-preview" id="imagePreview" style="display: none;">
@@ -842,6 +842,23 @@
           handleImageUpload(imageInput.files[0]);
         }
       });
+
+      // Paste image from clipboard (I2V only)
+      document.addEventListener('paste', handlePaste);
+    }
+
+    function handlePaste(e) {
+      if (currentMode !== 'i2v') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) handleImageUpload(file);
+          break;
+        }
+      }
     }
 
     function updateModeUI() {
