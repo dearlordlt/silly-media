@@ -55,6 +55,59 @@ def remove_background(image: Image.Image) -> Image.Image:
     return remove(image, session=session, alpha_matting=False)
 
 
+def resize_smooth(image: Image.Image, longest_side: int) -> Image.Image:
+    """Resize so the longest side equals ``longest_side``, preserving aspect ratio.
+
+    Uses LANCZOS resampling — ideal for hand-painted / realistic art where smooth
+    downscaling looks better than the hard edges of nearest-neighbor.
+
+    Args:
+        image: Input PIL Image
+        longest_side: Target size of the longest edge in pixels
+
+    Returns:
+        Resized PIL Image
+    """
+    w, h = image.size
+    scale = longest_side / max(w, h)
+    new_size = (max(1, round(w * scale)), max(1, round(h * scale)))
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
+def process_sprite(
+    image: Image.Image,
+    remove_bg: bool = True,
+    output_size: int | None = None,
+) -> Image.Image:
+    """Non-pixel-art sprite processing pipeline.
+
+    1. Optionally remove background (before resize for better detection)
+    2. Optionally smooth-resize so the longest side == output_size (aspect preserved)
+
+    Args:
+        image: Input PIL Image (full-resolution model output)
+        remove_bg: Whether to remove the background via rembg
+        output_size: Longest-edge target; None keeps full resolution
+
+    Returns:
+        Processed RGBA PIL Image (PNG-ready, transparent if remove_bg)
+    """
+    result = image
+
+    if remove_bg:
+        logger.info("Removing background with rembg (u2net)...")
+        result = remove_background(result)
+
+    if output_size is not None:
+        logger.info(f"Smooth-resizing longest side to {output_size}px (LANCZOS)...")
+        result = resize_smooth(result, output_size)
+
+    if result.mode != "RGBA":
+        result = result.convert("RGBA")
+
+    return result
+
+
 def process_pixel_art(
     image: Image.Image,
     size: int = 32,

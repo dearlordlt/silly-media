@@ -169,6 +169,53 @@ def generate_pixel_art(
 
 
 @mcp.tool()
+def generate_sprite(
+    prompt: str,
+    model: str = "z-image-turbo",
+    aspect_ratio: str = "1:1",
+    remove_background: bool = True,
+    output_size: Optional[int] = None,
+    negative_prompt: str = "",
+    num_inference_steps: Optional[int] = None,
+    cfg_scale: Optional[float] = None,
+    seed: Optional[int] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    base_size: int = 1024,
+) -> list:
+    """Non-pixel-art sprite/asset generation. Prompt is used VERBATIM (no pixel
+    styling) — write your own framing, e.g. "...single survivor, full body,
+    centered, plain neutral background". remove_background=True returns a
+    transparent cutout (rembg). output_size smooth-downscales the longest side
+    (LANCZOS), aspect preserved; omit to keep full res. Supports non-square via
+    aspect_ratio (e.g. 3:4 for characters) or explicit width/height. Pick model:
+    z-image (quality), z-image-turbo (fast, default), qwen-image-2512 (portraits).
+    Returns image inline + saved PNG path."""
+    payload = _drop_none(
+        {
+            "prompt": prompt,
+            "model": model,
+            "remove_background": remove_background,
+            "output_size": output_size,
+            "negative_prompt": negative_prompt,
+            "num_inference_steps": num_inference_steps,
+            "cfg_scale": cfg_scale,
+            "seed": seed,
+            "width": width,
+            "height": height,
+            "aspect_ratio": None if (width or height) else aspect_ratio,
+            "base_size": base_size,
+        }
+    )
+    with _client() as c:
+        r = c.post("/sprite/generate", json=payload)
+    if r.status_code != 200:
+        return [_err(r)]
+    p = _save(r.content, "sprite", "png")
+    return [Image(data=r.content, format="png"), f"Saved: {p}"]
+
+
+@mcp.tool()
 def edit_image(
     image_path: str,
     prompt: str,

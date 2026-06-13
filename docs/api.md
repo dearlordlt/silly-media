@@ -480,6 +480,97 @@ Generated files:
 
 ---
 
+## Sprite Generation (Non-Pixel-Art)
+
+Generate hand-painted / realistic game sprites and assets with a transparent
+cutout — the non-pixel-art sibling of `/pixelart/generate`. Key differences:
+
+- **Prompt is used verbatim** — no pixel-art style injection. You write the framing.
+- **Smooth downscale** (LANCZOS) instead of nearest-neighbor, so realistic art doesn't get crunchy.
+- **Any image model** (not just `z-image-turbo`) and **non-square sizes** (full-body characters at 3:4, etc.).
+- **Optional background removal** (rembg u2net) for a transparent PNG, same as pixelart.
+
+Pipeline: generate at full resolution → optionally remove background → optionally
+smooth-resize the longest side to `output_size` (aspect preserved).
+
+### `GET /sprite/progress`
+
+Get the current sprite generation progress (same shape as `/pixelart/progress`).
+
+### `POST /sprite/generate`
+
+Generate a non-pixel-art sprite from a text prompt.
+
+**Request Body**
+
+```json
+{
+  "prompt": "lone survivor in a patched coat, full body, centered, plain neutral background, soft flat lighting, hand-painted realistic",
+  "model": "z-image-turbo",
+  "aspect_ratio": "3:4",
+  "remove_background": true,
+  "output_size": 256,
+  "negative_prompt": "",
+  "num_inference_steps": null,
+  "cfg_scale": null,
+  "seed": null
+}
+```
+
+| Field                 | Type   | Required | Default         | Description                                                                     |
+| --------------------- | ------ | -------- | --------------- | ------------------------------------------------------------------------------- |
+| `prompt`              | string | Yes      | -               | Generation prompt, used **verbatim** (write your own framing)                   |
+| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `ovis-image-7b`) |
+| `remove_background`   | bool   | No       | `true`          | Remove background via rembg → transparent cutout                                |
+| `output_size`         | int    | No       | `null`          | Longest-side target (8-2048), aspect preserved; omit to keep full resolution    |
+| `negative_prompt`     | string | No       | `""`            | Negative prompt                                                                 |
+| `num_inference_steps` | int    | No       | model default   | Denoising steps (1-100)                                                         |
+| `cfg_scale`           | float  | No       | model default   | Guidance scale (0 for turbo models)                                             |
+| `seed`                | int    | No       | `null`          | Random seed (-1 or null for random)                                             |
+| `width` / `height`    | int    | No       | `null`          | Explicit generation dims (64-2048); alternative to `aspect_ratio`               |
+| `aspect_ratio`        | string | No       | -               | Generation aspect ratio preset (e.g. `3:4`); ignored if `width`/`height` given  |
+| `base_size`           | int    | No       | `1024`          | Base size for `aspect_ratio` calculation                                        |
+
+**Response**
+
+- Content-Type: `image/png`
+- Body: Raw PNG bytes (RGBA, transparent if `remove_background`)
+
+**Errors**
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request parameters |
+| 404 | Model not found |
+| 500 | Generation failed |
+
+### Examples
+
+**Character sprite with transparent cutout**
+```bash
+curl -X POST http://localhost:4201/sprite/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "weary survivor in a patched coat, full body, centered, plain neutral background, soft flat lighting, hand-painted realistic",
+    "model": "z-image",
+    "aspect_ratio": "3:4",
+    "output_size": 256
+  }' \
+  -o survivor.png
+```
+
+**Room/item asset, full resolution (no downscale)**
+```bash
+curl -X POST http://localhost:4201/sprite/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "rusty hydroponics rack with glowing seedlings, isometric, plain background, gritty realistic",
+    "aspect_ratio": "1:1"
+  }' \
+  -o hydroponics.png
+```
+
+---
+
 ## Image Editing (Img2Img)
 
 Edit existing images using AI-guided natural language prompts. The model can change emotions, poses, backgrounds, styles, and more while preserving the original image structure.

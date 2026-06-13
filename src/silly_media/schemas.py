@@ -173,3 +173,33 @@ class PixelArtRequest(BaseModel):
         bool,
         Field(default=True, description="Remove background using AI (rembg)"),
     ] = True
+
+
+class SpriteRequest(GenerateRequest):
+    """Request schema for non-pixel-art sprite / cutout generation.
+
+    Unlike PixelArtRequest, the prompt is used VERBATIM (no pixel-art style
+    injection) and downscaling uses smooth LANCZOS resampling instead of
+    nearest-neighbor. Inherits all sizing options (width/height or
+    aspect_ratio + base_size) from GenerateRequest, so non-square sprites
+    (e.g. full-body characters at 3:4) work.
+    """
+
+    # Which image model to generate with (sprite endpoint has no path param).
+    model: Annotated[
+        str,
+        Field(default="z-image-turbo", description="Image model id (z-image, z-image-turbo, qwen-image-2512, ovis-image-7b)"),
+    ] = "z-image-turbo"
+
+    # Background removal (rembg) — produces a transparent cutout.
+    remove_background: Annotated[
+        bool,
+        Field(default=True, description="Remove background using AI (rembg) for a transparent sprite"),
+    ] = True
+
+    # Optional final downscale: longest side scaled to this, aspect preserved.
+    # None keeps the full generation resolution.
+    output_size: Annotated[
+        int | None,
+        Field(default=None, ge=8, le=2048, description="Longest side of final image (aspect preserved); omit to keep full resolution"),
+    ] = None
