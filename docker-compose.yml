@@ -5,6 +5,7 @@ services:
       - "4201:4201"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
+      - hy3dgen-cache:/root/.cache/hy3dgen
       - ./data:/app/data
     env_file:
       - .env
@@ -30,6 +31,7 @@ services:
       - "4201:4201"
     volumes:
       - huggingface-cache:/root/.cache/huggingface
+      - hy3dgen-cache:/root/.cache/hy3dgen
       - ./src:/app/src:ro
       - ./data:/app/data
     env_file:
@@ -46,3 +48,4 @@ services:
 
 volumes:
   huggingface-cache:
+  hy3dgen-cache:

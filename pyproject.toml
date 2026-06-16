@@ -52,6 +52,15 @@ dependencies = [
     "numba>=0.63.1",
     "toml",
     "diskcache",
+    # 3D generation (Hunyuan3D-2 via hy3dgen; hy3dgen itself installed from git in Dockerfile)
+    "trimesh>=4.0.0",
+    "pymeshlab>=2023.12",
+    "pygltflib>=1.16.0",
+    "xatlas>=0.0.9",
+    "omegaconf>=2.3.0",
+    "onnxruntime>=1.17.0",
+    "ninja>=1.11.0",
+    "pybind11>=2.11.0",
 ]
 
 [project.optional-dependencies]

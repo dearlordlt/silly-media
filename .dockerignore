@@ -13,3 +13,9 @@ build
 .ruff_cache
 *.md
 !README.md
+# Generated media + runtime data are bind-mounted, never needed in build context
+data
+ui-*.html
+*.html
+ace-step-1.5
+hunyuan3d

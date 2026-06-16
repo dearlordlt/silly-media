@@ -46,8 +46,11 @@ class ZImageTurboModel(BaseImageModel):
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=False,
         )
-        self._pipe.to("cuda")
-        self._pipe.vae.enable_tiling()
+        # Keep only the active submodule on GPU; rest stays on CPU.
+        # Frees ~12-16GB during VAE decode so we survive desktop GPU contention.
+        # NOTE: do NOT call .to("cuda") when using offload — accelerate manages placement.
+        self._pipe.enable_model_cpu_offload()
+        self._pipe.vae.enable_tiling()  # keep tiling; trims the VAE-decode activation peak
 
         self._loaded = True
         logger.info(f"{self.model_id} loaded successfully")
@@ -58,8 +61,8 @@ class ZImageTurboModel(BaseImageModel):
             return
 
         if self._pipe is not None:
-            # Move to CPU first to release CUDA memory
-            self._pipe.to("cpu")
+            # With model CPU offload, idle weights already live on CPU and
+            # accelerate hooks own device placement — just drop the pipe.
             del self._pipe
             self._pipe = None
 
@@ -137,8 +140,11 @@ class ZImageModel(BaseImageModel):
             torch_dtype=torch.bfloat16,
             low_cpu_mem_usage=False,
         )
-        self._pipe.to("cuda")
-        self._pipe.vae.enable_tiling()
+        # Keep only the active submodule on GPU; rest stays on CPU.
+        # Frees ~12-16GB during VAE decode so we survive desktop GPU contention.
+        # NOTE: do NOT call .to("cuda") when using offload — accelerate manages placement.
+        self._pipe.enable_model_cpu_offload()
+        self._pipe.vae.enable_tiling()  # keep tiling; trims the VAE-decode activation peak
 
         self._loaded = True
         logger.info(f"{self.model_id} loaded successfully")
@@ -149,8 +155,8 @@ class ZImageModel(BaseImageModel):
             return
 
         if self._pipe is not None:
-            # Move to CPU first to release CUDA memory
-            self._pipe.to("cpu")
+            # With model CPU offload, idle weights already live on CPU and
+            # accelerate hooks own device placement — just drop the pipe.
             del self._pipe
             self._pipe = None
 

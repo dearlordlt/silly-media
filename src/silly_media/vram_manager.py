@@ -27,6 +27,7 @@ class ModelType(Enum):
     IMG2IMG = "img2img"
     LLM = "llm"
     MUSIC = "music"
+    MODEL3D = "model3d"
 
 
 class Loadable(Protocol):
@@ -75,6 +76,7 @@ class VRAMManager:
         "huihui-qwen3-4b": 10.0,
         "ace-step": 6.0,
         "ace-step-quality": 6.0,
+        "hunyuan3d-2": 21.0,
     }
 
     def __new__(cls) -> "VRAMManager":

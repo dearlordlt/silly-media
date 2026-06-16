@@ -3014,6 +3014,62 @@ ws.run_forever()
 
 ---
 
+## 3D Model Generation (`/model3d`)
+
+Image-to-3D and text-to-3D via Hunyuan3D-2. Produces a textured, low-poly
+binary glTF (`.glb`). The main endpoint is **synchronous** and returns the GLB
+bytes directly, matching the blender-mcp Hunyuan3D `LOCAL_API` contract — point
+the Blender addon's Hunyuan3D API URL at `http://<host>:4201/model3d`.
+
+### `GET /model3d/models`
+
+List available 3D backends (`hunyuan3d-2`), VRAM estimate, and load state.
+
+### `POST /model3d/generate`
+
+Generate a `.glb`. Provide **either** `text` (a reference image is auto-generated
+with an image model first, then image→3D) **or** `image` (base64 or http(s) URL).
+
+Request body:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `text` | `null` | Text prompt (auto image → 3D) |
+| `image` | `null` | Base64 image or URL (image → 3D) |
+| `texture` | `true` | Paint a texture onto the mesh |
+| `target_faces` | `10000` | Decimate toward this face count (low = low-poly) |
+| `octree_resolution` | `256` | Shape detail (64–512) |
+| `num_inference_steps` | `30` | Shape diffusion steps |
+| `guidance_scale` | `5.5` | Shape guidance |
+| `seed` | `-1` | Random seed (-1 = random) |
+| `image_model` | `z-image-turbo` | Image model for the text→image step |
+
+Returns `200` with `Content-Type: model/gltf-binary` (the raw GLB). Response
+header `X-Model-Id` is the saved id.
+
+```bash
+# text -> low-poly textured 3D
+curl -X POST http://localhost:4201/model3d/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text":"low-poly RuneScape-style female, blonde ponytail","target_faces":6000}' \
+  -o model.glb
+
+# image -> 3D
+curl -X POST http://localhost:4201/model3d/generate \
+  -H "Content-Type: application/json" \
+  -d "{\"image\":\"$(base64 -w0 ref.png)\",\"texture\":true}" \
+  -o model.glb
+```
+
+### `GET /model3d/download/{model_id}` · `GET /model3d/list`
+
+Download a previously generated GLB by id, or list recent generations
+(most recent first).
+
+> Test UI: open `ui-3d.html` (live `<model-viewer>` preview + download).
+
+---
+
 ## OpenAPI Schema
 
 Interactive docs available at:

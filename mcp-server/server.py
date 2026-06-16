@@ -534,5 +534,47 @@ def music_status(job_id: str) -> str:
         return f"status={st.get('status')} progress={st.get('progress')} step={st.get('current_step')}/{st.get('total_steps')} error={st.get('error')}"
 
 
+@mcp.tool()
+def generate_3d(
+    text: Optional[str] = None,
+    image_path: Optional[str] = None,
+    texture: bool = True,
+    target_faces: int = 6000,
+    octree_resolution: int = 256,
+    num_inference_steps: int = 30,
+    guidance_scale: float = 5.5,
+    seed: int = -1,
+    image_model: str = "z-image-turbo",
+    max_wait_seconds: float = 900.0,
+) -> str:
+    """Text-to-3D or image-to-3D (Hunyuan3D-2). Give `text` (a reference image is
+    auto-generated first) OR `image_path` (absolute path, image -> 3D). Returns a
+    textured low-poly .glb; lower `target_faces` = lower poly. Synchronous: shape +
+    texture takes ~1-3 min (first run also downloads weights). Saves and returns the
+    .glb path."""
+    if not text and not image_path:
+        return "Provide either text or image_path."
+    body = _drop_none(
+        {
+            "text": text,
+            "image": _b64_of(image_path) if image_path else None,
+            "texture": texture,
+            "target_faces": target_faces,
+            "octree_resolution": octree_resolution,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed,
+            "image_model": image_model,
+        }
+    )
+    timeout = httpx.Timeout(connect=10.0, read=max_wait_seconds, write=120.0, pool=max_wait_seconds)
+    with httpx.Client(base_url=BASE_URL, timeout=timeout) as c:
+        r = c.post("/model3d/generate", json=body)
+        if r.status_code != 200:
+            return _err(r)
+        path = _save(r.content, "model", "glb")
+        return f"Saved 3D model: {path} ({len(r.content) // 1024} KB)"
+
+
 if __name__ == "__main__":
     mcp.run()

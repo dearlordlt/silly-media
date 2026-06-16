@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Silly Media - 3D Generation</title>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js"
+          onerror="window.__mvFailed=true"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460;
+      --accent: #e94560; --accent2: #533483; --text: #eee; --text-dim: #888;
+      --success: #4ade80; --warning: #fbbf24; --radius: 8px;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 20px; }
+    .container { max-width: 1600px; margin: 0 auto; display: grid; grid-template-columns: 480px 1fr; gap: 20px; }
+    @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } }
+    .header { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    h1 { font-size: 1.5rem; color: var(--accent); }
+    .header-links a { color: var(--text-dim); text-decoration: none; font-size: 0.85rem; margin-left: 16px; }
+    .header-links a:hover { color: var(--text); }
+    h2 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text-dim); }
+    .panel { background: var(--surface); border-radius: var(--radius); padding: 20px; }
+    .controls { position: sticky; top: 20px; display: flex; flex-direction: column; }
+    label { display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 4px; margin-top: 10px; }
+    textarea, input, select { width: 100%; padding: 10px; border: 1px solid var(--surface2); border-radius: var(--radius); background: var(--bg); color: var(--text); font-size: 0.95rem; }
+    textarea { min-height: 80px; resize: vertical; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .check input { width: auto; }
+    button { background: var(--accent); color: white; border: none; padding: 12px; border-radius: var(--radius); font-size: 1rem; cursor: pointer; margin-top: 16px; width: 100%; }
+    button:hover { background: #d63651; }
+    button:disabled { background: var(--surface2); cursor: not-allowed; }
+    .seg { display: flex; gap: 0; margin-bottom: 8px; }
+    .seg button { margin: 0; border-radius: 0; background: var(--surface2); }
+    .seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+    .seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+    .seg button.active { background: var(--accent); }
+    model-viewer { width: 100%; height: 460px; background: #0d1117; border-radius: var(--radius); display:block; }
+    .viewer-wrap { position: relative; }
+    .viewer-fallback { position:absolute; inset:0; display:none; align-items:center; justify-content:center; text-align:center; padding:20px; color:var(--text-dim); font-size:0.9rem; }
+    /* progress bar */
+    .bar { height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; margin-top: 14px; display:none; }
+    .bar > div { height: 100%; width: 30%; background: var(--accent); border-radius: 3px; animation: slide 1.2s infinite ease-in-out; }
+    @keyframes slide { 0%{margin-left:-30%} 100%{margin-left:100%} }
+    .phase { margin-top: 10px; font-size: 0.95rem; color: var(--text); min-height: 20px; }
+    .phase .t { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .log { margin-top: 12px; background: #0d1117; border: 1px solid var(--surface2); border-radius: var(--radius); padding: 10px; font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--text-dim); height: 150px; overflow-y: auto; white-space: pre-wrap; }
+    .log .ok { color: var(--success); } .log .err { color: var(--accent); } .log .warn { color: var(--warning); }
+    .dl { display: none; margin-top: 12px; background: var(--success); color:#062; font-weight:600; text-align:center; padding:10px; border-radius: var(--radius); text-decoration: none; }
+    .hint { font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; }
+    .recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
+    .recent button { padding: 6px; font-size: 0.7rem; background: var(--surface2); margin: 0; word-break: break-all; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .presets button { width: auto; flex: 0 0 auto; margin: 0; padding: 7px 10px; font-size: 0.8rem; background: var(--surface2); }
+    .presets button.active { background: var(--accent2); }
+    #presetDesc { min-height: 16px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🧊 Silly Media — 3D</h1>
+      <div class="header-links">
+        <a href="ui.html">Image</a>
+        <a href="ui-video.html">Video</a>
+        <a href="http://localhost:4201/docs" target="_blank">API Docs</a>
+      </div>
+    </div>
+
+    <div class="panel controls">
+      <h2>Generate a 3D model</h2>
+
+      <div class="seg">
+        <button id="modeText" class="active" onclick="setMode('text')">Text → 3D</button>
+        <button id="modeImage" onclick="setMode('image')">Image → 3D</button>
+      </div>
+
+      <label style="margin-top:14px">Preset — sets the knobs for what you're making</label>
+      <div id="presets" class="presets"></div>
+      <div id="presetDesc" class="hint"></div>
+
+      <div id="textBlock">
+        <label>Prompt</label>
+        <textarea id="prompt" placeholder="low-poly RuneScape-style female, blonde ponytail, blue eyes"></textarea>
+        <label>Reference image model</label>
+        <select id="imageModel">
+          <option value="z-image-turbo">z-image-turbo (fast)</option>
+          <option value="z-image">z-image (quality)</option>
+          <option value="qwen-image-2512">qwen-image-2512</option>
+          <option value="ovis-image-7b">ovis-image-7b</option>
+        </select>
+      </div>
+
+      <div id="imageBlock" style="display:none">
+        <label>Reference image (PNG/JPG)</label>
+        <input type="file" id="imageFile" accept="image/*">
+        <div class="hint">A centered subject on a plain background reconstructs best.</div>
+      </div>
+
+      <div class="row">
+        <div><label>Target faces (low-poly)</label><input type="number" id="targetFaces" value="6000" min="500" max="300000" step="500"></div>
+        <div><label>Octree res (detail)</label><input type="number" id="octree" value="256" min="64" max="512" step="64"></div>
+      </div>
+      <div class="row">
+        <div><label>Steps</label><input type="number" id="steps" value="30" min="1" max="100"></div>
+        <div><label>Guidance</label><input type="number" id="guidance" value="5.5" min="0" max="15" step="0.5"></div>
+        <div><label>Seed (-1)</label><input type="number" id="seed" value="-1" min="-1"></div>
+      </div>
+
+      <div class="check"><input type="checkbox" id="texture" checked><label for="texture" style="margin:0">Paint texture</label></div>
+
+      <button id="genBtn" onclick="generate()">Generate</button>
+
+      <h2 style="margin-top:24px">Recent</h2>
+      <div id="recent" class="recent"></div>
+    </div>
+
+    <div class="panel">
+      <div class="viewer-wrap">
+        <model-viewer id="viewer" camera-controls auto-rotate shadow-intensity="1" exposure="1" environment-image="neutral"></model-viewer>
+        <div id="viewerFallback" class="viewer-fallback">3D preview component didn't load (CDN blocked?).<br>Generation still works — use the download button.</div>
+      </div>
+      <a id="downloadLink" class="dl" download>⬇ Download .glb</a>
+      <div class="bar" id="bar"><div></div></div>
+      <div class="phase" id="phase"></div>
+      <div class="log" id="log">Ready. Pick a mode, enter a prompt, hit Generate.</div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:4201';
+    let mode = 'text';
+    let phaseTimer = null, elapsedTimer = null, t0 = 0;
+
+    // Presets: map a goal -> good settings, so you don't need to know what
+    // octree/faces mean. Tweak any field after applying.
+    const PRESETS = {
+      lowpoly:   { label: '🧍 Low-poly character', faces: 6000,   octree: 256, steps: 30, guidance: 5.5, texture: true,  model: 'z-image-turbo',
+                   desc: 'Stylized game character (RuneScape-ish). Few faces, flat-shaded look.' },
+      blocky:    { label: '🟫 Blocky / voxel',     faces: 1500,   octree: 128, steps: 20, guidance: 5.0, texture: true,  model: 'z-image-turbo',
+                   desc: 'Chunky Minecraft-ish style. Very low detail, fast.' },
+      realistic: { label: '👤 Realistic figure',   faces: 80000,  octree: 384, steps: 50, guidance: 5.5, texture: true,  model: 'z-image',
+                   desc: 'High-detail person/creature from a full image. Heavier + slower.' },
+      prop:      { label: '⚔️ Prop / item',        faces: 8000,   octree: 256, steps: 30, guidance: 6.0, texture: true,  model: 'z-image-turbo',
+                   desc: 'A single object: sword, tool, gadget. Clean and crisp.' },
+      building:  { label: '🏛️ Building / structure', faces: 25000, octree: 384, steps: 40, guidance: 5.5, texture: true,  model: 'z-image',
+                   desc: 'House, tower, ruin. More faces for flat architectural detail.' },
+      sculpt:    { label: '🗿 Sculpt (no texture)', faces: 150000, octree: 512, steps: 50, guidance: 5.5, texture: false, model: 'z-image',
+                   desc: 'Clean high-res shape only — good for 3D print or re-texturing.' },
+    };
+
+    function renderPresets() {
+      const box = document.getElementById('presets');
+      box.innerHTML = '';
+      for (const [key, p] of Object.entries(PRESETS)) {
+        const b = document.createElement('button');
+        b.textContent = p.label;
+        b.dataset.key = key;
+        b.onclick = () => applyPreset(key);
+        box.appendChild(b);
+      }
+    }
+
+    function applyPreset(key) {
+      const p = PRESETS[key];
+      if (!p) return;
+      document.getElementById('targetFaces').value = p.faces;
+      document.getElementById('octree').value = p.octree;
+      document.getElementById('steps').value = p.steps;
+      document.getElementById('guidance').value = p.guidance;
+      document.getElementById('texture').checked = p.texture;
+      const sel = document.getElementById('imageModel');
+      if ([...sel.options].some(o => o.value === p.model)) sel.value = p.model;
+      document.getElementById('presetDesc').textContent = p.desc;
+      document.querySelectorAll('#presets button').forEach(b =>
+        b.classList.toggle('active', b.dataset.key === key));
+      log(`Preset "${p.label}": ${p.faces} faces, octree ${p.octree}, ${p.steps} steps, texture ${p.texture ? 'on' : 'off'}.`);
+    }
+
+    function setMode(m) {
+      mode = m;
+      document.getElementById('modeText').classList.toggle('active', m === 'text');
+      document.getElementById('modeImage').classList.toggle('active', m === 'image');
+      document.getElementById('textBlock').style.display = m === 'text' ? 'block' : 'none';
+      document.getElementById('imageBlock').style.display = m === 'image' ? 'block' : 'none';
+    }
+
+    function log(msg, kind) {
+      const el = document.getElementById('log');
+      const ts = new Date().toLocaleTimeString();
+      const cls = kind ? ` class="${kind}"` : '';
+      el.innerHTML += `\n<span${cls}>[${ts}] ${msg}</span>`;
+      el.scrollTop = el.scrollHeight;
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result.split(',')[1]);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+
+    // Poll which model is loaded -> human phase label (real live feedback).
+    async function pollPhase() {
+      try {
+        const r = await fetch(`${API_BASE}/models`);
+        const d = await r.json();
+        const loaded = [];
+        for (const k of ['image','model3d']) (d[k]?.loaded || []).forEach(x => loaded.push(x));
+        let label = 'working…';
+        if (loaded.some(x => x.includes('image') && !x.includes('3d'))) label = '🖼️ generating reference image…';
+        if (loaded.includes('hunyuan3d-2')) label = '🧊 building 3D mesh + texture…';
+        const secs = ((Date.now() - t0) / 1000).toFixed(0);
+        document.getElementById('phase').innerHTML = `${label} <span class="t">(${secs}s)</span>`;
+      } catch (e) { /* ignore */ }
+    }
+
+    function startFeedback() {
+      t0 = Date.now();
+      document.getElementById('bar').style.display = 'block';
+      document.getElementById('phase').textContent = 'starting…';
+      pollPhase();
+      phaseTimer = setInterval(pollPhase, 2000);
+    }
+    function stopFeedback() {
+      clearInterval(phaseTimer); phaseTimer = null;
+      document.getElementById('bar').style.display = 'none';
+    }
+
+    async function generate() {
+      const btn = document.getElementById('genBtn');
+      const body = {
+        octree_resolution: +document.getElementById('octree').value,
+        num_inference_steps: +document.getElementById('steps').value,
+        guidance_scale: +document.getElementById('guidance').value,
+        target_faces: +document.getElementById('targetFaces').value,
+        texture: document.getElementById('texture').checked,
+        seed: +document.getElementById('seed').value,
+      };
+      if (mode === 'text') {
+        const p = document.getElementById('prompt').value.trim();
+        if (!p) { log('Enter a prompt first.', 'err'); return; }
+        body.text = p; body.image_model = document.getElementById('imageModel').value;
+      } else {
+        const f = document.getElementById('imageFile').files[0];
+        if (!f) { log('Choose an image first.', 'err'); return; }
+        body.image = await fileToBase64(f);
+      }
+
+      btn.disabled = true;
+      document.getElementById('downloadLink').style.display = 'none';
+      log(`Submitting ${mode}→3D request… (shape + texture usually 1–3 min)`);
+      startFeedback();
+
+      try {
+        const res = await fetch(`${API_BASE}/model3d/generate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          log(`Server returned ${res.status}: ${txt.slice(0, 400)}`, 'err');
+          return;
+        }
+        const blob = await res.blob();
+        const secs = ((Date.now() - t0) / 1000).toFixed(0);
+        log(`✓ Done in ${secs}s — received ${(blob.size / 1024).toFixed(0)} KB GLB.`, 'ok');
+        const url = URL.createObjectURL(blob);
+        const id = res.headers.get('X-Model-Id') || 'model';
+        showModel(url, id);
+        loadRecent();
+      } catch (e) {
+        log(`Request failed: ${e.message}`, 'err');
+      } finally {
+        stopFeedback();
+        btn.disabled = false;
+      }
+    }
+
+    function showModel(url, id) {
+      const dl = document.getElementById('downloadLink');
+      dl.href = url; dl.download = id + '.glb'; dl.style.display = 'block';
+      const v = document.getElementById('viewer');
+      const fb = document.getElementById('viewerFallback');
+      if (window.__mvFailed || !customElements.get('model-viewer')) {
+        fb.style.display = 'flex';
+        log('3D preview unavailable (model-viewer didn\'t load) — use Download.', 'warn');
+      } else {
+        v.src = url;
+        log('Loaded into 3D preview. Drag to orbit.', 'ok');
+      }
+    }
+
+    async function loadRecent() {
+      try {
+        const res = await fetch(`${API_BASE}/model3d/list?limit=24`);
+        const data = await res.json();
+        const box = document.getElementById('recent');
+        box.innerHTML = '';
+        for (const m of data.models) {
+          const b = document.createElement('button');
+          b.textContent = m.id;
+          b.onclick = () => { log(`Loading recent ${m.id}…`); showModel(`${API_BASE}${m.url}`, m.id); };
+          box.appendChild(b);
+        }
+      } catch (e) { log('Could not reach service for recent list.', 'warn'); }
+    }
+
+    // Startup checks
+    window.addEventListener('load', () => {
+      renderPresets();
+      applyPreset('lowpoly');
+      setTimeout(() => {
+        if (window.__mvFailed || !customElements.get('model-viewer')) {
+          document.getElementById('viewerFallback').style.display = 'flex';
+          log('Note: 3D preview component blocked/unloaded. Downloads still work.', 'warn');
+        } else {
+          log('3D preview ready.', 'ok');
+        }
+      }, 4000);
+      fetch(`${API_BASE}/health`).then(r => r.json())
+        .then(d => log(`Service healthy. 3D backends: ${(d.available_model3d_models||[]).join(', ')||'none'}`, 'ok'))
+        .catch(() => log('⚠ Cannot reach silly-media at ' + API_BASE, 'err'));
+      loadRecent();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./restart.sh)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
+      "mcp__silly-media__generate_image"
+    ]
+  }
+}

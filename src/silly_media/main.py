@@ -160,6 +160,19 @@ async def lifespan(app: FastAPI):
         )
     logger.info(f"Registered music models: {MusicRegistry.get_available_models()}")
 
+    # Register 3D model generators with VRAMManager
+    from .model3d import Model3DRegistry
+
+    for name in Model3DRegistry.get_available_models():
+        model = Model3DRegistry.get_model(name)
+        vram_manager.register(
+            name,
+            ModelType.MODEL3D,
+            model,
+            estimated_vram_gb=getattr(model, "estimated_vram_gb", 21.0),
+        )
+    logger.info(f"Registered 3D models: {Model3DRegistry.get_available_models()}")
+
     # Optionally preload the default model
     if settings.model_preload:
         logger.info(f"Preloading default model: {settings.default_model}")
@@ -205,6 +218,7 @@ from .routers.pixelart import router as pixelart_router  # noqa: E402
 from .routers.sprite import router as sprite_router  # noqa: E402
 from .routers.llm import router as llm_router  # noqa: E402
 from .routers.music import router as music_router  # noqa: E402
+from .routers.model3d import router as model3d_router  # noqa: E402
 
 app.include_router(actors_router)
 app.include_router(tts_router)
@@ -215,6 +229,7 @@ app.include_router(pixelart_router)
 app.include_router(sprite_router)
 app.include_router(llm_router)
 app.include_router(music_router)
+app.include_router(model3d_router)
 app.include_router(comfyui_router)
 
 
@@ -261,6 +276,7 @@ async def health_check():
         "available_img2img_models": vram_manager.get_available_models(ModelType.IMG2IMG),
         "available_llm_models": vram_manager.get_available_models(ModelType.LLM),
         "available_music_models": vram_manager.get_available_models(ModelType.MUSIC),
+        "available_model3d_models": vram_manager.get_available_models(ModelType.MODEL3D),
     }
 
 
@@ -322,6 +338,14 @@ async def list_models():
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
                 vram_manager.get_model_info(m).model_type == ModelType.MUSIC
+            ],
+        },
+        "model3d": {
+            "available": vram_manager.get_available_models(ModelType.MODEL3D),
+            "loaded": [
+                m for m in vram_manager.get_loaded_models()
+                if vram_manager.get_model_info(m) and
+                vram_manager.get_model_info(m).model_type == ModelType.MODEL3D
             ],
         },
     }
