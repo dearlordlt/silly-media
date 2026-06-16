@@ -92,6 +92,13 @@
           <option value="qwen-image-2512">qwen-image-2512</option>
           <option value="ovis-image-7b">ovis-image-7b</option>
         </select>
+        <label>Subject (how the reference is framed)</label>
+        <select id="subject">
+          <option value="character">Character / person</option>
+          <option value="object">Object / item (isolated, no person)</option>
+          <option value="building">Building / structure</option>
+          <option value="auto">Auto</option>
+        </select>
       </div>
 
       <div id="imageBlock" style="display:none">
@@ -138,17 +145,17 @@
     // Presets: map a goal -> good settings, so you don't need to know what
     // octree/faces mean. Tweak any field after applying.
     const PRESETS = {
-      lowpoly:   { label: '🧍 Low-poly character', faces: 6000,   octree: 256, steps: 30, guidance: 5.5, texture: true,  model: 'z-image-turbo',
+      lowpoly:   { label: '🧍 Low-poly character', faces: 6000,   octree: 256, steps: 30, guidance: 5.5, texture: true,  model: 'z-image-turbo', subject: 'character',
                    desc: 'Stylized game character (RuneScape-ish). Few faces, flat-shaded look.' },
-      blocky:    { label: '🟫 Blocky / voxel',     faces: 1500,   octree: 128, steps: 20, guidance: 5.0, texture: true,  model: 'z-image-turbo',
+      blocky:    { label: '🟫 Blocky / voxel',     faces: 1500,   octree: 128, steps: 20, guidance: 5.0, texture: true,  model: 'z-image-turbo', subject: 'character',
                    desc: 'Chunky Minecraft-ish style. Very low detail, fast.' },
-      realistic: { label: '👤 Realistic figure',   faces: 80000,  octree: 384, steps: 50, guidance: 5.5, texture: true,  model: 'z-image',
+      realistic: { label: '👤 Realistic figure',   faces: 80000,  octree: 384, steps: 50, guidance: 5.5, texture: true,  model: 'z-image', subject: 'character',
                    desc: 'High-detail person/creature from a full image. Heavier + slower.' },
-      prop:      { label: '⚔️ Prop / item',        faces: 8000,   octree: 256, steps: 30, guidance: 6.0, texture: true,  model: 'z-image-turbo',
-                   desc: 'A single object: sword, tool, gadget. Clean and crisp.' },
-      building:  { label: '🏛️ Building / structure', faces: 25000, octree: 384, steps: 40, guidance: 5.5, texture: true,  model: 'z-image',
+      prop:      { label: '⚔️ Prop / item',        faces: 8000,   octree: 256, steps: 30, guidance: 6.0, texture: true,  model: 'z-image-turbo', subject: 'object',
+                   desc: 'A single object: sword, tool, gadget. Isolated, no character.' },
+      building:  { label: '🏛️ Building / structure', faces: 25000, octree: 384, steps: 40, guidance: 5.5, texture: true,  model: 'z-image', subject: 'building',
                    desc: 'House, tower, ruin. More faces for flat architectural detail.' },
-      sculpt:    { label: '🗿 Sculpt (no texture)', faces: 150000, octree: 512, steps: 50, guidance: 5.5, texture: false, model: 'z-image',
+      sculpt:    { label: '🗿 Sculpt (no texture)', faces: 150000, octree: 512, steps: 50, guidance: 5.5, texture: false, model: 'z-image', subject: 'auto',
                    desc: 'Clean high-res shape only — good for 3D print or re-texturing.' },
     };
 
@@ -174,6 +181,7 @@
       document.getElementById('texture').checked = p.texture;
       const sel = document.getElementById('imageModel');
       if ([...sel.options].some(o => o.value === p.model)) sel.value = p.model;
+      if (p.subject) document.getElementById('subject').value = p.subject;
       document.getElementById('presetDesc').textContent = p.desc;
       document.querySelectorAll('#presets button').forEach(b =>
         b.classList.toggle('active', b.dataset.key === key));
@@ -246,6 +254,7 @@
         const p = document.getElementById('prompt').value.trim();
         if (!p) { log('Enter a prompt first.', 'err'); return; }
         body.text = p; body.image_model = document.getElementById('imageModel').value;
+        body.subject = document.getElementById('subject').value;
       } else {
         const f = document.getElementById('imageFile').files[0];
         if (!f) { log('Choose an image first.', 'err'); return; }

@@ -69,7 +69,34 @@ def _decode_image(image_field: str) -> Image.Image:
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
-async def _image_from_text(prompt: str, image_model: str, seed: int) -> Image.Image:
+# Framing templates per subject type. A clean, isolated reference image is what
+# makes the 3D reconstruction come out as the thing you actually asked for.
+_FRAMING = {
+    "character": (
+        "{p}, single character, full body, centered, facing forward, A-pose, "
+        "plain solid background, even studio lighting",
+        AspectRatio.PORTRAIT_3_4,
+    ),
+    "object": (
+        "{p}, single object, centered, isolated on plain white background, "
+        "product shot, studio lighting, no people, no hands, no character",
+        AspectRatio.SQUARE,
+    ),
+    "building": (
+        "{p}, single building, centered, three-quarter isometric view, "
+        "isolated on plain background, architectural render, no people",
+        AspectRatio.SQUARE,
+    ),
+    "auto": (
+        "{p}, single subject, centered, isolated on plain background, studio lighting",
+        AspectRatio.SQUARE,
+    ),
+}
+
+
+async def _image_from_text(
+    prompt: str, image_model: str, seed: int, subject: str = "character"
+) -> Image.Image:
     """Generate a reference image from text using an existing image model."""
     if image_model not in vram_manager.get_available_models(ModelType.IMAGE):
         # Fall back to whatever image model is available.
@@ -78,14 +105,11 @@ async def _image_from_text(prompt: str, image_model: str, seed: int) -> Image.Im
             raise HTTPException(status_code=500, detail="No image model available for text->3D")
         image_model = avail[0]
 
-    # Centered, plain-background subject reconstructs far better in 3D.
-    framed = (
-        f"{prompt}, full body, centered, facing forward, "
-        "T-pose, plain solid background, even studio lighting"
-    )
+    template, ar = _FRAMING.get(subject, _FRAMING["character"])
+    framed = template.format(p=prompt)
     req = GenerateRequest(
         prompt=framed,
-        aspect_ratio=AspectRatio.PORTRAIT_3_4,
+        aspect_ratio=ar,
         base_size=1024,
         seed=None if seed < 0 else seed,
     )
@@ -117,8 +141,12 @@ async def generate_model3d(request: Model3DRequest, model: str = "hunyuan3d-2") 
     if request.image:
         image = _decode_image(request.image)
     else:
-        logger.info(f"text->3D: generating reference image for: {request.text[:60]}...")
-        image = await _image_from_text(request.text, request.image_model, request.seed)
+        logger.info(
+            f"text->3D ({request.subject}): generating reference for: {request.text[:60]}..."
+        )
+        image = await _image_from_text(
+            request.text, request.image_model, request.seed, request.subject
+        )
 
     # 2) Image -> 3D (separate GPU acquisition; VRAM manager swaps models).
     try:

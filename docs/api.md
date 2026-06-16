@@ -3043,6 +3043,7 @@ Request body:
 | `guidance_scale` | `5.5` | Shape guidance |
 | `seed` | `-1` | Random seed (-1 = random) |
 | `image_model` | `z-image-turbo` | Image model for the text→image step |
+| `subject` | `character` | Text-path framing: `character`, `object` (isolated item, no person), `building`, or `auto`. Picks how the reference image is composed so the 3D result is the thing you asked for. |
 
 Returns `200` with `Content-Type: model/gltf-binary` (the raw GLB). Response
 header `X-Model-Id` is the saved id.

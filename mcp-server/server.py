@@ -545,13 +545,15 @@ def generate_3d(
     guidance_scale: float = 5.5,
     seed: int = -1,
     image_model: str = "z-image-turbo",
+    subject: str = "character",
     max_wait_seconds: float = 900.0,
 ) -> str:
     """Text-to-3D or image-to-3D (Hunyuan3D-2). Give `text` (a reference image is
-    auto-generated first) OR `image_path` (absolute path, image -> 3D). Returns a
-    textured low-poly .glb; lower `target_faces` = lower poly. Synchronous: shape +
-    texture takes ~1-3 min (first run also downloads weights). Saves and returns the
-    .glb path."""
+    auto-generated first) OR `image_path` (absolute path, image -> 3D). For the text
+    path, set `subject` so the reference is framed right: "character" (person),
+    "object" (isolated item like a sword — no person), "building", or "auto".
+    Returns a textured low-poly .glb; lower `target_faces` = lower poly. Synchronous:
+    shape + texture takes ~1-3 min (first run also downloads weights)."""
     if not text and not image_path:
         return "Provide either text or image_path."
     body = _drop_none(
@@ -565,6 +567,7 @@ def generate_3d(
             "guidance_scale": guidance_scale,
             "seed": seed,
             "image_model": image_model,
+            "subject": subject,
         }
     )
     timeout = httpx.Timeout(connect=10.0, read=max_wait_seconds, write=120.0, pool=max_wait_seconds)

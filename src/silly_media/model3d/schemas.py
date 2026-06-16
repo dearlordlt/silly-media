@@ -1,6 +1,6 @@
 """Schemas for 3D model generation APIs."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -55,6 +55,12 @@ class Model3DRequest(BaseModel):
         str,
         Field(default="z-image-turbo", description="Image model for the text->image step"),
     ] = "z-image-turbo"
+    # Controls how the text->image reference is framed so the 3D result is the
+    # thing you asked for (a person vs an isolated object vs a building).
+    subject: Annotated[
+        Literal["character", "object", "building", "auto"],
+        Field(default="character", description="Reference framing: character/object/building/auto"),
+    ] = "character"
 
 
 class Model3DInfo(BaseModel):
