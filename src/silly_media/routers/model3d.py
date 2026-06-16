@@ -158,15 +158,34 @@ async def generate_model3d(request: Model3DRequest, model: str = "hunyuan3d-2") 
         logger.exception("3D generation failed")
         raise HTTPException(status_code=500, detail=f"3D generation failed: {e}")
 
+    # Keep the reference image (the source z-image / uploaded image) next to the
+    # GLB so the UI can show what actually fed the reconstruction.
+    model_id = Path(glb_path).stem
+    try:
+        image.save(_MODELS_DIR / f"{model_id}_ref.png")
+    except Exception as e:  # non-fatal
+        logger.warning(f"Could not save reference image: {e}")
+
     data = Path(glb_path).read_bytes()
     return Response(
         content=data,
         media_type=_GLB_MEDIA,
         headers={
-            "X-Model-Id": Path(glb_path).stem,
+            "X-Model-Id": model_id,
+            "X-Ref-Url": f"/model3d/ref/{model_id}",
             "Content-Disposition": f'attachment; filename="{Path(glb_path).name}"',
         },
     )
+
+
+@router.get("/ref/{model_id}")
+async def get_reference(model_id: str) -> FileResponse:
+    """Get the reference image used to build a model (the text->image result)."""
+    safe = "".join(c for c in model_id if c.isalnum())
+    path = _MODELS_DIR / f"{safe}_ref.png"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Reference image not found")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.get("/download/{model_id}")
@@ -186,9 +205,10 @@ async def list_generated(limit: int = 50) -> dict:
     if not _MODELS_DIR.exists():
         return {"models": []}
     files = sorted(_MODELS_DIR.glob("*.glb"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return {
-        "models": [
-            {"id": p.stem, "url": f"/model3d/download/{p.stem}", "size_bytes": p.stat().st_size}
-            for p in files[:limit]
-        ]
-    }
+    out = []
+    for p in files[:limit]:
+        entry = {"id": p.stem, "url": f"/model3d/download/{p.stem}", "size_bytes": p.stat().st_size}
+        if (_MODELS_DIR / f"{p.stem}_ref.png").exists():
+            entry["ref_url"] = f"/model3d/ref/{p.stem}"
+        out.append(entry)
+    return {"models": out}

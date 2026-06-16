@@ -131,6 +131,10 @@
         <div id="viewerFallback" class="viewer-fallback">3D preview component didn't load (CDN blocked?).<br>Generation still works — use the download button.</div>
       </div>
       <a id="downloadLink" class="dl" download>⬇ Download .glb</a>
+      <div id="refBox" style="display:none; margin-top:12px;">
+        <div class="hint">Reference image (what fed the 3D — z-image result or your upload):</div>
+        <img id="refImg" alt="reference" style="max-width:260px; width:100%; border-radius:var(--radius); margin-top:6px; background:#0d1117; display:block;">
+      </div>
       <div class="bar" id="bar"><div></div></div>
       <div class="phase" id="phase"></div>
       <div class="log" id="log">Ready. Pick a mode, enter a prompt, hit Generate.</div>
@@ -280,7 +284,8 @@
         log(`✓ Done in ${secs}s — received ${(blob.size / 1024).toFixed(0)} KB GLB.`, 'ok');
         const url = URL.createObjectURL(blob);
         const id = res.headers.get('X-Model-Id') || 'model';
-        showModel(url, id);
+        const ref = res.headers.get('X-Ref-Url');
+        showModel(url, id, ref ? API_BASE + ref : null);
         loadRecent();
       } catch (e) {
         log(`Request failed: ${e.message}`, 'err');
@@ -290,9 +295,12 @@
       }
     }
 
-    function showModel(url, id) {
+    function showModel(url, id, refUrl) {
       const dl = document.getElementById('downloadLink');
       dl.href = url; dl.download = id + '.glb'; dl.style.display = 'block';
+      const refBox = document.getElementById('refBox'), refImg = document.getElementById('refImg');
+      if (refUrl) { refImg.src = refUrl; refBox.style.display = 'block'; }
+      else { refBox.style.display = 'none'; }
       const v = document.getElementById('viewer');
       const fb = document.getElementById('viewerFallback');
       if (window.__mvFailed || !customElements.get('model-viewer')) {
@@ -313,7 +321,10 @@
         for (const m of data.models) {
           const b = document.createElement('button');
           b.textContent = m.id;
-          b.onclick = () => { log(`Loading recent ${m.id}…`); showModel(`${API_BASE}${m.url}`, m.id); };
+          b.onclick = () => {
+            log(`Loading recent ${m.id}…`);
+            showModel(`${API_BASE}${m.url}`, m.id, m.ref_url ? `${API_BASE}${m.ref_url}` : null);
+          };
           box.appendChild(b);
         }
       } catch (e) { log('Could not reach service for recent list.', 'warn'); }

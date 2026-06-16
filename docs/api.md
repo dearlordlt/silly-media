@@ -3065,7 +3065,13 @@ curl -X POST http://localhost:4201/model3d/generate \
 ### `GET /model3d/download/{model_id}` · `GET /model3d/list`
 
 Download a previously generated GLB by id, or list recent generations
-(most recent first).
+(most recent first). List entries include `ref_url` when a reference image exists.
+
+### `GET /model3d/ref/{model_id}`
+
+The reference image (the text→image result, or your uploaded image) that fed the
+reconstruction — saved alongside each GLB. The generate response also returns an
+`X-Ref-Url` header pointing here.
 
 > Test UI: open `ui-3d.html` (live `<model-viewer>` preview + download).
 
