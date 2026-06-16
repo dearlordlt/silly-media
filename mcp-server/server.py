@@ -11,7 +11,8 @@ silly-media MCP server.
 
 Wraps the local silly-media FastAPI service (default http://localhost:4201)
 as MCP tools so an agent can generate images, edit images, synthesize speech,
-analyze images, run the local LLM, and generate video / music.
+analyze images, run the local LLM, generate video / music, and generate
+textured 3D models (Hunyuan3D, text or image -> GLB) via generate_3d.
 
 Config via env:
   SILLY_MEDIA_URL   base URL of the service   (default http://localhost:4201)
