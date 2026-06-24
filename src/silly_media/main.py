@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
             name,
             ModelType.IMAGE,
             model,
-            estimated_vram_gb=22.0,  # Default estimate for image models
+            estimated_vram_gb=getattr(model, "estimated_vram_gb", 22.0),
         )
     logger.info(f"Registered image models: {ModelRegistry.get_available_models()}")
 

@@ -144,8 +144,9 @@ class Krea2TurboModel(BaseImageModel):
         logger.info(f"Unloading {self.display_name}...")
 
         if self._pipe is not None:
-            # With model CPU offload, idle weights already live on CPU and
-            # accelerate hooks own device placement — just drop the pipe.
+            # This model places modules by hand (no accelerate offload), so after a generation
+            # the transformer + VAE are left resident on GPU. Drop the pipe; the gc.collect()
+            # + empty_cache() below reclaim whatever was on the GPU.
             del self._pipe
             self._pipe = None
 
@@ -169,9 +170,12 @@ class Krea2TurboModel(BaseImageModel):
         if request.seed is not None and request.seed >= 0:
             generator = torch.Generator(device="cuda").manual_seed(request.seed)
 
-        # Turbo: default to 8 steps / guidance disabled unless the caller overrides.
+        # Turbo: 8 steps unless overridden. Guidance is forced off (distilled checkpoint) and
+        # the caller's cfg_scale is ignored: Phase 1 only encodes the positive prompt and the
+        # text encoder is detached during denoise, so a non-zero CFG path would have no
+        # negative embeds to work with.
         steps = request.num_inference_steps if request.num_inference_steps else self.default_steps
-        cfg = request.cfg_scale if request.cfg_scale is not None else self.default_cfg
+        cfg = self.default_cfg
 
         logger.info(
             f"Generating image: {request.width}x{request.height}, "
