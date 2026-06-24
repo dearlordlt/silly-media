@@ -117,9 +117,9 @@ def generate_image(
     base_size: int = 1024,
 ) -> list:
     """Text-to-image. Models: z-image-turbo (fast, default), z-image, qwen-image-2512,
-    ovis-image-7b. Use aspect_ratio (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) +
-    base_size, OR explicit width/height (64-2048). Returns the image inline and the
-    saved PNG path."""
+    ovis-image-7b, krea-2-turbo (12B, high quality, ~8 steps). Use aspect_ratio
+    (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) + base_size, OR explicit width/height
+    (64-2048). Returns the image inline and the saved PNG path."""
     payload = _drop_none(
         {
             "prompt": prompt,

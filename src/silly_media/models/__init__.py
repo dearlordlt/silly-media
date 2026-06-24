@@ -30,3 +30,14 @@ try:
     __all__.append("OvisImageModel")
 except ImportError:
     pass  # OvisImagePipeline not available in this diffusers version
+
+# Krea-2-Turbo requires a recent diffusers (Krea2Pipeline), try to register if available
+try:
+    from diffusers import Krea2Pipeline  # noqa: F401 - check if available
+
+    from .krea2 import Krea2TurboModel
+
+    ModelRegistry.register("krea-2-turbo", Krea2TurboModel)
+    __all__.append("Krea2TurboModel")
+except ImportError:
+    pass  # Krea2Pipeline not available in this diffusers version

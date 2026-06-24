@@ -32,6 +32,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast      |
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
 | Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
+| Krea 2 Turbo    | `krea-2-turbo`    | 8       | ~14GB | 12B MMDiT, FP8 weight-only, high quality, guidance off; gated (needs `HF_TOKEN`) |
 
 \* With `use_lora: true`, Qwen Image 2512 uses 6 steps instead of 50.
 
@@ -95,7 +96,7 @@ Check API and model status.
 {
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
-  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b"],
+  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b", "krea-2-turbo"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["hunyuan-video"],
   "available_vision_models": ["qwen3-vl-8b"],
@@ -114,7 +115,7 @@ List available and loaded models by type.
 ```json
 {
   "image": {
-    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b"],
+    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b", "krea-2-turbo"],
     "loaded": ["z-image-turbo"]
   },
   "audio": {
@@ -218,6 +219,7 @@ Generate an image using the specified model.
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
+- `krea-2-turbo`: 8 steps, cfg_scale ignored (guidance disabled, uses 0.0 internally)
 
 **Response**
 
@@ -520,7 +522,7 @@ Generate a non-pixel-art sprite from a text prompt.
 | Field                 | Type   | Required | Default         | Description                                                                     |
 | --------------------- | ------ | -------- | --------------- | ------------------------------------------------------------------------------- |
 | `prompt`              | string | Yes      | -               | Generation prompt, used **verbatim** (write your own framing)                   |
-| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `ovis-image-7b`) |
+| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `ovis-image-7b`, `krea-2-turbo`) |
 | `remove_background`   | bool   | No       | `true`          | Remove background via rembg → transparent cutout                                |
 | `output_size`         | int    | No       | `null`          | Longest-side target (8-2048), aspect preserved; omit to keep full resolution    |
 | `negative_prompt`     | string | No       | `""`            | Negative prompt                                                                 |
@@ -2122,6 +2124,20 @@ curl -X POST http://localhost:4201/generate/qwen-image-2512 \
     "use_lora": true
   }' \
   -o portrait_fast.png
+```
+
+#### Krea 2 Turbo (12B, high quality - 8 steps)
+
+```bash
+# Gated model: accept the license at https://huggingface.co/krea/Krea-2-Turbo and
+# set HF_TOKEN in .env before first use (weights download on first request).
+curl -X POST http://localhost:4201/generate/krea-2-turbo \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a fox in the snow, cinematic photography",
+    "aspect_ratio": "3:2"
+  }' \
+  -o fox.png
 ```
 
 ### Image Editing (Img2Img)

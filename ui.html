@@ -1679,6 +1679,7 @@
           <option value="z-image">Z-Image</option>
           <option value="z-image-turbo" selected>Z-Image Turbo</option>
           <option value="qwen-image-2512">Qwen Image 2512</option>
+          <option value="krea-2-turbo">Krea 2 Turbo</option>
         </select>
 
         <div id="loraOptions" style="display: none;">
@@ -2827,6 +2828,10 @@ Results:
           stepsInput.value = 30;
           cfgInput.value = 4.0;
           if (cfgValue) cfgValue.textContent = '4.0';
+        } else if (model === 'krea-2-turbo') {
+          stepsInput.value = 8;
+          cfgInput.value = 0.0;
+          if (cfgValue) cfgValue.textContent = '0.0';
         }
       }
       saveSettings();
