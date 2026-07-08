@@ -102,6 +102,10 @@ class Krea2TurboModel(BaseImageModel):
         _orig_check = getattr(_pu, "maybe_raise_or_warn", None)
 
         def _skip_tokenizer_check(*args, **kwargs):
+            # diffusers signature: maybe_raise_or_warn(library_name, library, class_name,
+            # importable_classes, passed_class_obj, name, is_pipeline_module) -> `name` is arg 5.
+            # diffusers is pinned to git-main; if that signature changes, this falls through to
+            # the original check (the tokenizer class check fires and load() raises loudly).
             name = kwargs.get("name", args[5] if len(args) > 5 else None)
             if name == "tokenizer":
                 return

@@ -219,7 +219,7 @@ Generate an image using the specified model.
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
-- `krea-2-turbo`: 8 steps, cfg_scale ignored (guidance disabled, uses 0.0 internally). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.
+- `krea-2-turbo`: 8 steps, `cfg_scale` **and** `negative_prompt` ignored (guidance disabled — only the positive prompt is encoded). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.
 
 **Response**
 

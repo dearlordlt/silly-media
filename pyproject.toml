@@ -7,7 +7,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "torch>=2.0.0",
-    "transformers>=4.51.0,<5.0.0",  # ACE-Step 1.5 incompatible with transformers 5.x (meta tensors)
+    "transformers>=4.57.0,<5.0.0",  # >=4.57: Qwen3-VL + rope_parameters (krea-2-turbo); <5.x: ACE-Step 1.5 (meta tensors)
     "accelerate>=1.0.0",
     "safetensors>=0.4.0",
     "pillow>=10.0.0",
@@ -35,7 +35,7 @@ dependencies = [
     "bitsandbytes>=0.41.0",  # Required for 4-bit quantized models (img2img)
     "rembg[cpu]>=2.0.50",  # AI background removal for pixel art (CPU to avoid VRAM conflicts)
     "gguf>=0.6.0",  # Required for GGUF quantized models (qwen-image-2512)
-    "torchao>=0.9.0",  # Required for FP8 weight-only quantization (krea-2-turbo)
+    "torchao>=0.11.0",  # Float8WeightOnlyConfig (config-class API) for FP8 quant (krea-2-turbo)
     # Music generation (ACE-Step 1.5 installed in Dockerfile with --no-deps;
     # its runtime deps listed here)
     "soundfile>=0.12.0",

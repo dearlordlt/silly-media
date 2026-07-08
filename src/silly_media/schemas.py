@@ -188,7 +188,7 @@ class SpriteRequest(GenerateRequest):
     # Which image model to generate with (sprite endpoint has no path param).
     model: Annotated[
         str,
-        Field(default="z-image-turbo", description="Image model id (z-image, z-image-turbo, qwen-image-2512, ovis-image-7b)"),
+        Field(default="z-image-turbo", description="Image model id (z-image, z-image-turbo, qwen-image-2512, ovis-image-7b, krea-2-turbo)"),
     ] = "z-image-turbo"
 
     # Background removal (rembg) — produces a transparent cutout.
