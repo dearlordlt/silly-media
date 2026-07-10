@@ -6,16 +6,18 @@ Base URL: `http://localhost:4201`
 
 ## Overview
 
-Silly Media provides eight main capabilities:
+Silly Media provides the following capabilities:
 
 - **Image Generation**: Text-to-image using diffusion models
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
+- **Sprite Generation**: Hand-painted / realistic game sprites with transparent cutout (non-pixel-art)
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
 - **LLM Text Generation**: Text completion and chat using large language models
 - **Music Generation**: Text-to-music using ACE-Step 1.5 with lyrics, genre tags, and vocal support
+- **3D Model Generation**: Image-to-3D and text-to-3D textured `.glb` meshes using Hunyuan3D-2
 - **ComfyUI Compatibility**: Drop-in ComfyUI API so third-party clients can generate images without a real ComfyUI install
 
 The service uses a **smart VRAM manager** that automatically loads/unloads models to fit within GPU memory. Only one model can be active at a time.
@@ -75,6 +77,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | ACE-Step 1.5 Turbo     | `ace-step`         | 8     | ~6GB | Fast generation, default model                 |
 | ACE-Step 1.5 Quality   | `ace-step-quality` | 50    | ~6GB | Higher quality, CFG support, more steps        |
 
+### 3D Models
+
+| Model       | ID            | VRAM  | Notes                                                    |
+| ----------- | ------------- | ----- | -------------------------------------------------------- |
+| Hunyuan3D-2 | `hunyuan3d-2` | ~21GB | Image-to-3D and text-to-3D, textured low-poly GLB output |
+
 **Note:** Only one model can be loaded at a time. The VRAM manager automatically unloads other models when switching.
 
 **Model comparison:**
@@ -102,7 +110,8 @@ Check API and model status.
   "available_vision_models": ["qwen3-vl-8b"],
   "available_img2img_models": ["qwen-image-edit"],
   "available_llm_models": ["huihui-qwen3-4b"],
-  "available_music_models": ["ace-step", "ace-step-quality"]
+  "available_music_models": ["ace-step", "ace-step-quality"],
+  "available_model3d_models": ["hunyuan3d-2"]
 }
 ```
 
@@ -140,6 +149,10 @@ List available and loaded models by type.
   },
   "music": {
     "available": ["ace-step", "ace-step-quality"],
+    "loaded": []
+  },
+  "model3d": {
+    "available": ["hunyuan3d-2"],
     "loaded": []
   }
 }
