@@ -406,7 +406,7 @@ async def list_loras():
     ] if lora_dir.is_dir() else []
     return {
         "loras": loras,
-        "compatible_models": ["z-image", "z-image-turbo"],
+        "compatible_models": ["z-image", "z-image-turbo", "z-image-turbo-pm"],
     }
 
 

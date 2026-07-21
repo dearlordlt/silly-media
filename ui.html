@@ -1678,6 +1678,7 @@
         <select id="model" onchange="onModelChange()">
           <option value="z-image">Z-Image</option>
           <option value="z-image-turbo" selected>Z-Image Turbo</option>
+          <option value="z-image-turbo-pm">Z-Image Turbo PM</option>
           <option value="qwen-image-2512">Qwen Image 2512</option>
           <option value="krea-2-turbo">Krea 2 Turbo</option>
         </select>
@@ -2812,7 +2813,7 @@ Results:
     let zLoraState = {};        // name -> {on, scale}, persisted in settings
 
     function isZImageModel(model) {
-      return model === 'z-image' || model === 'z-image-turbo';
+      return model.startsWith('z-image');
     }
 
     async function fetchZLoras() {
@@ -2899,7 +2900,7 @@ Results:
       } else {
         loraOptions.style.display = 'none';
         // Set defaults based on model
-        if (model === 'z-image-turbo') {
+        if (model === 'z-image-turbo' || model === 'z-image-turbo-pm') {
           stepsInput.value = 9;
           cfgInput.value = 0.0;
           if (cfgValue) cfgValue.textContent = '0.0';

@@ -130,7 +130,8 @@ def generate_image(
     lora_scale: float = 1.0,
     loras: Optional[list[str]] = None,
 ) -> list:
-    """Text-to-image. Models: z-image-turbo (fast, default), z-image, qwen-image-2512,
+    """Text-to-image. Models: z-image-turbo (fast, default), z-image,
+    z-image-turbo-pm (NSFW fine-tune, honors cfg_scale up to ~1.5), qwen-image-2512,
     ovis-image-7b, krea-2-turbo (12B, high quality, ~8 steps). Use aspect_ratio
     (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) + base_size, OR explicit width/height
     (64-2048). loras: stack any number of installed LoRAs (see list_loras), each entry

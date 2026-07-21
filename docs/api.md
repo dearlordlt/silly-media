@@ -32,6 +32,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | --------------- | ----------------- | ------- | ----- | -------------------------------------------- |
 | Z-Image         | `z-image`         | 30      | ~22GB | Full CFG support, negative prompts, high quality, stackable LoRAs† |
 | Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast, stackable LoRAs† |
+| Z-Image Turbo PM | `z-image-turbo-pm` | 9      | ~22GB | PornMaster V3.5 NSFW fine-tune (local checkpoint in `data/checkpoints/`), honors `cfg_scale` (≤1.5 recommended), stackable LoRAs† |
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
 | Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
 | Krea 2 Turbo    | `krea-2-turbo`    | 8       | ~13GB (≤768–896 base) | 12B MMDiT, FP8 weight-only, high quality, guidance off; gated (needs `HF_TOKEN`) |
@@ -210,7 +211,7 @@ List LoRA adapters installed in `data/loras` (any `*.safetensors` file dropped t
   "loras": [
     { "name": "my-style-lora", "size_mb": 170.4 }
   ],
-  "compatible_models": ["z-image", "z-image-turbo"]
+  "compatible_models": ["z-image", "z-image-turbo", "z-image-turbo-pm"]
 }
 ```
 
@@ -249,6 +250,7 @@ Generate an image using the specified model.
 
 - `z-image`: 30 steps, cfg_scale 4.0 (supports 3.0-5.0, full CFG support)
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
+- `z-image-turbo-pm`: 9 steps, cfg_scale honored (default 0.0; author recommends up to 1.5 with negative prompts). Only registered when `data/checkpoints/z-image-turbo-pm.safetensors` exists.
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0
 - `krea-2-turbo`: 8 steps, `cfg_scale` **and** `negative_prompt` ignored (guidance disabled — only the positive prompt is encoded). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.

@@ -97,6 +97,9 @@ class ZImageTurboModel(ZImageLoraMixin, BaseImageModel):
     # Turbo model uses fixed low step count and no guidance
     default_steps = 9
     default_cfg = 0.0  # Turbo models use guidance_scale=0
+    # Stock turbo ignores request cfg_scale entirely; fine-tune subclasses that
+    # support guidance (e.g. PM at cfg 1.5) opt in by flipping this.
+    honor_cfg = False
 
     def __init__(self):
         super().__init__()
@@ -160,17 +163,20 @@ class ZImageTurboModel(ZImageLoraMixin, BaseImageModel):
         # Turbo model: use its optimal settings
         # Override steps if user didn't specify (turbo works best with 9)
         steps = request.num_inference_steps if request.num_inference_steps else self.default_steps
+        cfg = self.default_cfg
+        if self.honor_cfg and request.cfg_scale is not None:
+            cfg = request.cfg_scale
 
         logger.info(
             f"Generating image: {request.width}x{request.height}, "
-            f"steps={steps}, cfg={self.default_cfg} (turbo)"
+            f"steps={steps}, cfg={cfg} (turbo)"
         )
 
         result = self._pipe(
             prompt=request.prompt,
             negative_prompt=request.negative_prompt or None,
             num_inference_steps=steps,
-            guidance_scale=self.default_cfg,  # Turbo needs 0.0
+            guidance_scale=cfg,
             width=request.width,
             height=request.height,
             generator=generator,
@@ -275,3 +281,54 @@ class ZImageModel(ZImageLoraMixin, BaseImageModel):
         )
 
         return result.images[0]
+
+
+class ZImageTurboPMModel(ZImageTurboModel):
+    """PornMaster V3.5 fine-tune of Z-Image-Turbo (civitai model 2270401).
+
+    The Civitai checkpoint is a transformer-only single file; text encoder,
+    VAE, and scheduler are reused from the stock Z-Image-Turbo repo. Runs
+    turbo-style (9 steps, guidance off) but honors cfg_scale if the request
+    sets one — the author recommends up to cfg 1.5 with negative prompts.
+    """
+
+    model_id = "civitai/PornMaster-Z-Image-Turbo-V3.5"
+    display_name = "Z-Image Turbo PM"
+    checkpoint_file = "z-image-turbo-pm.safetensors"
+
+    honor_cfg = True
+
+    @classmethod
+    def checkpoint_path(cls) -> Path:
+        return Path(settings.checkpoint_dir) / cls.checkpoint_file
+
+    def load(self) -> None:
+        """Load the stock Z-Image-Turbo pipeline with the PM transformer swapped in."""
+        if self._loaded:
+            return
+
+        from diffusers import ZImagePipeline, ZImageTransformer2DModel
+
+        path = self.checkpoint_path()
+        if not path.is_file():
+            raise RuntimeError(
+                f"Checkpoint not found: {path} — download it to data/checkpoints first"
+            )
+
+        logger.info(f"Loading {self.display_name} from {path}...")
+
+        transformer = ZImageTransformer2DModel.from_single_file(
+            str(path), torch_dtype=torch.bfloat16
+        )
+        self._pipe = ZImagePipeline.from_pretrained(
+            "Tongyi-MAI/Z-Image-Turbo",
+            transformer=transformer,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=False,
+        )
+        # Same VRAM strategy as the stock models: offload idle submodules.
+        self._pipe.enable_model_cpu_offload()
+        self._pipe.vae.enable_tiling()
+
+        self._loaded = True
+        logger.info(f"{self.display_name} loaded successfully")

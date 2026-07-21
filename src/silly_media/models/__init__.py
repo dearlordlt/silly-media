@@ -1,13 +1,18 @@
 """Model registry and base classes for image generation models."""
 
 from .base import BaseImageModel, ModelRegistry
-from .z_image import ZImageModel, ZImageTurboModel
+from .z_image import ZImageModel, ZImageTurboModel, ZImageTurboPMModel
 
-__all__ = ["BaseImageModel", "ModelRegistry", "ZImageModel", "ZImageTurboModel"]
+__all__ = ["BaseImageModel", "ModelRegistry", "ZImageModel", "ZImageTurboModel", "ZImageTurboPMModel"]
 
 # Register available models
 ModelRegistry.register("z-image", ZImageModel)
 ModelRegistry.register("z-image-turbo", ZImageTurboModel)
+
+# PM fine-tune loads from a local single-file checkpoint; only offer it when
+# the file is actually present (drop it in data/checkpoints and restart).
+if ZImageTurboPMModel.checkpoint_path().is_file():
+    ModelRegistry.register("z-image-turbo-pm", ZImageTurboPMModel)
 
 # Qwen-Image-2512 with GGUF support
 try:
