@@ -8,7 +8,7 @@ Base URL: `http://localhost:4201`
 
 Silly Media provides the following capabilities:
 
-- **Image Generation**: Text-to-image using diffusion models
+- **Image Generation**: Text-to-image using diffusion models, with stackable user LoRAs on the Z-Image models
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
 - **Sprite Generation**: Hand-painted / realistic game sprites with transparent cutout (non-pixel-art)
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts
@@ -30,13 +30,14 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 | Model           | ID                | Steps   | VRAM  | Notes                                        |
 | --------------- | ----------------- | ------- | ----- | -------------------------------------------- |
-| Z-Image         | `z-image`         | 30      | ~22GB | Full CFG support, negative prompts, high quality |
-| Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast      |
+| Z-Image         | `z-image`         | 30      | ~22GB | Full CFG support, negative prompts, high quality, stackable LoRAs† |
+| Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast, stackable LoRAs† |
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
 | Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
 | Krea 2 Turbo    | `krea-2-turbo`    | 8       | ~13GB (≤768–896 base) | 12B MMDiT, FP8 weight-only, high quality, guidance off; gated (needs `HF_TOKEN`) |
 
 \* With `use_lora: true`, Qwen Image 2512 uses 6 steps instead of 50.
+† Any number of user LoRAs from `data/loras/` can be stacked per request via the `loras` field — see `GET /loras` and `POST /generate/{model}`. Standard LoRA checkpoints only (Civitai/ComfyUI `lora_A`/`lora_B` format); LyCORIS LoKr files are not supported by the loader.
 
 ### Audio Models
 
@@ -2118,6 +2119,27 @@ curl -X POST http://localhost:4201/generate/z-image-turbo \
   -o landscape.png
 ```
 
+#### Stacked LoRAs (Z-Image models)
+
+```bash
+# See what's installed
+curl http://localhost:4201/loras
+
+# Generate with two LoRAs at different strengths
+curl -X POST http://localhost:4201/generate/z-image-turbo \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "a portrait photo of a woman",
+    "loras": [
+      {"name": "z-facial", "scale": 0.8},
+      {"name": "sexy-lingerie", "scale": 0.7}
+    ]
+  }' \
+  -o stacked.png
+```
+
+Repeating the same combo is free (adapters stay loaded); changing only scales re-weights without reloading files. The legacy single-LoRA form `{"lora": "name", "lora_scale": 0.8}` still works.
+
 #### Z-Image (Standard - 30 steps, Full CFG)
 
 ```bash
@@ -2395,6 +2417,21 @@ response = requests.post(
     },
 )
 with open("image_standard.png", "wb") as f:
+    f.write(response.content)
+
+# Generation with stacked LoRAs (Z-Image models)
+installed = requests.get("http://localhost:4201/loras").json()["loras"]
+response = requests.post(
+    "http://localhost:4201/generate/z-image-turbo",
+    json={
+        "prompt": "a portrait photo of a woman",
+        "loras": [
+            {"name": "z-facial", "scale": 0.8},
+            {"name": "sexy-lingerie", "scale": 0.7},
+        ],
+    },
+)
+with open("image_loras.png", "wb") as f:
     f.write(response.content)
 
 # Image editing (img2img) - Base64 JSON
