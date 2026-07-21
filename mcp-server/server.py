@@ -91,6 +91,17 @@ def service_status() -> str:
 
 
 @mcp.tool()
+def list_loras() -> str:
+    """List installed LoRA adapters (files in data/loras). Use their names with
+    generate_image's `loras` parameter — Z-Image models only."""
+    with _client() as c:
+        r = c.get("/loras")
+    if r.status_code != 200:
+        return _err(r)
+    return r.text
+
+
+@mcp.tool()
 def list_tts_actors() -> str:
     """List saved XTTS voice-clone actors (use one as the `actor` for speak())
     and Maya saved voice descriptions."""
@@ -115,11 +126,27 @@ def generate_image(
     width: Optional[int] = None,
     height: Optional[int] = None,
     base_size: int = 1024,
+    lora: Optional[str] = None,
+    lora_scale: float = 1.0,
+    loras: Optional[list[str]] = None,
 ) -> list:
     """Text-to-image. Models: z-image-turbo (fast, default), z-image, qwen-image-2512,
     ovis-image-7b, krea-2-turbo (12B, high quality, ~8 steps). Use aspect_ratio
     (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) + base_size, OR explicit width/height
-    (64-2048). Returns the image inline and the saved PNG path."""
+    (64-2048). loras: stack any number of installed LoRAs (see list_loras), each entry
+    "name" or "name:scale" (e.g. ["style-a", "style-b:0.7"]); Z-Image models only.
+    lora/lora_scale are the legacy single-LoRA form. Returns the image inline
+    and the saved PNG path."""
+    lora_specs = None
+    if loras:
+        lora_specs = []
+        for item in loras:
+            name, sep, scale_str = item.rpartition(":")
+            try:
+                spec = {"name": name, "scale": float(scale_str)} if sep else {"name": item}
+            except ValueError:
+                spec = {"name": item}
+            lora_specs.append(spec)
     payload = _drop_none(
         {
             "prompt": prompt,
@@ -132,6 +159,9 @@ def generate_image(
             # only send aspect_ratio when explicit dims weren't given
             "aspect_ratio": None if (width or height) else aspect_ratio,
             "base_size": base_size,
+            "lora": lora,
+            "lora_scale": lora_scale if lora else None,
+            "loras": lora_specs,
         }
     )
     with _client() as c:

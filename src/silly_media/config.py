@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # Database and storage settings
     db_path: str = "./data/db/silly_media.db"
     actors_storage_path: str = "./data/actors"
+    lora_dir: str = "./data/loras"
 
     class Config:
         env_file = ".env"

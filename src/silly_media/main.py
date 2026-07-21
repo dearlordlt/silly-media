@@ -357,6 +357,25 @@ async def get_progress():
     return progress.to_dict()
 
 
+@app.get("/loras")
+async def list_loras():
+    """List LoRA adapters installed in the lora directory."""
+    import pathlib
+
+    lora_dir = pathlib.Path(settings.lora_dir)
+    loras = [
+        {
+            "name": f.stem,
+            "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+        }
+        for f in sorted(lora_dir.glob("*.safetensors"))
+    ] if lora_dir.is_dir() else []
+    return {
+        "loras": loras,
+        "compatible_models": ["z-image", "z-image-turbo"],
+    }
+
+
 @app.get("/aspect-ratios")
 async def list_aspect_ratios():
     """List available aspect ratio presets."""
@@ -429,6 +448,9 @@ async def generate_image(
 
             return Response(content=buffer.getvalue(), media_type="image/png")
 
+    except ValueError as e:
+        # Bad request contents caught during generation (e.g. unknown LoRA name)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Generation failed")
         raise HTTPException(status_code=500, detail=f"Generation failed: {e}")

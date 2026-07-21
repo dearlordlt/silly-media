@@ -56,6 +56,23 @@ def calculate_dimensions(
     return width, height
 
 
+class LoraSpec(BaseModel):
+    """A named LoRA adapter with its strength, referencing a file in lora_dir."""
+
+    name: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=128,
+            pattern=r"^[^/\\]+$",
+            description="LoRA filename (without .safetensors) from data/loras",
+        ),
+    ]
+    scale: Annotated[
+        float, Field(default=1.0, ge=0.0, le=2.0, description="LoRA strength")
+    ] = 1.0
+
+
 class GenerateRequest(BaseModel):
     """Request schema for image generation."""
 
@@ -85,6 +102,34 @@ class GenerateRequest(BaseModel):
         bool,
         Field(default=False, description="Use Turbo LoRA for faster inference (model-dependent)"),
     ] = False
+
+    # Named LoRAs from the lora_dir (e.g. "my-lora" -> data/loras/my-lora.safetensors).
+    # Any number can be stacked; currently supported by the Z-Image models.
+    loras: Annotated[
+        list[LoraSpec],
+        Field(default_factory=list, description="LoRAs to apply together, each {name, scale}"),
+    ]
+
+    # Legacy single-LoRA fields, kept for backwards compatibility. Merged into
+    # `loras` by the validator below — downstream code only reads `loras`.
+    lora: Annotated[
+        str | None,
+        Field(default=None, description="Deprecated: single LoRA name; use `loras` instead"),
+    ] = None
+    lora_scale: Annotated[
+        float,
+        Field(default=1.0, ge=0.0, le=2.0, description="Deprecated: strength for `lora`"),
+    ] = 1.0
+
+    @model_validator(mode="after")
+    def merge_legacy_lora(self) -> "GenerateRequest":
+        """Fold legacy lora/lora_scale into loras and drop duplicate names (first wins)."""
+        merged = list(self.loras)
+        if self.lora:
+            merged.insert(0, LoraSpec(name=self.lora, scale=self.lora_scale))
+        seen: set[str] = set()
+        self.loras = [s for s in merged if not (s.name in seen or seen.add(s.name))]
+        return self
 
     @model_validator(mode="after")
     def resolve_dimensions(self) -> "GenerateRequest":

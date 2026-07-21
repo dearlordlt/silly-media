@@ -200,6 +200,19 @@ List available aspect ratio presets with calculated dimensions.
 }
 ```
 
+### `GET /loras`
+
+List LoRA adapters installed in `data/loras` (any `*.safetensors` file dropped there is picked up — no restart needed). Usable with the Z-Image models via the `loras` request field.
+
+```json
+{
+  "loras": [
+    { "name": "my-style-lora", "size_mb": 170.4 }
+  ],
+  "compatible_models": ["z-image", "z-image-turbo"]
+}
+```
+
 ### `POST /generate/{model}`
 
 Generate an image using the specified model.
@@ -222,9 +235,14 @@ Generate an image using the specified model.
   "height": "int, optional (64-2048)",
   "aspect_ratio": "string, optional",
   "base_size": "int, optional (256-2048, default 1024)",
-  "use_lora": "bool, optional (default false, only for qwen-image-2512)"
+  "use_lora": "bool, optional (default false, only for qwen-image-2512)",
+  "loras": "array, optional — [{\"name\": \"...\", \"scale\": 1.0}, ...] stacks any number of LoRAs from data/loras (Z-Image models only; scale 0.0-2.0, default 1.0)",
+  "lora": "string, optional — deprecated single-LoRA form, merged into loras",
+  "lora_scale": "float, optional (0.0-2.0, default 1.0) — strength for the deprecated lora field"
 }
 ```
+
+**LoRA stacking (Z-Image models):** list installed adapters with `GET /loras`, then pass e.g. `"loras": [{"name": "style-a"}, {"name": "style-b", "scale": 0.7}]`. Adapters are hot-swapped between requests — repeating the same combo costs nothing; changing scales only re-weights without reloading files. Old clients sending `lora`/`lora_scale` keep working unchanged.
 
 **Model-specific defaults:**
 

@@ -1688,6 +1688,16 @@
             <span>Use Turbo LoRA (6 steps, faster)</span>
           </label>
         </div>
+
+        <div id="zLoraSection" style="display: none;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 8px;">
+            <label style="margin: 0;">LoRAs</label>
+            <button class="btn-secondary btn-small" onclick="fetchZLoras(true)" title="Reload LoRA list from server">↻</button>
+          </div>
+          <div id="zLoraList" style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+            <span style="font-size: 0.8rem; color: var(--text-dim);">Loading…</span>
+          </div>
+        </div>
       </div>
 
       <button id="generateBtn" class="btn-primary" onclick="generate()">Generate</button>
@@ -2106,6 +2116,7 @@ Results:
     async function init() {
       db = await openDB();
       loadSavedSettings();
+      fetchZLoras();
       loadHistory();
       loadNegHistory();
       loadJsonHistory();
@@ -2252,6 +2263,7 @@ Results:
         apiUrl: document.getElementById('apiUrl').value,
         model: document.getElementById('model').value,
         useLora: document.getElementById('useLora').checked,
+        zLoras: zLoraState,
         negativePrompt: document.getElementById('negativePrompt').value,
         batchJson: document.getElementById('batchJson').value,
         simpleBatchCount: document.getElementById('simpleBatchCount').value
@@ -2290,6 +2302,7 @@ Results:
         if (s.apiUrl) document.getElementById('apiUrl').value = s.apiUrl;
         if (s.model) document.getElementById('model').value = s.model;
         if (s.useLora !== undefined) document.getElementById('useLora').checked = s.useLora;
+        if (s.zLoras) zLoraState = s.zLoras;
         // Update UI to show/hide LoRA options based on selected model (without triggering save)
         updateLoraVisibility();
         if (s.negativePrompt) document.getElementById('negativePrompt').value = s.negativePrompt;
@@ -2767,6 +2780,12 @@ Results:
         }
       }
 
+      // Stacked LoRAs for Z-Image models
+      if (isZImageModel(model)) {
+        const activeLoras = getActiveZLoras();
+        if (activeLoras.length) settings.loras = activeLoras;
+      }
+
       return settings;
     }
 
@@ -2788,16 +2807,76 @@ Results:
       return document.getElementById('model').value;
     }
 
+    // --- Z-Image stacked LoRAs ---
+    let availableZLoras = [];   // [{name, size_mb}] from GET /loras
+    let zLoraState = {};        // name -> {on, scale}, persisted in settings
+
+    function isZImageModel(model) {
+      return model === 'z-image' || model === 'z-image-turbo';
+    }
+
+    async function fetchZLoras() {
+      const listEl = document.getElementById('zLoraList');
+      try {
+        const resp = await fetch(`${getApiUrl()}/loras`, { signal: AbortSignal.timeout(5000) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        availableZLoras = data.loras || [];
+        renderZLoraList();
+      } catch (e) {
+        listEl.innerHTML = '<span style="font-size:0.8rem;color:var(--text-dim)">Could not load LoRA list</span>';
+      }
+    }
+
+    function renderZLoraList() {
+      const listEl = document.getElementById('zLoraList');
+      if (!availableZLoras.length) {
+        listEl.innerHTML = '<span style="font-size:0.8rem;color:var(--text-dim)">No LoRAs installed (drop .safetensors into data/loras)</span>';
+        return;
+      }
+      listEl.innerHTML = '';
+      availableZLoras.forEach(l => {
+        const st = zLoraState[l.name] || { on: false, scale: 1.0 };
+        zLoraState[l.name] = st;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = st.on; cb.style.cssText = 'width:auto;margin:0';
+        const name = document.createElement('span');
+        name.textContent = l.name;
+        name.title = `${l.size_mb} MB`;
+        name.style.cssText = 'flex:1;font-size:0.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        const slider = document.createElement('input');
+        slider.type = 'range'; slider.min = '0'; slider.max = '2'; slider.step = '0.05';
+        slider.value = st.scale; slider.disabled = !st.on; slider.style.cssText = 'width:90px';
+        const val = document.createElement('span');
+        val.className = 'range-value';
+        val.textContent = Number(st.scale).toFixed(2);
+        cb.onchange = () => { st.on = cb.checked; slider.disabled = !st.on; saveSettings(); };
+        slider.oninput = () => { st.scale = parseFloat(slider.value); val.textContent = st.scale.toFixed(2); saveSettings(); };
+        row.append(cb, name, slider, val);
+        listEl.appendChild(row);
+      });
+    }
+
+    function getActiveZLoras() {
+      return availableZLoras
+        .filter(l => zLoraState[l.name]?.on)
+        .map(l => ({ name: l.name, scale: Number(zLoraState[l.name].scale) || 1.0 }));
+    }
+
     // Helper to update LoRA visibility without triggering save (used during load)
     function updateLoraVisibility() {
       const model = document.getElementById('model').value;
       const loraOptions = document.getElementById('loraOptions');
       loraOptions.style.display = model === 'qwen-image-2512' ? 'block' : 'none';
+      document.getElementById('zLoraSection').style.display = isZImageModel(model) ? 'block' : 'none';
     }
 
     // Model change handler - show/hide LoRA options and update defaults
     function onModelChange() {
       const model = document.getElementById('model').value;
+      document.getElementById('zLoraSection').style.display = isZImageModel(model) ? 'block' : 'none';
       const loraOptions = document.getElementById('loraOptions');
       const stepsInput = document.getElementById('steps');
       const cfgInput = document.getElementById('cfgScale');
