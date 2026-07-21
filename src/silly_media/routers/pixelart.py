@@ -69,7 +69,7 @@ async def generate_pixelart(request: PixelArtRequest):
     try:
         async with vram_manager.acquire_gpu(PIXELART_MODEL) as model_instance:
             logger.info(
-                f"Pixel art request: prompt={request.prompt[:50]}..., "
+                f"Pixel art request: prompt=****, "
                 f"output_size={request.size}x{request.size}, "
                 f"remove_bg={request.remove_background}"
             )

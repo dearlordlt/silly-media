@@ -55,7 +55,7 @@ async def generate_sprite(request: SpriteRequest):
         async with vram_manager.acquire_gpu(request.model) as model_instance:
             logger.info(
                 f"Sprite request: model={request.model}, "
-                f"prompt={request.prompt[:50]}..., "
+                f"prompt=****, "
                 f"gen_size={request.width}x{request.height}, "
                 f"output_size={request.output_size}, remove_bg={request.remove_background}"
             )

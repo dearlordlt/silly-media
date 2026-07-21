@@ -98,7 +98,7 @@ class QwenImageEditModel(BaseImg2ImgModel):
         logger.info(
             f"Editing image: {image.size[0]}x{image.size[1]} -> {width}x{height}, "
             f"steps={request.num_inference_steps}, cfg={request.true_cfg_scale}, "
-            f"use_lora={request.use_lora}, prompt={request.prompt[:50]}..."
+            f"use_lora={request.use_lora}, prompt=****"
         )
 
         # Build pipeline kwargs

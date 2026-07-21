@@ -39,6 +39,33 @@ class _QuietAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_QuietAccessFilter())
 
+# Free-text content fields that must never appear in logs (prompts stay private).
+_SENSITIVE_BODY_FIELDS = {"prompt", "negative_prompt", "text", "lyrics"}
+
+
+def _mask_sensitive(value):
+    """Recursively replace free-text content fields with **** for logging."""
+    if isinstance(value, dict):
+        return {
+            k: "****" if k in _SENSITIVE_BODY_FIELDS else _mask_sensitive(v)
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_sensitive(v) for v in value]
+    return value
+
+
+def _mask_error(error: dict) -> dict:
+    """Mask the offending input value in a validation error for logging."""
+    masked = dict(error)
+    if "input" in masked:
+        loc = masked.get("loc") or ()
+        if loc and loc[-1] in _SENSITIVE_BODY_FIELDS:
+            masked["input"] = "****"
+        else:
+            masked["input"] = _mask_sensitive(masked["input"])
+    return masked
+
 
 def handle_shutdown(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -242,12 +269,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     except Exception:
         body_text = "<failed to read request body>"
 
+    import json as _json
+
+    try:
+        log_body = _json.dumps(_mask_sensitive(_json.loads(body_text)))
+    except Exception:
+        log_body = f"<non-JSON body, {len(body_text)} chars>"
+
     logger.error(
         "Request validation failed: %s %s errors=%s body=%s",
         request.method,
         request.url.path,
-        exc.errors(),
-        body_text,
+        [_mask_error(e) for e in exc.errors()],
+        log_body,
     )
 
     safe_errors = []
@@ -417,7 +451,7 @@ async def generate_image(
     try:
         async with vram_manager.acquire_gpu(model) as model_instance:
             logger.info(
-                f"Generation request: model={model}, prompt={request.prompt[:50]}..., "
+                f"Generation request: model={model}, prompt=****, "
                 f"size={request.width}x{request.height}"
             )
 

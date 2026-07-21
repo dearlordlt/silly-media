@@ -142,7 +142,7 @@ async def generate_model3d(request: Model3DRequest, model: str = "hunyuan3d-2") 
         image = _decode_image(request.image)
     else:
         logger.info(
-            f"text->3D ({request.subject}): generating reference for: {request.text[:60]}..."
+            f"text->3D ({request.subject}): generating reference for: **** ({len(request.text)} chars)"
         )
         image = await _image_from_text(
             request.text, request.image_model, request.seed, request.subject

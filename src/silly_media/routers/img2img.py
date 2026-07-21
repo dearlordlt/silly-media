@@ -86,7 +86,7 @@ async def edit_image(
     try:
         async with vram_manager.acquire_gpu(model) as model_instance:
             logger.info(
-                f"Img2img request: model={model}, prompt={request.prompt[:50]}..."
+                f"Img2img request: model={model}, prompt=****"
             )
 
             # Setup progress tracking
@@ -167,7 +167,7 @@ async def edit_image_upload(
     try:
         async with vram_manager.acquire_gpu(model) as model_instance:
             logger.info(
-                f"Img2img request: model={model}, prompt={request.prompt[:50]}..."
+                f"Img2img request: model={model}, prompt=****"
             )
 
             # Setup progress tracking
