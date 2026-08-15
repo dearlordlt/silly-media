@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import torch
 from PIL import Image
 
+from ..utils import repo_cached
 from .base import BaseImageModel
 
 if TYPE_CHECKING:
@@ -53,6 +54,18 @@ class Krea2TurboModel(BaseImageModel):
 
         logger.info(f"Loading {self.display_name} with FP8 (E4M3) weight-only quantization...")
 
+        # Serve straight from the HF cache when the snapshot is already there. diffusers'
+        # shard loader calls snapshot_download(), which hits the network on *every* load
+        # even when nothing is missing — and since this repo is gated, an HF_TOKEN that has
+        # fallen off the authorized list turns that into a 403 the loader reports as
+        # "couldn't connect to huggingface.co". The failed lookup also rewrites refs/main to
+        # the latest upstream commit, which has no local snapshot, breaking later offline
+        # loads too. Skipping the lookup avoids both. Falls back to a normal (downloading)
+        # load when the repo isn't cached yet.
+        local_only = repo_cached(BASE_MODEL)
+        if local_only:
+            logger.info(f"{BASE_MODEL} found in local HF cache; loading offline")
+
         # Quantize the 12B transformer to FP8 weight-only as it loads. diffusers'
         # TorchAoConfig takes a torchao AOBaseConfig instance (not a string).
         quant_config = TorchAoConfig(Float8WeightOnlyConfig())
@@ -61,13 +74,16 @@ class Krea2TurboModel(BaseImageModel):
             subfolder="transformer",
             quantization_config=quant_config,
             torch_dtype=torch.bfloat16,
+            local_files_only=local_only,
         )
 
         # Build the Qwen3-VL text encoder ourselves so we can patch its config.
         # transformers 4.57.x doesn't migrate the new `rope_parameters` RoPE schema to the
         # legacy `rope_scaling` for Qwen3-VL's nested text_config, so the rotary embedding
         # crashes on `config.rope_scaling.get(...)`. Backfill rope_scaling first.
-        te_config = AutoConfig.from_pretrained(BASE_MODEL, subfolder="text_encoder")
+        te_config = AutoConfig.from_pretrained(
+            BASE_MODEL, subfolder="text_encoder", local_files_only=local_only
+        )
         for name in (None, "text_config", "vision_config"):
             cfg = te_config if name is None else getattr(te_config, name, None)
             if cfg is None:
@@ -80,6 +96,7 @@ class Krea2TurboModel(BaseImageModel):
             subfolder="text_encoder",
             config=te_config,
             torch_dtype=torch.bfloat16,
+            local_files_only=local_only,
         )
 
         # Build the tokenizer ourselves too. The repo only ships the fast `tokenizer.json`
@@ -91,6 +108,7 @@ class Krea2TurboModel(BaseImageModel):
             BASE_MODEL,
             subfolder="tokenizer",
             extra_special_tokens={},
+            local_files_only=local_only,
         )
 
         # The repo's model_index declares the slow `Qwen2Tokenizer`, but it ships only the fast
@@ -121,6 +139,7 @@ class Krea2TurboModel(BaseImageModel):
                 text_encoder=text_encoder,
                 tokenizer=tokenizer,
                 torch_dtype=torch.bfloat16,
+                local_files_only=local_only,
             )
         finally:
             if _orig_check is not None:

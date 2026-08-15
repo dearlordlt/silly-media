@@ -42,9 +42,14 @@ class VideoRegistry:
 # Import and register models after class definition to avoid circular imports
 def _register_models() -> None:
     """Register all video models."""
+    from ..utils import repo_cached
     from .hunyuan import HunyuanVideoModel
 
-    VideoRegistry.register("hunyuan-video", HunyuanVideoModel)
+    # The distilled T2V/I2V weights (~88GB) were dropped locally to reclaim disk, so
+    # only offer the model when at least one of them is cached — otherwise a single
+    # /video request would trigger a huge download. Re-download to bring it back.
+    if repo_cached(HunyuanVideoModel.model_id_t2v) or repo_cached(HunyuanVideoModel.model_id_i2v):
+        VideoRegistry.register("hunyuan-video", HunyuanVideoModel)
 
 
 _register_models()

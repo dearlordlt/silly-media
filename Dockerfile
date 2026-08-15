@@ -43,9 +43,13 @@ ENV MAX_JOBS=8
 # Install uv
 RUN pip3 install uv
 
-# Set up HuggingFace cache directories
+# Set up HuggingFace cache directories. TRANSFORMERS_CACHE is deprecated but still
+# honoured by some loaders, and it means the dir that *contains* the models--* trees —
+# i.e. the same thing as HF_HUB_CACHE ($HF_HOME/hub). Pointing it one level up at
+# HF_HOME made those loaders write a second copy at the top level, splitting models
+# across two layouts and duplicating ~17GB. Keep the two in agreement.
 ENV HF_HOME=/root/.cache/huggingface
-ENV TRANSFORMERS_CACHE=/root/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
 
 WORKDIR /app
 

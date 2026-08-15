@@ -1,5 +1,6 @@
 """Model registry and base classes for image generation models."""
 
+from ..utils import repo_cached
 from .base import BaseImageModel, ModelRegistry
 from .z_image import ZImageModel, ZImageTurboModel, ZImageTurboPMModel
 
@@ -25,14 +26,17 @@ try:
 except ImportError:
     pass  # GGUF support not available in this diffusers version
 
-# Ovis-Image requires a custom diffusers fork, try to register if available
+# Ovis-Image requires a custom diffusers fork, try to register if available.
+# Its weights were dropped locally to reclaim disk, so only offer it when they're
+# actually cached (re-download the repo to bring it back).
 try:
     from diffusers import OvisImagePipeline  # noqa: F401 - check if available
 
     from .ovis_image import OvisImageModel
 
-    ModelRegistry.register("ovis-image-7b", OvisImageModel)
-    __all__.append("OvisImageModel")
+    if repo_cached(OvisImageModel.model_id):
+        ModelRegistry.register("ovis-image-7b", OvisImageModel)
+        __all__.append("OvisImageModel")
 except ImportError:
     pass  # OvisImagePipeline not available in this diffusers version
 

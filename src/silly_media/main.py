@@ -434,7 +434,7 @@ async def list_aspect_ratios():
     },
 )
 async def generate_image(
-    model: str = Path(..., description="Model name (e.g., 'ovis-image-7b')"),
+    model: str = Path(..., description="Model name (e.g., 'z-image-turbo')"),
     request: GenerateRequest = ...,
 ):
     """Generate an image using the specified model."""

@@ -10,8 +10,12 @@ services:
     env_file:
       - .env
     environment:
+      # TRANSFORMERS_CACHE must point at the dir containing the models--* trees, which is
+      # $HF_HOME/hub — not HF_HOME itself. Pointing it one level up made some loaders write
+      # a second copy at the top level, splitting models across two layouts (~17GB wasted).
+      # Overrides the Dockerfile ENV so this applies without a full rebuild.
       - HF_HOME=/root/.cache/huggingface
-      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - NVIDIA_VISIBLE_DEVICES=all
@@ -37,8 +41,12 @@ services:
     env_file:
       - .env
     environment:
+      # TRANSFORMERS_CACHE must point at the dir containing the models--* trees, which is
+      # $HF_HOME/hub — not HF_HOME itself. Pointing it one level up made some loaders write
+      # a second copy at the top level, splitting models across two layouts (~17GB wasted).
+      # Overrides the Dockerfile ENV so this applies without a full rebuild.
       - HF_HOME=/root/.cache/huggingface
-      - TRANSFORMERS_CACHE=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - NVIDIA_VISIBLE_DEVICES=all
     runtime: nvidia

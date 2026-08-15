@@ -34,7 +34,7 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Z-Image Turbo   | `z-image-turbo`   | 9       | ~22GB | Default, bilingual text rendering, fast, stackable LoRAs† |
 | Z-Image Turbo PM | `z-image-turbo-pm` | 9      | ~22GB | PornMaster V3.5 NSFW fine-tune (local checkpoint in `data/checkpoints/`), honors `cfg_scale` (≤1.5 recommended), stackable LoRAs† |
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
-| Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | Requires custom diffusers fork               |
+| Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | **Not installed** — weights removed to reclaim disk. Requires custom diffusers fork; re-download `AIDC-AI/Ovis-Image-7B` to re-register |
 | Krea 2 Turbo    | `krea-2-turbo`    | 8       | ~13GB (≤768–896 base) | 12B MMDiT, FP8 weight-only, high quality, guidance off; gated (needs `HF_TOKEN`) |
 
 \* With `use_lora: true`, Qwen Image 2512 uses 6 steps instead of 50.
@@ -52,7 +52,12 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 | Model            | ID              | VRAM  | Notes                                      |
 | ---------------- | --------------- | ----- | ------------------------------------------ |
-| HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | T2V and I2V, 480p/720p, ~60-90s generation |
+| HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | **Not installed** — the ~88GB of distilled T2V/I2V weights were removed to reclaim disk. T2V and I2V, 480p/720p, ~60-90s generation. Re-download either `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v_distilled` or `…_i2v_step_distilled` to re-register |
+
+> Models are registered only when their weights are present in the local HF cache, so
+> `ovis-image-7b` and `hunyuan-video` currently don't appear in `/health` or `/models`
+> and their endpoints return 404. Nothing else is needed to restore them beyond
+> re-downloading the repo and restarting.
 
 ### Vision Models
 
@@ -106,9 +111,9 @@ Check API and model status.
 {
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
-  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b", "krea-2-turbo"],
+  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
-  "available_video_models": ["hunyuan-video"],
+  "available_video_models": [],
   "available_vision_models": ["qwen3-vl-8b"],
   "available_img2img_models": ["qwen-image-edit"],
   "available_llm_models": ["huihui-qwen3-4b"],
@@ -126,7 +131,7 @@ List available and loaded models by type.
 ```json
 {
   "image": {
-    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "ovis-image-7b", "krea-2-turbo"],
+    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo"],
     "loaded": ["z-image-turbo"]
   },
   "audio": {
@@ -134,7 +139,7 @@ List available and loaded models by type.
     "loaded": []
   },
   "video": {
-    "available": ["hunyuan-video"],
+    "available": [],
     "loaded": []
   },
   "vision": {
@@ -252,7 +257,7 @@ Generate an image using the specified model.
 - `z-image-turbo`: 9 steps, cfg_scale ignored (uses 0.0 internally)
 - `z-image-turbo-pm`: 9 steps, cfg_scale honored (default 0.0; author recommends up to 1.5 with negative prompts). Only registered when `data/checkpoints/z-image-turbo-pm.safetensors` exists.
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
-- `ovis-image-7b`: 50 steps, cfg_scale 5.0
+- `ovis-image-7b`: 50 steps, cfg_scale 5.0 (not installed — see model table)
 - `krea-2-turbo`: 8 steps, `cfg_scale` **and** `negative_prompt` ignored (guidance disabled — only the positive prompt is encoded). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.
 
 **Response**
@@ -556,7 +561,7 @@ Generate a non-pixel-art sprite from a text prompt.
 | Field                 | Type   | Required | Default         | Description                                                                     |
 | --------------------- | ------ | -------- | --------------- | ------------------------------------------------------------------------------- |
 | `prompt`              | string | Yes      | -               | Generation prompt, used **verbatim** (write your own framing)                   |
-| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `ovis-image-7b`, `krea-2-turbo`) |
+| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `krea-2-turbo`) |
 | `remove_background`   | bool   | No       | `true`          | Remove background via rembg → transparent cutout                                |
 | `output_size`         | int    | No       | `null`          | Longest-side target (8-2048), aspect preserved; omit to keep full resolution    |
 | `negative_prompt`     | string | No       | `""`            | Negative prompt                                                                 |
