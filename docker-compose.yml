@@ -21,7 +21,9 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
     runtime: nvidia
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4201/health"]
+      # curl isn't installed in the image, so the old curl-based probe always failed and
+      # the container sat permanently "unhealthy" despite serving fine. Use python3.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4201/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
