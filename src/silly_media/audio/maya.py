@@ -91,7 +91,7 @@ class MayaModel(BaseAudioModel):
 
         # Load model in BF16 for efficiency
         model_kwargs = {
-            "torch_dtype": torch.bfloat16,
+            "dtype": torch.bfloat16,  # transformers 5.x dropped torch_dtype= (silent fp32)
             "device_map": self._device,
             "trust_remote_code": True,
         }

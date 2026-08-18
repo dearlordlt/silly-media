@@ -78,6 +78,7 @@ class VRAMManager:
         "ace-step": 6.0,
         "ace-step-quality": 6.0,
         "hunyuan3d-2": 21.0,
+        "ltx-2.5": 20.0,  # GGUF Q4_K_M transformer + NF4 text encoder, model offload
     }
 
     def __new__(cls) -> "VRAMManager":

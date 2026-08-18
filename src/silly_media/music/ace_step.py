@@ -4,6 +4,7 @@ import gc
 import logging
 import random
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -16,6 +17,37 @@ logger = logging.getLogger(__name__)
 
 # ACE-Step 1.5 repo root inside the Docker container
 ACE_STEP_ROOT = "/app/ace-step-1.5"
+
+
+@contextmanager
+def _materialized_model_init():
+    """Build models on CPU instead of the meta device during from_pretrained.
+
+    transformers 5.x constructs model skeletons under torch.device("meta"), but
+    ACE-Step's remote-code audio tokenizer (vector_quantize_pytorch's ResidualFSQ)
+    calls .item() in __init__, which meta tensors can't do — transformers' built-in
+    meta_device_safe_creation_ops shim only covers torch.linspace, not torch.tensor.
+    Stripping the meta-device context materializes the skeleton for real (the weight
+    loader handles that fine; it's the DeepSpeed path) at the cost of a few GB of
+    transient RAM. vram_manager serializes loads, so the global patch can't leak
+    into a concurrent model load.
+    """
+    from transformers.modeling_utils import PreTrainedModel
+
+    orig = PreTrainedModel.get_init_context.__func__
+
+    def patched(cls, *args, **kwargs):
+        return [
+            ctx
+            for ctx in orig(cls, *args, **kwargs)
+            if not (isinstance(ctx, torch.device) and ctx.type == "meta")
+        ]
+
+    PreTrainedModel.get_init_context = classmethod(patched)
+    try:
+        yield
+    finally:
+        PreTrainedModel.get_init_context = classmethod(orig)
 
 
 class AceStepModel(BaseMusicModel):
@@ -48,10 +80,11 @@ class AceStepModel(BaseMusicModel):
         from acestep.handler import AceStepHandler
 
         self._dit_handler = AceStepHandler()
-        status, ok = self._dit_handler.initialize_service(
-            project_root=ACE_STEP_ROOT,
-            config_path=self.config_path,
-        )
+        with _materialized_model_init():
+            status, ok = self._dit_handler.initialize_service(
+                project_root=ACE_STEP_ROOT,
+                config_path=self.config_path,
+            )
         logger.info(f"ACE-Step init: {status} (ok={ok})")
 
         if not ok:

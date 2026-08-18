@@ -51,5 +51,20 @@ def _register_models() -> None:
     if repo_cached(HunyuanVideoModel.model_id_t2v) or repo_cached(HunyuanVideoModel.model_id_i2v):
         VideoRegistry.register("hunyuan-video", HunyuanVideoModel)
 
+    # LTX-2.5 needs a rebuilt image (diffusers main with the LTX2 pipelines +
+    # transformers >=5.5 for the Gemma 4 text encoder) AND downloaded weights
+    # (gated ~28GB base repo + 15.7GB GGUF) — see docs/api.md for the bootstrap
+    # command. Skip registration quietly when either is missing so the app still
+    # boots on an old image.
+    try:
+        from diffusers import LTX2ImageToVideoPipeline, LTX2Pipeline  # noqa: F401
+        from transformers.models import gemma4  # noqa: F401
+    except ImportError:
+        return
+    from .ltx25 import LTX25VideoModel
+
+    if LTX25VideoModel.weights_cached():
+        VideoRegistry.register("ltx-2.5", LTX25VideoModel)
+
 
 _register_models()

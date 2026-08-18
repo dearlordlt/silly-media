@@ -31,6 +31,25 @@ _jobs: dict[str, VideoStatusResponse] = {}
 _job_start_times: dict[str, float] = {}  # Track start times for elapsed calculation
 
 
+def _make_step_callback(job_id: str):
+    """Diffusers callback_on_step_end that mirrors denoise progress into _jobs.
+
+    Runs inside the asyncio.to_thread worker; mutating the pydantic model's fields
+    is GIL-safe. Models whose pipelines don't support callbacks just ignore it.
+    """
+
+    def _cb(pipe, step: int, timestep, callback_kwargs: dict) -> dict:
+        job = _jobs.get(job_id)
+        if job is not None:
+            total = getattr(pipe, "num_timesteps", None) or job.total_steps or 1
+            job.total_steps = total
+            job.current_step = step + 1
+            job.progress = min((step + 1) / total, 0.99)
+        return callback_kwargs
+
+    return _cb
+
+
 @router.get("/models", response_model=VideoModelsResponse)
 async def list_video_models() -> VideoModelsResponse:
     """List available video generation models."""
@@ -145,13 +164,10 @@ async def _run_t2v_job(job_id: str, model_name: str, request: T2VRequest) -> Non
     _job_start_times[job_id] = start_time
     _jobs[job_id].status = "processing"
 
-    # Note: HunyuanVideo15Pipeline doesn't support progress callbacks
-    # Elapsed time is calculated on status poll instead
-
     try:
         async with vram_manager.acquire_gpu(model_name) as model:
             output_path = await asyncio.to_thread(
-                model.generate_t2v, request, None
+                model.generate_t2v, request, _make_step_callback(job_id)
             )
 
         # Calculate duration
@@ -172,7 +188,7 @@ async def _run_t2v_job(job_id: str, model_name: str, request: T2VRequest) -> Non
         # Update job status
         _jobs[job_id].status = "completed"
         _jobs[job_id].progress = 1.0
-        _jobs[job_id].current_step = request.num_inference_steps
+        _jobs[job_id].current_step = _jobs[job_id].total_steps
         _jobs[job_id].video_url = f"/video/download/{job_id}"
         _jobs[job_id].thumbnail_url = f"/video/thumbnail/{job_id}"
         _jobs[job_id].elapsed_seconds = time.time() - start_time
@@ -192,13 +208,10 @@ async def _run_i2v_job(job_id: str, model_name: str, request: I2VRequest) -> Non
     _job_start_times[job_id] = start_time
     _jobs[job_id].status = "processing"
 
-    # Note: HunyuanVideo15ImageToVideoPipeline doesn't support progress callbacks
-    # Progress will show as "processing" until complete
-
     try:
         async with vram_manager.acquire_gpu(model_name) as model:
             output_path = await asyncio.to_thread(
-                model.generate_i2v, request, None
+                model.generate_i2v, request, _make_step_callback(job_id)
             )
 
         # Calculate duration
@@ -219,7 +232,7 @@ async def _run_i2v_job(job_id: str, model_name: str, request: I2VRequest) -> Non
         # Update job status
         _jobs[job_id].status = "completed"
         _jobs[job_id].progress = 1.0
-        _jobs[job_id].current_step = request.num_inference_steps
+        _jobs[job_id].current_step = _jobs[job_id].total_steps
         _jobs[job_id].video_url = f"/video/download/{job_id}"
         _jobs[job_id].thumbnail_url = f"/video/thumbnail/{job_id}"
         _jobs[job_id].elapsed_seconds = time.time() - start_time

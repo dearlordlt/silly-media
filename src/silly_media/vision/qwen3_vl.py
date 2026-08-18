@@ -36,7 +36,7 @@ class Qwen3VLModel(BaseVisionModel):
 
         self._model = Qwen3VLForConditionalGeneration.from_pretrained(
             self.model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,  # transformers 5.x dropped torch_dtype= (silent fp32)
             device_map="auto",
         )
         self._processor = AutoProcessor.from_pretrained(self.model_id)

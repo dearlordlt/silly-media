@@ -417,20 +417,24 @@ def _poll(c: httpx.Client, status_path: str, max_wait: float) -> dict:
 def generate_video(
     prompt: str,
     image_path: Optional[str] = None,
-    model: str = "hunyuan-video",
+    model: str = "ltx-2.5",
     resolution: str = "480p",
     aspect_ratio: str = "16:9",
-    num_frames: int = 45,
+    num_frames: int = 121,
     num_inference_steps: int = 6,
     guidance_scale: float = 1.0,
     seed: int = -1,
     fps: int = 24,
+    audio: bool = True,
     max_wait_seconds: float = 600.0,
 ) -> str:
     """Text-to-video, or image-to-video if image_path (absolute path) is given.
-    Async: submits a job and blocks while polling (~60-90s/clip). On completion
-    downloads the MP4 (+thumbnail) and returns paths. If it outruns max_wait_seconds,
-    returns the job_id — re-check with video_status(job_id)."""
+    ltx-2.5 generates synchronized audio in the MP4 (audio=False for a silent clip);
+    its step count is fixed (num_inference_steps ignored) and num_frames snaps to
+    8k+1 (121 ≈ 5s at 24fps; clips over ~8s at 480p / ~3s at 720p are shortened to
+    fit VRAM). Async: submits a job and blocks while polling. On completion
+    downloads the MP4 (+thumbnail) and returns paths. If it outruns
+    max_wait_seconds, returns the job_id — re-check with video_status(job_id)."""
     body = _drop_none(
         {
             "prompt": prompt,
@@ -441,6 +445,7 @@ def generate_video(
             "guidance_scale": guidance_scale,
             "seed": seed,
             "fps": fps,
+            "audio": audio,
         }
     )
     with _client() as c:
@@ -538,11 +543,15 @@ def generate_music(
 
 
 def _download_music(c: httpx.Client, job_id: str, st: dict) -> str:
+    # The status payload's download_url carries the model's internal audio-dir id,
+    # which differs from the router job_id — don't rebuild the URL from job_id.
     audios = st.get("audios") or []
-    n = len(audios) if audios else 1
+    urls = [a.get("download_url") for a in audios if isinstance(a, dict) and a.get("download_url")]
+    if not urls:
+        urls = [f"/music/download/{job_id}/{i}" for i in range(len(audios) or 1)]
     saved = []
-    for i in range(n):
-        a = c.get(f"/music/download/{job_id}/{i}")
+    for url in urls:
+        a = c.get(url)
         if a.status_code == 200:
             ap = _save(a.content, "music", "wav")
             saved.append(str(ap))

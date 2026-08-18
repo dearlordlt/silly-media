@@ -50,7 +50,7 @@ class Krea2TurboModel(BaseImageModel):
         from diffusers import Krea2Pipeline, TorchAoConfig
         from diffusers.models import Krea2Transformer2DModel
         from torchao.quantization import Float8WeightOnlyConfig
-        from transformers import AutoConfig, Qwen2TokenizerFast, Qwen3VLModel
+        from transformers import AutoConfig, Qwen3VLModel
 
         logger.info(f"Loading {self.display_name} with FP8 (E4M3) weight-only quantization...")
 
@@ -89,13 +89,18 @@ class Krea2TurboModel(BaseImageModel):
             if cfg is None:
                 continue
             rope_params = getattr(cfg, "rope_parameters", None)
-            if rope_params and getattr(cfg, "rope_scaling", None) is None:
-                cfg.rope_scaling = dict(rope_params)
+            try:
+                if rope_params and getattr(cfg, "rope_scaling", None) is None:
+                    cfg.rope_scaling = dict(rope_params)
+            except Exception as exc:
+                # transformers 5.x may expose rope_scaling as a managed alias of
+                # rope_parameters; then the backfill is unnecessary anyway.
+                logger.warning(f"Skipping rope_scaling backfill on {name or 'root'}: {exc}")
         text_encoder = Qwen3VLModel.from_pretrained(
             BASE_MODEL,
             subfolder="text_encoder",
             config=te_config,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             local_files_only=local_only,
         )
 
@@ -104,12 +109,26 @@ class Krea2TurboModel(BaseImageModel):
         # as a list, which transformers 4.57.x's slow Qwen2Tokenizer can't consume. Force
         # the fast tokenizer and drop the malformed field (the special tokens still come
         # from tokenizer.json, so nothing is lost).
-        tokenizer = Qwen2TokenizerFast.from_pretrained(
-            BASE_MODEL,
-            subfolder="tokenizer",
-            extra_special_tokens={},
-            local_files_only=local_only,
-        )
+        try:
+            from transformers import Qwen2TokenizerFast
+
+            tokenizer = Qwen2TokenizerFast.from_pretrained(
+                BASE_MODEL,
+                subfolder="tokenizer",
+                extra_special_tokens={},
+                local_files_only=local_only,
+            )
+        except (ImportError, TypeError, ValueError) as exc:
+            # transformers 5.x tokenizer consolidation may drop the class or fix the
+            # malformed-list handling that made the explicit fast class necessary.
+            logger.warning(f"Qwen2TokenizerFast workaround failed ({exc}); trying AutoTokenizer")
+            from transformers import AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                BASE_MODEL,
+                subfolder="tokenizer",
+                local_files_only=local_only,
+            )
 
         # The repo's model_index declares the slow `Qwen2Tokenizer`, but it ships only the fast
         # tokenizer files — so diffusers' class check rejects our (correct, functional) fast

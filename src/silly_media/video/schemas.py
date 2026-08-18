@@ -38,11 +38,11 @@ class VideoGenerateRequest(BaseModel):
     ] = VideoAspectRatio.LANDSCAPE_16_9
     num_frames: Annotated[
         int,
-        Field(default=45, ge=25, le=85, description="Number of frames (25-85, ~1-3.5 seconds at 24fps)"),
+        Field(default=45, ge=9, le=241, description="Number of frames (ltx-2.5 snaps to 8k+1; 121 ≈ 5s at 24fps)"),
     ] = 45
     num_inference_steps: Annotated[
         int,
-        Field(default=6, ge=1, le=100, description="Number of inference steps (6 for distilled, 50 for standard)"),
+        Field(default=6, ge=1, le=100, description="Number of inference steps (ignored by ltx-2.5: fixed 8-step distilled schedule)"),
     ] = 6
     guidance_scale: Annotated[
         float,
@@ -56,6 +56,10 @@ class VideoGenerateRequest(BaseModel):
         int,
         Field(default=24, ge=12, le=30, description="Output video FPS"),
     ] = 24
+    audio: Annotated[
+        bool,
+        Field(default=True, description="Include the generated audio track in the MP4 (ltx-2.5; audio is generated either way, this only controls muxing)"),
+    ] = True
 
 
 class T2VRequest(VideoGenerateRequest):

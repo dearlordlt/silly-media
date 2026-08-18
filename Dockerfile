@@ -64,12 +64,28 @@ COPY src/ ./src/
 # Install the package
 RUN uv pip install -e .
 
+# coqui-tts (<=0.27.5) imports transformers' private isin_mps_friendly, removed in
+# transformers 5. torch.isin is the drop-in replacement (their own TODO says so).
+RUN sed -i 's/from transformers.pytorch_utils import isin_mps_friendly as isin/from torch import isin/' \
+    /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/tortoise/autoregressive.py && \
+    grep -n 'from torch import isin' /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/tortoise/autoregressive.py
+
 # Install ACE-Step 1.5 from GitHub with --no-deps (runtime deps in pyproject.toml)
 # Patch Python version requirement (1.5 pins ==3.11.* but works fine with 3.10)
 RUN git clone --depth 1 https://github.com/ace-step/ACE-Step-1.5.git /app/ace-step-1.5 && \
     cd /app/ace-step-1.5 && \
     sed -i 's/requires-python = "[^"]*"/requires-python = ">=3.10"/' pyproject.toml && \
     uv pip install -e . --no-deps
+
+# transformers 5.x + ACE-Step: device_map="cpu" makes the load materialize on CPU
+# before the handler's .to(device). Not sufficient on its own — transformers 5
+# still builds the skeleton on the meta device, which the remote-code audio
+# tokenizer can't survive; the real fix is the _materialized_model_init() wrapper
+# in src/silly_media/music/ace_step.py. This sed is the tested companion config.
+# The grep fails the build loudly if upstream refactors the call and the sed no-ops.
+RUN sed -i 's/attn_implementation=candidate,/attn_implementation=candidate,\n                    device_map="cpu",/' \
+    /app/ace-step-1.5/acestep/core/generation/handler/init_service_loader.py && \
+    grep -n 'device_map="cpu"' /app/ace-step-1.5/acestep/core/generation/handler/init_service_loader.py
 
 # Hunyuan3D-2 (hy3dgen): image->3D shape + texture. Runtime deps live in
 # pyproject.toml; hy3dgen itself is used from PYTHONPATH. Compile its two CUDA

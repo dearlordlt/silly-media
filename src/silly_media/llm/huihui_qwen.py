@@ -38,7 +38,7 @@ class HuihuiQwen3Model(BaseLLMModel):
         self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self._model = AutoModelForCausalLM.from_pretrained(
             self.model_id,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,  # transformers 5.x dropped torch_dtype= (silent fp32)
             device_map="auto",
             attn_implementation="eager",  # Avoid potential flash attention dtype issues
         )

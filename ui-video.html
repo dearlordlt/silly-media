@@ -504,7 +504,7 @@
       <!-- Model Selection -->
       <label for="modelSelect">Video Model</label>
       <select id="modelSelect">
-        <option value="hunyuan-video">HunyuanVideo 1.5</option>
+        <option value="ltx-2.5">LTX-2.5 Distilled</option>
       </select>
 
       <!-- Image Upload (I2V only) -->
@@ -531,7 +531,7 @@
         <div>
           <label for="resolutionSelect">Resolution</label>
           <select id="resolutionSelect">
-            <option value="480p">480p (faster)</option>
+            <option value="480p">480p (fast)</option>
             <option value="720p">720p (higher quality)</option>
           </select>
         </div>
@@ -542,48 +542,26 @@
             <option value="9:16">9:16 (Portrait)</option>
             <option value="1:1">1:1 (Square)</option>
           </select>
+          <div id="aspectRatioHint" style="display: none; font-size: 0.75rem; color: var(--text-dim); margin-top: -8px; margin-bottom: 12px;">Taken from the source image</div>
         </div>
       </div>
 
-      <!-- Frames -->
+      <!-- Length -->
       <div class="range-group">
         <div class="range-header">
-          <label for="framesRange">Frames</label>
-          <span class="range-value" id="framesValue">45</span>
+          <label for="lengthRange">Length</label>
+          <span class="range-value" id="lengthValue">5s</span>
         </div>
-        <input type="range" id="framesRange" min="25" max="85" step="4" value="45">
-        <div class="duration-display" id="durationDisplay">~1.9 seconds at 24fps</div>
-        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">Max 85 frames (~3.5s at 24fps) - VRAM limitation</div>
+        <input type="range" id="lengthRange" min="1" max="10" step="1" value="5">
+        <div class="duration-display" id="lengthDetail">121 frames at 24fps</div>
       </div>
 
-      <!-- Inference Steps -->
-      <div class="range-group">
-        <div class="range-header">
-          <label for="stepsRange">Inference Steps</label>
-          <span class="range-value" id="stepsValue">6</span>
-        </div>
-        <input type="range" id="stepsRange" min="1" max="100" step="1" value="6">
-        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">6 steps for distilled model, 50 for standard</div>
-      </div>
-
-      <!-- Guidance Scale -->
-      <div class="range-group">
-        <div class="range-header">
-          <label for="guidanceRange">Guidance Scale</label>
-          <span class="range-value" id="guidanceValue">1.0</span>
-        </div>
-        <input type="range" id="guidanceRange" min="1.0" max="15.0" step="0.5" value="1.0">
-        <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px;">1.0 for distilled, 6.0 for standard</div>
-      </div>
-
-      <!-- FPS -->
-      <div class="range-group">
-        <div class="range-header">
-          <label for="fpsRange">FPS</label>
-          <span class="range-value" id="fpsValue">24</span>
-        </div>
-        <input type="range" id="fpsRange" min="12" max="30" step="1" value="24">
-      </div>
+      <!-- Audio -->
+      <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+        <input type="checkbox" id="audioToggle" checked style="width: auto; margin: 0; accent-color: var(--accent);">
+        Audio track
+      </label>
+      <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 2px; margin-bottom: 12px;">Synchronized sound generated with the video</div>
 
       <!-- Seed -->
       <label for="seedInput">Seed</label>
@@ -660,7 +638,7 @@
 
     // State
     let currentMode = 't2v';
-    let selectedModel = 'hunyuan-video';
+    let selectedModel = 'ltx-2.5';
     let uploadedImage = null; // Base64 encoded
     let currentJobId = null;
     let pollInterval = null;
@@ -676,16 +654,24 @@
     const promptInput = document.getElementById('promptInput');
     const resolutionSelect = document.getElementById('resolutionSelect');
     const aspectRatioSelect = document.getElementById('aspectRatioSelect');
-    const framesRange = document.getElementById('framesRange');
-    const framesValue = document.getElementById('framesValue');
-    const durationDisplay = document.getElementById('durationDisplay');
-    const stepsRange = document.getElementById('stepsRange');
-    const stepsValue = document.getElementById('stepsValue');
-    const guidanceRange = document.getElementById('guidanceRange');
-    const guidanceValue = document.getElementById('guidanceValue');
-    const fpsRange = document.getElementById('fpsRange');
-    const fpsValue = document.getElementById('fpsValue');
+    const aspectRatioHint = document.getElementById('aspectRatioHint');
+    const lengthRange = document.getElementById('lengthRange');
+    const lengthValue = document.getElementById('lengthValue');
+    const lengthDetail = document.getElementById('lengthDetail');
+    const audioToggle = document.getElementById('audioToggle');
     const seedInput = document.getElementById('seedInput');
+
+    // ltx-2.5 runs a fixed distilled schedule (8 steps, guidance 1.0) — steps and
+    // guidance aren't user-facing. FPS is fixed; length in seconds is the control.
+    const FIXED_FPS = 24;
+    const FIXED_STEPS = 8;
+    let lastAspectRatio = '16:9'; // remembered while i2v shows "from source image"
+
+    function framesForSeconds(sec) {
+      // Same 8k+1 snapping the backend applies, so the shown frame count is exact
+      const n = Math.round(sec * FIXED_FPS);
+      return Math.max(9, Math.floor((n - 1) / 8) * 8 + 1);
+    }
     const generateBtn = document.getElementById('generateBtn');
     const status = document.getElementById('status');
     const statusDot = document.getElementById('statusDot');
@@ -726,11 +712,9 @@
         model: modelSelect.value,
         prompt: promptInput.value,
         resolution: resolutionSelect.value,
-        aspectRatio: aspectRatioSelect.value,
-        frames: framesRange.value,
-        steps: stepsRange.value,
-        guidance: guidanceRange.value,
-        fps: fpsRange.value,
+        aspectRatio: lastAspectRatio,
+        lengthSec: lengthRange.value,
+        audio: audioToggle.checked,
         seed: seedInput.value
       };
       localStorage.setItem('video_settings', JSON.stringify(settings));
@@ -742,33 +726,19 @@
         if (!saved) return;
         const settings = JSON.parse(saved);
 
-        if (settings.mode) {
-          currentMode = settings.mode;
-          updateModeUI();
-        }
         if (settings.model) modelSelect.value = settings.model;
         if (settings.prompt) promptInput.value = settings.prompt;
         if (settings.resolution) resolutionSelect.value = settings.resolution;
-        if (settings.aspectRatio) aspectRatioSelect.value = settings.aspectRatio;
-        if (settings.frames) {
-          framesRange.value = settings.frames;
-          framesValue.textContent = settings.frames;
-          updateDurationDisplay();
+        if (settings.aspectRatio) {
+          lastAspectRatio = settings.aspectRatio;
+          aspectRatioSelect.value = settings.aspectRatio;
         }
-        if (settings.steps) {
-          stepsRange.value = settings.steps;
-          stepsValue.textContent = settings.steps;
-        }
-        if (settings.guidance) {
-          guidanceRange.value = settings.guidance;
-          guidanceValue.textContent = settings.guidance;
-        }
-        if (settings.fps) {
-          fpsRange.value = settings.fps;
-          fpsValue.textContent = settings.fps;
-          updateDurationDisplay();
-        }
+        if (settings.lengthSec) lengthRange.value = settings.lengthSec;
+        if (typeof settings.audio === 'boolean') audioToggle.checked = settings.audio;
         if (settings.seed) seedInput.value = settings.seed;
+        if (settings.mode) currentMode = settings.mode;
+        updateModeUI();
+        updateLengthDisplay();
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -794,28 +764,21 @@
       promptInput.addEventListener('input', saveSettings);
 
       // Resolution & Aspect Ratio
-      resolutionSelect.addEventListener('change', saveSettings);
-      aspectRatioSelect.addEventListener('change', saveSettings);
+      resolutionSelect.addEventListener('change', () => {
+        updateLengthDisplay();
+        saveSettings();
+      });
+      aspectRatioSelect.addEventListener('change', () => {
+        if (currentMode !== 'i2v') lastAspectRatio = aspectRatioSelect.value;
+        saveSettings();
+      });
 
-      // Range sliders
-      framesRange.addEventListener('input', () => {
-        framesValue.textContent = framesRange.value;
-        updateDurationDisplay();
+      // Length slider
+      lengthRange.addEventListener('input', () => {
+        updateLengthDisplay();
         saveSettings();
       });
-      stepsRange.addEventListener('input', () => {
-        stepsValue.textContent = stepsRange.value;
-        saveSettings();
-      });
-      guidanceRange.addEventListener('input', () => {
-        guidanceValue.textContent = guidanceRange.value;
-        saveSettings();
-      });
-      fpsRange.addEventListener('input', () => {
-        fpsValue.textContent = fpsRange.value;
-        updateDurationDisplay();
-        saveSettings();
-      });
+      audioToggle.addEventListener('change', saveSettings);
       seedInput.addEventListener('change', saveSettings);
 
       // Generate button
@@ -869,13 +832,36 @@
 
       // Show/hide image section
       imageSection.style.display = currentMode === 'i2v' ? 'block' : 'none';
+
+      // In i2v the aspect ratio comes from the source image (the backend keeps the
+      // image's own proportions) — show that instead of a misleading choice.
+      if (currentMode === 'i2v') {
+        if (!aspectRatioSelect.querySelector('option[value="source"]')) {
+          const opt = document.createElement('option');
+          opt.value = 'source';
+          opt.textContent = 'From source image';
+          aspectRatioSelect.prepend(opt);
+        }
+        aspectRatioSelect.value = 'source';
+        aspectRatioSelect.disabled = true;
+        aspectRatioHint.style.display = 'block';
+      } else {
+        aspectRatioSelect.disabled = false;
+        aspectRatioSelect.querySelector('option[value="source"]')?.remove();
+        aspectRatioSelect.value = lastAspectRatio;
+        aspectRatioHint.style.display = 'none';
+      }
     }
 
-    function updateDurationDisplay() {
-      const frames = parseInt(framesRange.value);
-      const fps = parseInt(fpsRange.value);
-      const duration = (frames / fps).toFixed(1);
-      durationDisplay.textContent = `~${duration} seconds at ${fps}fps`;
+    function updateLengthDisplay() {
+      const sec = parseFloat(lengthRange.value);
+      lengthValue.textContent = `${sec}s`;
+      let detail = `${framesForSeconds(sec)} frames at ${FIXED_FPS}fps`;
+      // 720p uses ~2.4x the VRAM per frame; the backend shortens clips over ~4.7s
+      if (resolutionSelect.value === '720p' && sec > 4) {
+        detail += ' — shortened to ~5s at 720p (VRAM limit)';
+      }
+      lengthDetail.textContent = detail;
     }
 
     function randomizeSeed() {
@@ -966,11 +952,12 @@
       const requestBody = {
         prompt,
         resolution: resolutionSelect.value,
-        aspect_ratio: aspectRatioSelect.value,
-        num_frames: parseInt(framesRange.value),
-        num_inference_steps: parseInt(stepsRange.value),
-        guidance_scale: parseFloat(guidanceRange.value),
-        fps: parseInt(fpsRange.value),
+        // For i2v the backend derives the aspect ratio from the source image;
+        // the field still needs a valid enum value.
+        aspect_ratio: currentMode === 'i2v' ? lastAspectRatio : aspectRatioSelect.value,
+        num_frames: framesForSeconds(parseFloat(lengthRange.value)),
+        fps: FIXED_FPS,
+        audio: audioToggle.checked,
         seed: parseInt(seedInput.value)
       };
 
@@ -1014,7 +1001,7 @@
       progressSection.style.display = 'block';
       progressFill.style.width = '0%';
       progressPercent.textContent = '0%';
-      progressSteps.textContent = `Step 0 / ${stepsRange.value}`;
+      progressSteps.textContent = `Step 0 / ${FIXED_STEPS}`;
       progressTime.textContent = '0:00';
       progressStatus.textContent = 'Queued...';
       progressStatus.className = 'progress-status queued';
@@ -1047,7 +1034,7 @@
     function updateProgress(data) {
       const progress = data.progress || 0;
       const currentStep = data.current_step || 0;
-      const totalSteps = data.total_steps || parseInt(stepsRange.value);
+      const totalSteps = data.total_steps || FIXED_STEPS;
       const elapsed = data.elapsed_seconds || 0;
 
       progressFill.style.width = `${progress * 100}%`;
@@ -1090,9 +1077,9 @@
         thumbnailUrl,
         prompt: promptInput.value,
         resolution: resolutionSelect.value,
-        aspectRatio: aspectRatioSelect.value,
-        frames: framesRange.value,
-        fps: fpsRange.value,
+        aspectRatio: currentMode === 'i2v' ? 'from source' : aspectRatioSelect.value,
+        frames: framesForSeconds(parseFloat(lengthRange.value)),
+        fps: FIXED_FPS,
         elapsed: data.elapsed_seconds
       };
 

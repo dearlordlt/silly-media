@@ -13,7 +13,7 @@ Silly Media provides the following capabilities:
 - **Sprite Generation**: Hand-painted / realistic game sprites with transparent cutout (non-pixel-art)
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
-- **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) using HunyuanVideo
+- **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) with synchronized audio using LTX-2.5
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
 - **LLM Text Generation**: Text completion and chat using large language models
 - **Music Generation**: Text-to-music using ACE-Step 1.5 with lyrics, genre tags, and vocal support
@@ -50,9 +50,23 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 
 ### Video Models
 
-| Model            | ID              | VRAM  | Notes                                      |
-| ---------------- | --------------- | ----- | ------------------------------------------ |
+| Model               | ID              | VRAM  | Notes                                      |
+| ------------------- | --------------- | ----- | ------------------------------------------ |
+| LTX-2.5 Distilled   | `ltx-2.5`       | ~20GB | T2V and I2V with **synchronized audio** in the MP4. GGUF Q5_K_M transformer (`Abiray/LTX-2.5-Distilled-GGUF`) + NF4 Gemma 4 text encoder from the gated `Lightricks/LTX-2.5-Diffusers` base repo (accept its license on HF first). Fixed 8-step distilled schedule (`num_inference_steps` and `guidance_scale` are ignored); `num_frames` snaps to 8k+1, 121 ≈ 5s at 24fps. ~40-90s per clip (warm). Clips are auto-shortened to a VRAM token budget: full 10s (241 frames) at 480p, ~4.7s at 720p |
 | HunyuanVideo 1.5 | `hunyuan-video` | ~16GB | **Not installed** — the ~88GB of distilled T2V/I2V weights were removed to reclaim disk. T2V and I2V, 480p/720p, ~60-90s generation. Re-download either `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v_distilled` or `…_i2v_step_distilled` to re-register |
+
+To bootstrap the `ltx-2.5` weights (one-off, ~55GB total; skips the ~124GB of
+unused bf16/full transformer shards, latent upsampler, and distillation LoRA):
+
+```bash
+docker exec -i silly-media-silly-media-1 python -c "
+from huggingface_hub import hf_hub_download, snapshot_download
+hf_hub_download('Abiray/LTX-2.5-Distilled-GGUF', 'LTX-2.5-Distilled-Q5_K_M.gguf')
+snapshot_download('Lightricks/LTX-2.5-Diffusers', ignore_patterns=[
+    'transformer_full/*', 'transformer/*.safetensors',
+    'latent_upsampler/*', 'ltx-2.5-*.safetensors'])
+"
+```
 
 > Models are registered only when their weights are present in the local HF cache, so
 > `ovis-image-7b` and `hunyuan-video` currently don't appear in `/health` or `/models`
@@ -113,7 +127,7 @@ Check API and model status.
   "models_loaded": ["z-image-turbo"],
   "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
-  "available_video_models": [],
+  "available_video_models": ["ltx-2.5"],
   "available_vision_models": ["qwen3-vl-8b"],
   "available_img2img_models": ["qwen-image-edit"],
   "available_llm_models": ["huihui-qwen3-4b"],
@@ -139,7 +153,7 @@ List available and loaded models by type.
     "loaded": []
   },
   "video": {
-    "available": [],
+    "available": ["ltx-2.5"],
     "loaded": []
   },
   "vision": {
@@ -1378,7 +1392,9 @@ Video generation supports two modes:
 - **Text-to-Video (T2V)**: Generate video from a text prompt
 - **Image-to-Video (I2V)**: Animate a reference image based on a text prompt
 
-Generation is **asynchronous** - you start a job and poll for completion (~60-90 seconds on RTX 4090).
+Generation is **asynchronous** - you start a job and poll for completion (~50-105 seconds on RTX 4090 with `ltx-2.5`, depending on clip length and whether the model is already loaded).
+
+With `ltx-2.5` the output MP4 also contains a synchronized 48kHz AAC audio track, and clips are auto-shortened to a VRAM token budget (full 10s / 241 frames at 480p, ~4.7s at 720p) — asking for more doesn't fail, it just gets clamped with a warning in the logs.
 
 ### Video Parameters
 
@@ -1387,11 +1403,12 @@ Generation is **asynchronous** - you start a job and poll for completion (~60-90
 | `prompt`              | string | required | 1-2000 chars          | Text description of video         |
 | `resolution`          | enum   | `"480p"` | `480p`, `720p`        | Output resolution                 |
 | `aspect_ratio`        | enum   | `"16:9"` | `16:9`, `9:16`, `1:1` | Video aspect ratio                |
-| `num_frames`          | int    | `45`     | 25-85                 | Number of frames (~1-3.5s at 24fps) |
-| `num_inference_steps` | int    | `6`      | 1-100                 | Quality steps (6 for distilled, 50 for standard) |
-| `guidance_scale`      | float  | `1.0`    | 1.0-15.0              | Prompt adherence (1.0 for distilled, 6.0 for standard) |
+| `num_frames`          | int    | `45`     | 9-241                 | Number of frames (`ltx-2.5` snaps to 8k+1; 121 ≈ 5s at 24fps) |
+| `num_inference_steps` | int    | `6`      | 1-100                 | Quality steps (ignored by `ltx-2.5`: fixed 8-step distilled schedule) |
+| `guidance_scale`      | float  | `1.0`    | 1.0-15.0              | Prompt adherence (ignored by `ltx-2.5`: distilled, guidance disabled) |
 | `seed`                | int    | `-1`     | -1 or 0+              | Random seed (-1 = random)         |
 | `fps`                 | int    | `24`     | 12-30                 | Output video FPS                  |
+| `audio`               | bool   | `true`   | -                     | Include the generated audio track in the MP4 (`ltx-2.5`; audio is generated either way, this only skips muxing — no GPU savings) |
 
 **I2V-specific parameters:**
 
@@ -1411,12 +1428,12 @@ List available video generation models.
 {
   "models": [
     {
-      "id": "hunyuan-video",
-      "name": "HunyuanVideo 1.5",
+      "id": "ltx-2.5",
+      "name": "LTX-2.5 Distilled (GGUF)",
       "loaded": false,
       "supports_t2v": true,
       "supports_i2v": true,
-      "estimated_vram_gb": 16.0
+      "estimated_vram_gb": 20.0
     }
   ]
 }
@@ -1429,7 +1446,7 @@ Start text-to-video generation.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model ID (e.g., `hunyuan-video`) |
+| `model` | string | Model ID (e.g., `ltx-2.5`) |
 
 **Request Body**
 
@@ -1463,7 +1480,7 @@ Start image-to-video generation.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model ID (e.g., `hunyuan-video`) |
+| `model` | string | Model ID (e.g., `ltx-2.5`) |
 
 **Request Body**
 
@@ -1615,11 +1632,11 @@ Get list of generated videos.
     {
       "id": "abc12345",
       "prompt": "A red panda eating bamboo",
-      "model": "hunyuan-video",
+      "model": "ltx-2.5",
       "resolution": "480p",
       "aspect_ratio": "16:9",
-      "num_frames": 61,
-      "duration_seconds": 2.54,
+      "num_frames": 121,
+      "duration_seconds": 5.04,
       "created_at": "2024-01-15T10:30:00Z",
       "thumbnail_url": "/video/thumbnail/abc12345"
     }
@@ -2511,13 +2528,13 @@ print(response.json())
 response = requests.get("http://localhost:4201/tts/maya/emotion-tags")
 print(response.json()["tags"])
 
-# Video generation (T2V)
+# Video generation (T2V) - ltx-2.5 output includes synchronized audio
 response = requests.post(
-    "http://localhost:4201/video/t2v/hunyuan-video",
+    "http://localhost:4201/video/t2v/ltx-2.5",
     json={
         "prompt": "A red panda eating bamboo in a bamboo forest",
         "resolution": "480p",
-        "num_frames": 45,
+        "num_frames": 121,  # ~5s at 24fps; snapped to 8k+1
     },
 )
 job_id = response.json()["job_id"]
@@ -2547,13 +2564,13 @@ if status["status"] == "completed":
 #### Text-to-Video
 
 ```bash
-# Start T2V generation
-curl -X POST http://localhost:4201/video/t2v/hunyuan-video \
+# Start T2V generation (ltx-2.5 output includes synchronized audio)
+curl -X POST http://localhost:4201/video/t2v/ltx-2.5 \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A red panda eating bamboo in a bamboo forest",
     "resolution": "480p",
-    "num_frames": 45
+    "num_frames": 121
   }'
 
 # Check status (replace JOB_ID with actual job ID)
@@ -2569,14 +2586,14 @@ curl http://localhost:4201/video/download/JOB_ID -o video.mp4
 # Encode image to base64
 IMAGE_B64=$(base64 -w 0 input_image.png)
 
-# Start I2V generation
-curl -X POST http://localhost:4201/video/i2v/hunyuan-video \
+# Start I2V generation (aspect ratio comes from the source image)
+curl -X POST http://localhost:4201/video/i2v/ltx-2.5 \
   -H "Content-Type: application/json" \
   -d "{
     \"prompt\": \"The panda starts eating, head moving slowly\",
     \"image\": \"$IMAGE_B64\",
     \"resolution\": \"480p\",
-    \"num_frames\": 45
+    \"num_frames\": 121
   }"
 ```
 
