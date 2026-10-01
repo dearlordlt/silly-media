@@ -923,6 +923,12 @@
             <div class="preset-chips" id="poseChips"></div>
           </div>
 
+          <!-- Gaze chips -->
+          <div class="preset-section">
+            <h4>Gaze <button class="btn-secondary btn-small" onclick="toggleAllGazes()">All</button></h4>
+            <div class="preset-chips" id="gazeChips"></div>
+          </div>
+
           <!-- Composition chips -->
           <div class="preset-section">
             <h4>Composition <button class="btn-secondary btn-small" onclick="toggleAllCompositions()">All</button></h4>
@@ -1176,6 +1182,21 @@
       { id: 'desperate', label: 'Desperate', prompt: 'Make the person look desperate and anxious' },
     ];
 
+    const EDIT_GAZES = [
+      { id: 'camera', label: 'At Camera', prompt: 'Looking directly at the camera, making eye contact with the viewer' },
+      { id: 'over-shoulder', label: 'Over Shoulder', prompt: 'Looking back over her shoulder at the camera' },
+      { id: 'look-back', label: 'Looking Back', prompt: 'Turning her head to look back behind her' },
+      { id: 'away', label: 'Looking Away', prompt: 'Looking away from the camera to the side' },
+      { id: 'side-glance', label: 'Side Glance', prompt: 'Glancing sideways at the camera from the corner of her eyes' },
+      { id: 'up-at-camera', label: 'Up at Camera', prompt: 'Looking up at the camera with raised eyes, head slightly lowered' },
+      { id: 'down-at-camera', label: 'Down at Camera', prompt: 'Looking down at the camera from above' },
+      { id: 'up', label: 'Looking Up', prompt: 'Looking upward toward the sky, eyes raised' },
+      { id: 'down', label: 'Looking Down', prompt: 'Looking down at the ground, eyes lowered' },
+      { id: 'own-body', label: 'At Own Body', prompt: 'Looking down at her own body' },
+      { id: 'distance', label: 'Into Distance', prompt: 'Gazing into the distance with a dreamy faraway look' },
+      { id: 'eyes-closed', label: 'Eyes Closed', prompt: 'Eyes closed, face relaxed' },
+    ];
+
     const EDIT_POSES = [
       { id: 'standing', label: 'Standing', prompt: 'Change pose to standing straight' },
       { id: 'sitting', label: 'Sitting', prompt: 'Change pose to sitting down' },
@@ -1243,6 +1264,18 @@
       { id: 'topless', label: 'Topless', prompt: 'Topless, no top, bare breasts with visible nipples, areolas visible' },
       { id: 'bottomless', label: 'Bottomless', prompt: 'Bottomless, no pants, no skirt, no underwear, exposed lower body, visible pussy' },
       { id: 'see-through', label: 'See-Through', prompt: 'Wearing see-through transparent clothing, nipples visible through fabric' },
+      { id: 'panties', label: 'Panties', prompt: 'Topless, wearing only white lace panties, nothing else, bare breasts' },
+      { id: 'thong', label: 'Thong', prompt: 'Topless, wearing only a black lace thong, nothing else, bare breasts' },
+      { id: 'string-thong', label: 'String Thong', prompt: 'Topless, wearing only a tiny black string thong with thin side strings, nothing else, bare breasts' },
+      { id: 'g-string', label: 'G-String', prompt: 'Topless, wearing only a minimal red G-string with a tiny front triangle, nothing else, bare breasts' },
+      { id: 'micro-thong', label: 'Micro Thong', prompt: 'Topless, wearing only an extremely small black micro thong, nothing else, bare breasts' },
+      { id: 'bikini-bottom', label: 'Bikini Bottom', prompt: 'Topless, wearing only a black string bikini bottom tied at the hips, nothing else, bare breasts' },
+      { id: 'cheeky', label: 'Cheeky Panties', prompt: 'Topless, wearing only black cheeky lace panties that show half of the buttocks, nothing else, bare breasts' },
+      { id: 'high-cut', label: 'High-Cut Panties', prompt: 'Topless, wearing only white high-cut panties with the sides pulled high over the hips, nothing else, bare breasts' },
+      { id: 'sheer-panties', label: 'Sheer Panties', prompt: 'Topless, wearing only sheer black see-through mesh panties, nothing else, bare breasts' },
+      { id: 'crotchless', label: 'Crotchless Panties', prompt: 'Topless, wearing only open black crotchless lace panties, nothing else, bare breasts' },
+      { id: 'satin-panties', label: 'Satin Panties', prompt: 'Topless, wearing only shiny red satin panties, nothing else, bare breasts' },
+      { id: 'boyshorts', label: 'Lace Boyshorts', prompt: 'Topless, wearing only white lace boyshort panties, nothing else, bare breasts' },
     ];
 
     const EDIT_OUTFITS = [
@@ -1331,6 +1364,7 @@
     let db;
     let selectedEmotions = new Set();
     let selectedPoses = new Set();
+    let selectedGazes = new Set();
     let selectedCompositions = new Set();
     let selectedLocations = new Set();
     let selectedBody = new Set();
@@ -1893,6 +1927,7 @@
       const categories = [
         { el: 'emotionChips', items: EDIT_EMOTIONS, selected: selectedEmotions, type: 'emotion' },
         { el: 'poseChips', items: EDIT_POSES, selected: selectedPoses, type: 'pose' },
+        { el: 'gazeChips', items: EDIT_GAZES, selected: selectedGazes, type: 'gaze' },
         { el: 'compositionChips', items: EDIT_COMPOSITIONS, selected: selectedCompositions, type: 'composition' },
         { el: 'locationChips', items: EDIT_LOCATIONS, selected: selectedLocations, type: 'location' },
         { el: 'bodyChips', items: EDIT_BODY, selected: selectedBody, type: 'body' },
@@ -1919,7 +1954,7 @@
         const item = EDIT_QWEN21.find(i => i.id === id);
         if (item?.fill) { insertFillPrompt(item.prompt); return; }
       }
-      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits, shoe: selectedShoes, qwen21: selectedQwen21 };
+      const setMap = { emotion: selectedEmotions, pose: selectedPoses, gaze: selectedGazes, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits, shoe: selectedShoes, qwen21: selectedQwen21 };
       const set = setMap[type];
       if (composeMode) {
         // In compose mode: single-select per category (clicking another deselects the previous)
@@ -1962,6 +1997,12 @@
     function toggleAllPoses() {
       if (selectedPoses.size === EDIT_POSES.length) selectedPoses.clear();
       else EDIT_POSES.forEach(p => selectedPoses.add(p.id));
+      renderChips();
+    }
+
+    function toggleAllGazes() {
+      if (selectedGazes.size === EDIT_GAZES.length) selectedGazes.clear();
+      else EDIT_GAZES.forEach(g => selectedGazes.add(g.id));
       renderChips();
     }
 
@@ -2019,7 +2060,7 @@
 
       // In compose mode, trim selections to max 1 per category
       if (composeMode) {
-        for (const set of [selectedQwen21, selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits, selectedShoes]) {
+        for (const set of [selectedQwen21, selectedEmotions, selectedPoses, selectedGazes, selectedCompositions, selectedLocations, selectedBody, selectedOutfits, selectedShoes]) {
           if (set.size > 1) {
             const first = set.values().next().value;
             set.clear();
@@ -2047,6 +2088,7 @@
         [activeQwen21Items(), selectedQwen21],
         [EDIT_EMOTIONS, selectedEmotions],
         [EDIT_POSES, selectedPoses],
+        [EDIT_GAZES, selectedGazes],
         [EDIT_COMPOSITIONS, selectedCompositions],
         [EDIT_LOCATIONS, selectedLocations],
         [EDIT_BODY, selectedBody],
@@ -2162,6 +2204,7 @@
           { items: activeQwen21Items(), selected: selectedQwen21 },
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
+          { items: EDIT_GAZES, selected: selectedGazes },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
           { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_BODY, selected: selectedBody },
@@ -2203,6 +2246,7 @@
           { items: activeQwen21Items(), selected: selectedQwen21 },
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
+          { items: EDIT_GAZES, selected: selectedGazes },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
           { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_BODY, selected: selectedBody },
