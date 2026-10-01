@@ -37,6 +37,7 @@ dependencies = [
     "gguf>=0.6.0",  # Required for GGUF quantized models (qwen-image-2512, qwen-image-2.1, ltx-2.5)
     "av>=14.0.0",  # PyAV: diffusers encode_video muxes ltx-2.5 audio into mp4
     "sentencepiece>=0.2.0",  # slow GemmaTokenizer declared by LTX-2.5-Diffusers
+    "spandrel>=0.4",  # ESRGAN upscalers for the optional `upscale` on /generate and /img2img/edit
     "torchao>=0.11.0",  # Float8WeightOnlyConfig (config-class API) for FP8 quant (krea-2-turbo)
     # Music generation (ACE-Step 1.5 installed in Dockerfile with --no-deps;
     # its runtime deps listed here)

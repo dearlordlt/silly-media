@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -109,6 +109,23 @@ class GenerateRequest(BaseModel):
         bool,
         Field(default=False, description="Generate a transparent (RGBA) image (model-dependent, e.g. qwen-image-2.1)"),
     ] = False
+
+    # Optional ESRGAN upscale after generation (any model)
+    upscale: Annotated[
+        bool,
+        Field(default=False, description="Upscale the result with an ESRGAN model after generation"),
+    ] = False
+    upscale_factor: Annotated[
+        float,
+        Field(default=2.0, gt=1.0, le=4.0, description="Upscale factor (1-4], used when upscale is true"),
+    ] = 2.0
+    upscale_model: Annotated[
+        Literal["clean", "sharp"],
+        Field(
+            default="clean",
+            description="clean = Real-ESRGAN x4plus (also removes grain/halftone texture); sharp = 4x-UltraSharp (keeps fine detail)",
+        ),
+    ] = "clean"
 
     # Named LoRAs from the lora_dir (e.g. "my-lora" -> data/loras/my-lora.safetensors).
     # Any number can be stacked; currently supported by the Z-Image models.

@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from .config import settings
 from .models import ModelRegistry
 from .progress import progress
+from . import upscaler
 from .schemas import AspectRatio, ErrorResponse, GenerateRequest
 from .vram_manager import ModelType, vram_manager
 
@@ -446,6 +447,11 @@ async def generate_image(
             detail=f"Model '{model}' not found. Available: {available_image_models}",
         )
 
+    if request.upscale:
+        error = upscaler.validate(request.width, request.height, request.upscale_factor)
+        if error:
+            raise HTTPException(status_code=400, detail=error)
+
     # Generate image using VRAMManager for GPU coordination
     start_time = time.time()
     try:
@@ -475,6 +481,12 @@ async def generate_image(
                 )
             finally:
                 progress.finish()
+
+            # Optional ESRGAN upscale, still inside the GPU lock
+            if request.upscale:
+                image = await asyncio.to_thread(
+                    upscaler.upscale, image, request.upscale_factor, request.upscale_model
+                )
 
             # Convert to PNG bytes
             buffer = io.BytesIO()

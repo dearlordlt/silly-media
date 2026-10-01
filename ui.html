@@ -1426,6 +1426,17 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+    .upscale-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .upscale-row select {
+      width: auto;
+      margin: 0;
+      padding: 4px 6px;
+    }
     .qwen21-section {
       border: 1px solid var(--surface2);
       border-radius: 8px;
@@ -1736,6 +1747,23 @@
         </div>
       </div>
 
+      <div class="upscale-row">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+          <input type="checkbox" id="upscale" onchange="saveSettings()" style="width:auto;margin:0">
+          <span>Upscale</span>
+        </label>
+        <select id="upscaleFactor" onchange="saveSettings()" title="Upscale factor">
+          <option value="1.5">1.5x</option>
+          <option value="2" selected>2x</option>
+          <option value="3">3x</option>
+          <option value="4">4x</option>
+        </select>
+        <select id="upscaleModel" onchange="saveSettings()" title="clean removes grain/halftone texture; sharp keeps fine detail">
+          <option value="clean" selected>Clean</option>
+          <option value="sharp">Sharp</option>
+        </select>
+      </div>
+
       <div id="qwen21Section" class="qwen21-section" style="display:none">
         <label>Qwen 2.1 Size</label>
         <div class="preset-chips" id="qwen21SizeChips">
@@ -1748,7 +1776,7 @@
           <button class="btn-secondary btn-small" onclick="applyQwen21Preset('turbo6')" title="Turbo LoRA, 6 steps, no CFG">Turbo 6</button>
           <button class="btn-secondary btn-small" onclick="applyQwen21Preset('turbo9')" title="7 turbo + 2 base steps: finer detail, better small text">Turbo 9 hybrid</button>
           <button class="btn-secondary btn-small" onclick="applyQwen21Preset('base40')" title="Base model, 40 steps, no CFG (default)">Base 40</button>
-          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 4 with negative prompt (~2x slower)">Base 40 + CFG 4</button>
+          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 3 + anti-texture negative: cleanest output (~1.7x slower)">Base 40 + CFG 3 (clean)</button>
         </div>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
           <input type="checkbox" id="transparent" onchange="saveSettings()" style="width:auto;margin:0">
@@ -2130,7 +2158,7 @@ Results:
             <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('turbo6')" title="Turbo LoRA, 6 steps">Turbo 6</button>
             <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('turbo9')" title="7 turbo + 2 base steps">Turbo 9 hybrid</button>
             <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('base40')" title="Base model, 40 steps, no CFG">Base 40</button>
-            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 4 (~2x slower)">Base 40 + CFG 4</button>
+            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 3 + anti-texture negative (~1.7x slower)">Base 40 + CFG 3 (clean)</button>
           </div>
         </div>
 
@@ -2139,6 +2167,21 @@ Results:
             <label>
               <input type="checkbox" id="editUseLora" onchange="toggleLoraOption()">
               <span id="editUseLoraLabel">Lightning LoRA (fast)</span>
+            </label>
+          </div>
+          <div class="edit-clothes-option">
+            <label>
+              <input type="checkbox" id="editUpscale">
+              Upscale
+              <select id="editUpscaleFactor" style="margin:0;padding:2px 4px;font-size:0.8rem;width:auto">
+                <option value="1.5">1.5x</option>
+                <option value="2" selected>2x</option>
+                <option value="4">4x</option>
+              </select>
+              <select id="editUpscaleModel" style="margin:0;padding:2px 4px;font-size:0.8rem;width:auto" title="clean removes grain; sharp keeps detail">
+                <option value="clean" selected>Clean</option>
+                <option value="sharp">Sharp</option>
+              </select>
             </label>
           </div>
           <div class="edit-clothes-option" id="editNegativeOption">
@@ -2420,6 +2463,9 @@ Results:
         model: document.getElementById('model').value,
         useLora: document.getElementById('useLora').checked,
         transparent: document.getElementById('transparent').checked,
+        upscale: document.getElementById('upscale').checked,
+        upscaleFactor: document.getElementById('upscaleFactor').value,
+        upscaleModel: document.getElementById('upscaleModel').value,
         zLoras: zLoraState,
         negativePrompt: document.getElementById('negativePrompt').value,
         batchJson: document.getElementById('batchJson').value,
@@ -2460,6 +2506,9 @@ Results:
         if (s.model) document.getElementById('model').value = s.model;
         if (s.useLora !== undefined) document.getElementById('useLora').checked = s.useLora;
         if (s.transparent !== undefined) document.getElementById('transparent').checked = s.transparent;
+        if (s.upscale !== undefined) document.getElementById('upscale').checked = s.upscale;
+        if (s.upscaleFactor) document.getElementById('upscaleFactor').value = s.upscaleFactor;
+        if (s.upscaleModel) document.getElementById('upscaleModel').value = s.upscaleModel;
         if (s.zLoras) zLoraState = s.zLoras;
         // Update UI to show/hide LoRA options based on selected model (without triggering save)
         updateLoraVisibility();
@@ -2942,6 +2991,11 @@ Results:
       if (model === 'qwen-image-2.1' && document.getElementById('transparent').checked) {
         settings.transparent = true;
       }
+      if (document.getElementById('upscale').checked) {
+        settings.upscale = true;
+        settings.upscale_factor = parseFloat(document.getElementById('upscaleFactor').value);
+        settings.upscale_model = document.getElementById('upscaleModel').value;
+      }
 
       // Stacked LoRAs for Z-Image models
       if (isZImageModel(model)) {
@@ -3093,11 +3147,14 @@ Results:
     }
 
     // --- Qwen-Image 2.1 presets ---
+    const QWEN21_TEXTURE_NEGATIVE = 'halftone, dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened';
+
     const QWEN21_PRESETS = {
       turbo6: { useLora: true, steps: 6, cfg: 1.0 },
       turbo9: { useLora: true, steps: 9, cfg: 1.0 },
       base40: { useLora: false, steps: 40, cfg: 1.0 },
-      base40cfg: { useLora: false, steps: 40, cfg: 4.0, negative: 'blurry, low quality, distorted, deformed, bad anatomy, watermark, jpeg artifacts' },
+      // CFG 3 + this negative removes most of the model's halftone / paper-print texture
+      base40cfg: { useLora: false, steps: 40, cfg: 3.0, negative: QWEN21_TEXTURE_NEGATIVE },
     };
 
     function applyQwen21Preset(name) {
@@ -3105,7 +3162,9 @@ Results:
       document.getElementById('useLora').checked = p.useLora;
       setStepsCfg(p.steps, p.cfg);
       const neg = document.getElementById('negativePrompt');
-      if (p.negative && !neg.value.trim()) neg.value = p.negative;
+      if (p.negative && !neg.value.includes(p.negative)) {
+        neg.value = neg.value.trim() ? `${neg.value.trim()}, ${p.negative}` : p.negative;
+      }
       saveSettings();
       showToast(`Qwen 2.1: ${p.useLora ? 'turbo' : 'base'} ${p.steps} steps, CFG ${p.cfg}`);
     }
@@ -3864,6 +3923,9 @@ Results:
       }
       document.getElementById('useLora').checked = !!s.use_lora;
       document.getElementById('transparent').checked = !!s.transparent;
+      document.getElementById('upscale').checked = !!s.upscale;
+      if (s.upscale_factor) document.getElementById('upscaleFactor').value = String(s.upscale_factor);
+      if (s.upscale_model) document.getElementById('upscaleModel').value = s.upscale_model;
 
       if (s.width && s.height) {
         document.getElementById('aspectRatio').value = 'custom';
@@ -4214,10 +4276,19 @@ Be thorough and specific in your description.`;
     }
 
     function applyEditQwen21Preset(name) {
-      const p = { turbo6: [true, 6, 1], turbo9: [true, 9, 1], base40: [false, 40, 1], base40cfg: [false, 40, 4] }[name];
+      const p = { turbo6: [true, 6, 1], turbo9: [true, 9, 1], base40: [false, 40, 1], base40cfg: [false, 40, 3] }[name];
       document.getElementById('editUseLora').checked = p[0];
       toggleLoraOption();
       setEditStepsCfg(p[1], p[2]);
+      if (name === 'base40cfg') {
+        // CFG makes the negative count: keep the default terms, add the anti-texture ones
+        const neg = document.getElementById('editNegativePrompt');
+        if (!neg.value.includes(QWEN21_TEXTURE_NEGATIVE)) {
+          neg.value = `${neg.value.trim() || DEFAULT_NEGATIVE}, ${QWEN21_TEXTURE_NEGATIVE}`;
+        }
+        document.getElementById('editNegativeEnabled').checked = true;
+        toggleNegativeOption();
+      }
     }
 
     function setEditStepsCfg(steps, cfg) {
@@ -4408,6 +4479,9 @@ Be thorough and specific in your description.`;
         const transparent = s.transparent || false;
         const sizeMode = s.sizeMode || 'auto';
         const refCount = s.refCount || 0;
+        const upscale = s.upscale || false;
+        const upscaleFactor = s.upscaleFactor || '2';
+        const upscaleModel = s.upscaleModel || 'clean';
         const seed = s.seed ?? null;  // null means random was used
         const basePrompt = s.basePrompt || '';
         const clothedPrompt = s.clothedPrompt || '';
@@ -4435,6 +4509,9 @@ Be thorough and specific in your description.`;
           transparent,
           sizeMode,
           refCount,
+          upscale,
+          upscaleFactor,
+          upscaleModel,
           seed,
           basePrompt,
           clothedPrompt
@@ -4728,6 +4805,12 @@ Be thorough and specific in your description.`;
         payload.seed = seed;
       }
 
+      if (overrideSettings?.upscale ?? document.getElementById('editUpscale').checked) {
+        payload.upscale = true;
+        payload.upscale_factor = parseFloat(overrideSettings?.upscaleFactor ?? document.getElementById('editUpscaleFactor').value);
+        payload.upscale_model = overrideSettings?.upscaleModel ?? document.getElementById('editUpscaleModel').value;
+      }
+
       if (model === 'qwen-image-2.1') {
         if (overrideSettings?.transparent ?? document.getElementById('editTransparent').checked) {
           payload.transparent = true;
@@ -4848,6 +4931,9 @@ Be thorough and specific in your description.`;
             model: getEditModel(),
             transparent: !!prompts[i].transparent || document.getElementById('editTransparent').checked,
             sizeMode: document.getElementById('editSize').value,
+            upscale: document.getElementById('editUpscale').checked,
+            upscaleFactor: document.getElementById('editUpscaleFactor').value,
+            upscaleModel: document.getElementById('editUpscaleModel').value,
           };
           const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed, editOpts);
 
@@ -4875,6 +4961,9 @@ Be thorough and specific in your description.`;
             transparent: editOpts.model === 'qwen-image-2.1' && editOpts.transparent,
             sizeMode: editOpts.sizeMode,
             refCount: editOpts.model === 'qwen-image-2.1' ? editReferenceImages.length : 0,
+            upscale: editOpts.upscale,
+            upscaleFactor: editOpts.upscaleFactor,
+            upscaleModel: editOpts.upscaleModel,
             // Store seed used (null means random was used)
             seed: seed,
             // Store base prompt and clothed prompt for dressed variants
@@ -4910,6 +4999,9 @@ Be thorough and specific in your description.`;
             transparent: genSettings.transparent,
             sizeMode: genSettings.sizeMode,
             refCount: genSettings.refCount,
+            upscale: genSettings.upscale,
+            upscaleFactor: genSettings.upscaleFactor,
+            upscaleModel: genSettings.upscaleModel,
             seed: genSettings.seed,
             basePrompt: genSettings.basePrompt,
             clothedPrompt: genSettings.clothedPrompt
@@ -5044,7 +5136,10 @@ Be thorough and specific in your description.`;
           useLora: item.useLora || false,
           model: item.model || 'qwen-image-edit',
           transparent: item.transparent || false,
-          sizeMode: item.sizeMode || 'auto'
+          sizeMode: item.sizeMode || 'auto',
+          upscale: item.upscale || false,
+          upscaleFactor: item.upscaleFactor || '2',
+          upscaleModel: item.upscaleModel || 'clean'
         };
         // Reference images aren't stored per edit; reuse the ones currently loaded
         if ((item.refCount || 0) > 0 && editReferenceImages.length !== item.refCount) {
@@ -5082,6 +5177,9 @@ Be thorough and specific in your description.`;
           transparent: storedSettings.transparent,
           sizeMode: storedSettings.sizeMode,
           refCount: item.refCount || 0,
+          upscale: storedSettings.upscale,
+          upscaleFactor: storedSettings.upscaleFactor,
+          upscaleModel: storedSettings.upscaleModel,
           seed: seedToUse,
           basePrompt: item.basePrompt || '',
           clothedPrompt: item.clothedPrompt || ''

@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Path, Response, Upload
 from PIL import Image
 from pydantic import ValidationError
 
+from .. import upscaler
 from ..img2img import Img2ImgRegistry
 from ..img2img.schemas import Img2ImgRequest
 from ..progress import img2img_progress
@@ -68,6 +69,10 @@ def _resolve_model(model: str):
 
 
 def _validate_request(model: str, instance, request: Img2ImgRequest, n_references: int) -> None:
+    if request.upscale:
+        error = upscaler.validate(request.width, request.height, request.upscale_factor)
+        if error:
+            raise HTTPException(400, error)
     max_side = getattr(instance, "max_side", 2048)
     for side in (request.width, request.height):
         if side is not None and side > max_side:
@@ -108,6 +113,12 @@ async def _run_edit(
                 )
             finally:
                 img2img_progress.finish()
+
+            # Optional ESRGAN upscale, still inside the GPU lock
+            if request.upscale:
+                result_image = await asyncio.to_thread(
+                    upscaler.upscale, result_image, request.upscale_factor, request.upscale_model
+                )
 
             # Convert to PNG bytes
             buffer = io.BytesIO()
@@ -186,6 +197,9 @@ async def edit_image_upload(
     height: int | None = Form(None, description="Output height (defaults to input image height)"),
     use_lora: bool = Form(False, description="Use the model's speed LoRA"),
     transparent: bool = Form(False, description="Return a transparent (RGBA) result (qwen-image-2.1)"),
+    upscale: bool = Form(False, description="Upscale the result with an ESRGAN model"),
+    upscale_factor: float = Form(2.0, description="Upscale factor (1-4]"),
+    upscale_model: str = Form("clean", description="clean (removes grain) or sharp (keeps detail)"),
     reference_images: list[UploadFile] | None = File(
         None, description="Extra reference images (image 2, 3, ...); models that support it only"
     ),
@@ -208,6 +222,9 @@ async def edit_image_upload(
             height=height,
             use_lora=use_lora,
             transparent=transparent,
+            upscale=upscale,
+            upscale_factor=upscale_factor,
+            upscale_model=upscale_model,
         )
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False, include_context=False, include_input=False))

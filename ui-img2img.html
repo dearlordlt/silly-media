@@ -1016,7 +1016,7 @@
               <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('turbo6')">Turbo 6</button>
               <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('turbo9')">Turbo 9 hybrid</button>
               <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('base40')">Base 40</button>
-              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('base40cfg4')">Base 40 + CFG 4</button>
+              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('base40cfg3')" title="True CFG 3 + anti-texture negative: cleanest output (~1.7x slower)">Base 40 + CFG 3 (clean)</button>
             </div>
             <div class="settings-row">
               <div class="setting-item">
@@ -1035,6 +1035,30 @@
                   Transparent background
                 </label>
               </div>
+            </div>
+          </div>
+
+          <!-- Upscale (all models) -->
+          <div class="settings-row">
+            <div class="setting-item option-item">
+              <label>
+                <input type="checkbox" id="upscaleEnabled">
+                Upscale result
+              </label>
+            </div>
+            <div class="setting-item">
+              <select id="upscaleFactor" title="Upscale factor">
+                <option value="1.5">1.5x</option>
+                <option value="2" selected>2x</option>
+                <option value="3">3x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <select id="upscaleModel" title="Clean removes grain/halftone texture; Sharp keeps fine detail">
+                <option value="clean" selected>Clean (removes grain)</option>
+                <option value="sharp">Sharp (keeps detail)</option>
+              </select>
             </div>
           </div>
 
@@ -1357,6 +1381,8 @@
     const QWEN21_SIZE_TARGETS = { '1.5k': 1536, '2k': 2048 };
     const MODEL_STORAGE_KEY = 'sillyMediaImg2ImgModel';
 
+    // Removes most of qwen-image-2.1's halftone / paper-print texture when CFG > 1
+    const QWEN21_TEXTURE_NEGATIVE = 'halftone, dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened';
     const DEFAULT_NEGATIVE = 'ugly, deformed, disfigured, low quality, blurry, bad anatomy, extra limbs, male, penis, masculine, man, boy';
     const CLOTHES_NEGATIVE = 'clothes, clothing, dressed, bra, underwear, panties, shirt, dress, bikini, swimsuit, lingerie';
 
@@ -1649,7 +1675,7 @@
         turbo6: { lora: true, steps: 6, cfg: 1 },
         turbo9: { lora: true, steps: 9, cfg: 1 },
         base40: { lora: false, steps: 40, cfg: 1 },
-        base40cfg4: { lora: false, steps: 40, cfg: 4 },
+        base40cfg3: { lora: false, steps: 40, cfg: 3, textureNegative: true },
       };
       const p = presets[name];
       if (!p) return;
@@ -1657,6 +1683,15 @@
       toggleLoraOption();
       setSlider('steps', p.steps);
       setSlider('cfg', p.cfg);
+      if (p.textureNegative) {
+        // CFG makes the negative count: keep the default terms, add the anti-texture ones
+        const neg = document.getElementById('negativePrompt');
+        if (!neg.value.includes(QWEN21_TEXTURE_NEGATIVE)) {
+          neg.value = `${neg.value.trim() || DEFAULT_NEGATIVE}, ${QWEN21_TEXTURE_NEGATIVE}`;
+        }
+        document.getElementById('negativeEnabled').checked = true;
+        toggleNegativeOption();
+      }
     }
 
     // =================== OUTPUT SIZE (qwen-image-2.1) ===================
@@ -2295,6 +2330,13 @@
       };
       if (seed !== null && seed !== undefined) payload.seed = seed;
 
+      const upscale = overrideSettings?.upscale ?? document.getElementById('upscaleEnabled').checked;
+      if (upscale) {
+        payload.upscale = true;
+        payload.upscale_factor = overrideSettings?.upscaleFactor ?? parseFloat(document.getElementById('upscaleFactor').value);
+        payload.upscale_model = overrideSettings?.upscaleModel ?? document.getElementById('upscaleModel').value;
+      }
+
       // qwen-image-2.1 extras (other models get exactly the fields above)
       if (isQwen21(model)) {
         const q21 = overrideSettings?.qwen21 ?? await getQwen21Options();
@@ -2404,6 +2446,9 @@
         steps: parseInt(document.getElementById('stepsSlider').value),
         cfgScale: parseFloat(document.getElementById('cfgSlider').value),
         useLora: document.getElementById('useLora').checked,
+        upscale: document.getElementById('upscaleEnabled').checked,
+        upscaleFactor: parseFloat(document.getElementById('upscaleFactor').value),
+        upscaleModel: document.getElementById('upscaleModel').value,
       };
       const q21Options = isQwen21(model) ? await getQwen21Options() : null;
       if (q21Options && q21Options.referenceImages.length === 0 && prompts.some(p => p.needsRef)) {
@@ -2491,6 +2536,9 @@
             steps: runSettings.steps,
             cfgScale: runSettings.cfgScale,
             useLora: runSettings.useLora,
+            upscale: runSettings.upscale,
+            upscaleFactor: runSettings.upscaleFactor,
+            upscaleModel: runSettings.upscaleModel,
             seed,
             basePrompt: basePrompt || '',
             clothedPrompt: clothedPrompt || '',
@@ -2907,6 +2955,9 @@
           steps: edit.steps || 20,
           cfgScale: edit.cfgScale || 4.0,
           useLora: edit.useLora || false,
+          upscale: edit.upscale || false,
+          upscaleFactor: edit.upscaleFactor || 2,
+          upscaleModel: edit.upscaleModel || 'clean',
         };
         let q21Meta = null;
         if (isQwen21(model)) {
@@ -2944,6 +2995,9 @@
           steps: storedSettings.steps,
           cfgScale: storedSettings.cfgScale,
           useLora: storedSettings.useLora,
+          upscale: storedSettings.upscale,
+          upscaleFactor: storedSettings.upscaleFactor,
+          upscaleModel: storedSettings.upscaleModel,
           seed: seedToUse,
           basePrompt: edit.basePrompt || '',
           clothedPrompt: edit.clothedPrompt || '',

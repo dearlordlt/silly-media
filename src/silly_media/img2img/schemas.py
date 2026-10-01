@@ -1,5 +1,7 @@
 """Schemas for img2img API requests/responses."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -52,6 +54,12 @@ class Img2ImgRequest(BaseModel):
     transparent: bool = Field(
         default=False,
         description="Return a transparent (RGBA) result (qwen-image-2.1; automatic when the input has alpha)",
+    )
+    upscale: bool = Field(default=False, description="Upscale the result with an ESRGAN model after editing")
+    upscale_factor: float = Field(default=2.0, gt=1.0, le=4.0, description="Upscale factor (1-4], used when upscale is true")
+    upscale_model: Literal["clean", "sharp"] = Field(
+        default="clean",
+        description="clean = Real-ESRGAN x4plus (also removes grain/halftone texture); sharp = 4x-UltraSharp (keeps fine detail)",
     )
 
 

@@ -9,6 +9,7 @@ Base URL: `http://localhost:4201`
 Silly Media provides the following capabilities:
 
 - **Image Generation**: Text-to-image using diffusion models, with stackable user LoRAs on the Z-Image models
+- **Upscaling**: Optional ESRGAN upscale (`upscale: true`) on image generation and image editing, any model
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
 - **Sprite Generation**: Hand-painted / realistic game sprites with transparent cutout (non-pixel-art)
 - **Image Editing (img2img)**: Edit existing images using AI-guided prompts, including multi-image composition (up to 10 images) and transparent (RGBA) output with Qwen Image 2.1
@@ -275,6 +276,9 @@ Generate an image using the specified model.
   "base_size": "int, optional (256-2048, default 1024)",
   "use_lora": "bool, optional (default false, only for qwen-image-2512 and qwen-image-2.1)",
   "transparent": "bool, optional (default false, only for qwen-image-2.1 — returns an RGBA PNG; ignored by other models)",
+  "upscale": "bool, optional (default false) — ESRGAN upscale after generation, any model (see Upscaling)",
+  "upscale_factor": "float, optional (>1.0-4.0, default 2.0)",
+  "upscale_model": "string, optional — \"clean\" (default) or \"sharp\"",
   "loras": "array, optional — [{\"name\": \"...\", \"scale\": 1.0}, ...] stacks any number of LoRAs from data/loras (Z-Image models only; scale 0.0-2.0, default 1.0)",
   "lora": "string, optional — deprecated single-LoRA form, merged into loras",
   "lora_scale": "float, optional (0.0-2.0, default 1.0) — strength for the deprecated lora field"
@@ -293,6 +297,10 @@ Generate an image using the specified model.
 - `krea-2-turbo`: 8 steps, `cfg_scale` **and** `negative_prompt` ignored (guidance disabled — only the positive prompt is encoded). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.
 - `qwen-image-2.1`: 40 steps, cfg_scale 1.0 (trained to sample without guidance). `cfg_scale` > 1 enables true CFG with `negative_prompt` (`" "` if empty), ~2x slower. With `use_lora: true` (opt-in Viggle turbo LoRA `Viggle/Qwen-Image-2.1-viggle-turbo` v0.3 r256, applied unmerged with its own scheduler): default 6 steps; `num_inference_steps` ≤7 snaps to the published 5/6/7-step sigma schedules; ≥8 runs a 9-step hybrid (7 turbo steps, then the base model finishes the last 2 — finer detail and better small text, ~1.5x the 6-step time). Under turbo `cfg_scale` is forced to 1.0 and `negative_prompt` is ignored. `transparent: true` wraps the prompt in the official RGBA template (`This is an RGBA image with transparency. {prompt} The image has alpha channel and the background is transparent.`) and returns an RGBA PNG; without it the output is RGB like every other model. Native 2K: use `base_size` 2048 with any `aspect_ratio` (see Image Sizing).
 
+  **Texture / "paper print" look:** Qwen-Image 2.1 renders a fine halftone-like stipple (visible at 100% zoom, strongest at 2K and on smooth or shiny surfaces). It's the model itself — official bf16 samples show it too — and it is the same with turbo and base. Two things remove it:
+  1. **Cleanest generation:** base model (`use_lora: false`), 40 steps, `cfg_scale: 3.0` and `negative_prompt: "halftone, dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened"` (~1.7x the time of CFG 1; changes the composition vs CFG 1). The UIs' "Base 40 + CFG 3 (clean)" preset sets exactly this.
+  2. **Generate at ~1MP and upscale:** `base_size` 1024 + `upscale: true` with `upscale_model: "clean"` (see Upscaling) gives a cleaner 2K than native 2K generation — the clean upscaler also removes the stipple. Works with turbo too.
+
 **Response**
 
 - Content-Type: `image/png`
@@ -301,9 +309,52 @@ Generate an image using the specified model.
 **Errors**
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request parameters |
+| 400 | Invalid request parameters (including an upscaled size over 8192px per side) |
 | 404 | Model not found |
 | 500 | Generation failed |
+
+---
+
+## Upscaling
+
+`POST /generate/{model}`, `POST /img2img/edit/{model}` and `POST /img2img/edit/{model}/upload` accept an optional upscale step that runs on the result, for **any** model. It's off by default, so existing requests are unchanged.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `upscale` | bool | `false` | Upscale the generated / edited image |
+| `upscale_factor` | float | `2.0` | Scale factor, >1.0 to 4.0 (e.g. 1.5, 2, 3, 4). The 4x model output is resized down with Lanczos for factors below 4 |
+| `upscale_model` | string | `"clean"` | Which upscaler (below) |
+
+| `upscale_model` | Model | Use for |
+|-----------------|-------|---------|
+| `clean` | Real-ESRGAN x4plus (`lllyasviel/Annotators`) | Default. Trained on degraded images, so it also removes grain, noise and Qwen-Image 2.1's halftone / paper-print texture. Slightly smoother hair and fine texture |
+| `sharp` | 4x-UltraSharp (`Kim2091/UltraSharp`) | Keeps and sharpens fine detail as generated (keeps any grain too) |
+
+- Runs right after generation inside the same GPU slot; it adds a few seconds (~2-5s for a 1MP → 2x result). The upscaler weights (~67MB each) download on first use and stay in CPU RAM between requests.
+- Tiled with feathered overlaps (1024px tiles, auto-halved on OOM), so large outputs fit next to a loaded model. Peak VRAM stays within the generating model's usual budget.
+- Max output: **8192px per side**. With explicit `width`/`height` an oversized request is rejected with 400 before generating; otherwise (e.g. an edit at the input's size) the factor is capped to fit.
+- Transparent (RGBA) results stay transparent: the alpha channel is resized with Lanczos.
+- Works with every image and img2img model; not applied by `/sprite`, `/pixelart` or the ComfyUI endpoints.
+
+```bash
+# Qwen-Image 2.1 at ~1MP (turbo), upscaled 2x with the clean model -> 1664x2432
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "35-year-old woman in a Los Angeles street, high platform sandals", "aspect_ratio": "2:3", "use_lora": true, "upscale": true}' \
+  -o upscaled.png
+
+# Any model, 4x with the sharp model
+curl -X POST http://localhost:4201/generate/z-image-turbo \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "a red vintage bicycle against a yellow wall", "upscale": true, "upscale_factor": 4, "upscale_model": "sharp"}' \
+  -o bike_4x.png
+
+# Edit + upscale (multipart)
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1/upload \
+  -F image=@photo.png -F "prompt=Make the dress red" -F use_lora=true \
+  -F upscale=true -F upscale_factor=2 -F upscale_model=clean \
+  -o edited_2x.png
+```
 
 ---
 
@@ -736,7 +787,10 @@ Edit an image using base64-encoded image in JSON body.
   "height": null,
   "use_lora": false,
   "reference_images": null,
-  "transparent": false
+  "transparent": false,
+  "upscale": false,
+  "upscale_factor": 2.0,
+  "upscale_model": "clean"
 }
 ```
 
@@ -753,10 +807,15 @@ Edit an image using base64-encoded image in JSON body.
 | `use_lora`            | bool   | No       | `false` | Use the model's speed LoRA: `qwen-image-edit` Lightning (recommended: 4-6 steps, CFG 1.0); `qwen-image-2.1` 6-step turbo (5-7 steps snap to the published schedules, ≥8 = 9-step hybrid; CFG forced to 1.0) |
 | `reference_images`    | array  | No       | `null`  | Extra base64 images (max 9) — `image 2`, `image 3`… in the prompt. `qwen-image-2.1` only (400 on other models) |
 | `transparent`         | bool   | No       | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`; automatic when the input image has alpha) |
+| `upscale`             | bool   | No       | `false` | ESRGAN upscale of the result, any model (see Upscaling)                   |
+| `upscale_factor`      | float  | No       | `2.0`   | Upscale factor, >1.0-4.0                                                  |
+| `upscale_model`       | string | No       | `"clean"` | `clean` (Real-ESRGAN, removes grain/texture) or `sharp` (4x-UltraSharp, keeps detail) |
 
 > **Lightning LoRA** (`qwen-image-edit`): When `use_lora: true`, use `num_inference_steps: 4-6` and `true_cfg_scale: 1.0` for optimal results. Higher CFG values may cause artifacts with distilled models. The LoRA (`lightx2v/Qwen-Image-Lightning`) uses the EulerAncestral scheduler for best quality.
 
 > **Turbo LoRA** (`qwen-image-2.1`): `use_lora: true` loads the Viggle 6-step turbo LoRA with its own scheduler — omit `num_inference_steps` for 6 steps (5-7 snap to the published schedules; ≥8 runs the 9-step hybrid). `true_cfg_scale` is forced to 1.0 and `negative_prompt` ignored under turbo.
+
+> **Cleaner edits** (`qwen-image-2.1`): the halftone / paper-print texture described under `POST /generate` applies to edits too. For the cleanest result use the base model with `true_cfg_scale: 3.0` and add `halftone, dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened` to `negative_prompt`, or turn on `upscale` with `upscale_model: "clean"`.
 
 **Response**
 
@@ -793,6 +852,9 @@ Edit an image using multipart file upload.
 | `use_lora` | bool | No | `false` | Use the model's speed LoRA (Lightning / 6-step turbo) |
 | `transparent` | bool | No | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`) |
 | `reference_images` | file | No | - | Extra reference image (repeat the field for several, max 9) — `qwen-image-2.1` only |
+| `upscale` | bool | No | `false` | ESRGAN upscale of the result (see Upscaling) |
+| `upscale_factor` | float | No | `2.0` | Upscale factor, >1.0-4.0 |
+| `upscale_model` | string | No | `"clean"` | `clean` or `sharp` |
 
 **Response**
 

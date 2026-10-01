@@ -131,6 +131,9 @@ def generate_image(
     loras: Optional[list[str]] = None,
     use_lora: bool = False,
     transparent: bool = False,
+    upscale: bool = False,
+    upscale_factor: float = 2.0,
+    upscale_model: str = "clean",
 ) -> list:
     """Text-to-image. Models: z-image-turbo (fast, default), z-image,
     z-image-turbo-pm (NSFW fine-tune, honors cfg_scale up to ~1.5), qwen-image-2512,
@@ -141,6 +144,11 @@ def generate_image(
     default; 1536/2048 for qwen-image-2.1's 1.5K/2K), OR explicit width/height
     (64-2048). use_lora: turbo LoRA on qwen-image-2512 / qwen-image-2.1.
     transparent: RGBA PNG with transparent background (qwen-image-2.1 only).
+    upscale: ESRGAN upscale after generation (any model), upscale_factor in (1, 4],
+    upscale_model "clean" (Real-ESRGAN, also removes grain / qwen-image-2.1's halftone
+    texture) or "sharp" (4x-UltraSharp, keeps fine detail); max 8192px per side.
+    Cleanest qwen-image-2.1 output: 40 steps, cfg_scale 3, negative_prompt "halftone,
+    dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened".
     loras: stack any number of installed LoRAs (see list_loras), each entry
     "name" or "name:scale" (e.g. ["style-a", "style-b:0.7"]); Z-Image models only.
     lora/lora_scale are the legacy single-LoRA form. Returns the image inline
@@ -172,6 +180,9 @@ def generate_image(
             "loras": lora_specs,
             "use_lora": use_lora or None,
             "transparent": transparent or None,
+            "upscale": upscale or None,
+            "upscale_factor": upscale_factor if upscale else None,
+            "upscale_model": upscale_model if upscale else None,
         }
     )
     with _client() as c:
@@ -271,6 +282,9 @@ def edit_image(
     use_lora: bool = False,
     reference_image_paths: Optional[list[str]] = None,
     transparent: bool = False,
+    upscale: bool = False,
+    upscale_factor: float = 2.0,
+    upscale_model: str = "clean",
 ) -> list:
     """Img2img edit: transform an existing image (give an absolute path) per the prompt.
     Models: qwen-image-edit (default; 20 steps, true_cfg_scale 4.0; use_lora=True =
@@ -282,13 +296,17 @@ def edit_image(
     person from image 2 into the scene of image 1"; transparent=True returns an RGBA
     cutout (also automatic when the input has alpha); phrase it like "Remove the
     background and make it transparent, keep only the dog" ("extract"/"RGBA" wordings
-    tend to erase the subject).
+    tend to erase the subject). upscale / upscale_factor / upscale_model: optional ESRGAN
+    upscale of the result, same as generate_image (any edit model).
     Returns edited image inline + path."""
     payload = _drop_none(
         {
             "image": _b64_of(image_path),
             "reference_images": [_b64_of(p) for p in reference_image_paths] if reference_image_paths else None,
             "transparent": transparent or None,
+            "upscale": upscale or None,
+            "upscale_factor": upscale_factor if upscale else None,
+            "upscale_model": upscale_model if upscale else None,
             "prompt": prompt,
             "negative_prompt": negative_prompt or " ",
             "num_inference_steps": num_inference_steps,
