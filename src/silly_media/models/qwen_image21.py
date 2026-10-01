@@ -205,8 +205,16 @@ class QwenImage21Model(BaseImageModel):
             dtype=torch.bfloat16,
             local_files_only=local_only,
         )
-        if hasattr(self._pipe.vae, "enable_tiling"):
-            self._pipe.vae.enable_tiling()
+        # A full 2K decode needs >17GB, so tiling stays on, but the VAE's default
+        # 256px tiles (16x16 latents, 64px overlap) leave visible seams and magenta
+        # streaks (also in the alpha channel) at any size above 256px. 1024px tiles
+        # with 256px overlap remove them; a 1K image decodes in a single tile.
+        self._pipe.vae.enable_tiling(
+            tile_sample_min_height=1024,
+            tile_sample_min_width=1024,
+            tile_sample_stride_height=768,
+            tile_sample_stride_width=768,
+        )
         self._pipe.enable_model_cpu_offload()
         self._base_scheduler = self._pipe.scheduler
         _patch_vision_patch_embed(text_encoder)
