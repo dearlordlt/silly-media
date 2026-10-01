@@ -748,6 +748,28 @@
     }
 
     /* Checkerboard behind transparent (RGBA) results */
+    .upscale-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 8px 0 12px;
+    }
+    .upscale-row label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .upscale-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+    .upscale-row select {
+      width: auto;
+      margin: 0;
+    }
     .checkerboard {
       background-color: #2a2a40;
       background-image:
@@ -1039,27 +1061,21 @@
           </div>
 
           <!-- Upscale (all models) -->
-          <div class="settings-row">
-            <div class="setting-item option-item">
-              <label>
-                <input type="checkbox" id="upscaleEnabled">
-                Upscale result
-              </label>
-            </div>
-            <div class="setting-item">
-              <select id="upscaleFactor" title="Upscale factor">
-                <option value="1.5">1.5x</option>
-                <option value="2" selected>2x</option>
-                <option value="3">3x</option>
-                <option value="4">4x</option>
-              </select>
-            </div>
-            <div class="setting-item">
-              <select id="upscaleModel" title="Clean removes grain/halftone texture; Sharp keeps fine detail">
-                <option value="clean" selected>Clean (removes grain)</option>
-                <option value="sharp">Sharp (keeps detail)</option>
-              </select>
-            </div>
+          <div class="upscale-row">
+            <label>
+              <input type="checkbox" id="upscaleEnabled">
+              Upscale result
+            </label>
+            <select id="upscaleFactor" title="Upscale factor">
+              <option value="1.5">1.5x</option>
+              <option value="2" selected>2x</option>
+              <option value="3">3x</option>
+              <option value="4">4x</option>
+            </select>
+            <select id="upscaleModel" title="Clean removes grain/halftone texture; Sharp keeps fine detail">
+              <option value="clean" selected>Clean (removes grain)</option>
+              <option value="sharp">Sharp (keeps detail)</option>
+            </select>
           </div>
 
           <!-- Seed -->
