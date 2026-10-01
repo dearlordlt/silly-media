@@ -27,3 +27,29 @@ def repo_cached(repo_id: str) -> bool:
     except OSError:
         logger.warning(f"Could not read HF cache entry for {repo_id}", exc_info=True)
         return False
+
+
+def drop_tree_cache(repo_id: str) -> None:
+    """Remove huggingface_hub's cached tree listing (disk + in-memory) for a repo.
+
+    Models that download only some component folders of a repo (e.g. skipping a bf16
+    transformer replaced by a GGUF) trip hub's snapshot completeness check, which
+    compares the cached tree listing against disk and refuses local_files_only loads
+    over the gaps. Without a cached listing the check is a no-op.
+    """
+    import shutil
+
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    trees = Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}" / "trees"
+    if trees.exists():
+        shutil.rmtree(trees, ignore_errors=True)
+    try:
+        from huggingface_hub import _tree_cache
+
+        with _tree_cache._IN_MEMORY_TREE_CACHE_LOCK:
+            for key in list(_tree_cache._IN_MEMORY_TREE_CACHE):
+                if f"models--{repo_id.replace('/', '--')}" in key:
+                    del _tree_cache._IN_MEMORY_TREE_CACHE[key]
+    except Exception:  # private API — tolerate hub refactors
+        pass

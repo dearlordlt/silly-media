@@ -11,7 +11,7 @@ Silly Media provides the following capabilities:
 - **Image Generation**: Text-to-image using diffusion models, with stackable user LoRAs on the Z-Image models
 - **Pixel Art Generation**: Generate small pixel art icons with automatic background removal
 - **Sprite Generation**: Hand-painted / realistic game sprites with transparent cutout (non-pixel-art)
-- **Image Editing (img2img)**: Edit existing images using AI-guided prompts
+- **Image Editing (img2img)**: Edit existing images using AI-guided prompts, including multi-image composition (up to 10 images) and transparent (RGBA) output with Qwen Image 2.1
 - **Text-to-Speech (TTS)**: Voice synthesis with zero-shot voice cloning via "actors"
 - **Video Generation**: Text-to-video (T2V) and image-to-video (I2V) with synchronized audio using LTX-2.5
 - **Vision Analysis**: Image understanding and Q&A using vision-language models (VLM)
@@ -36,9 +36,25 @@ The service uses a **smart VRAM manager** that automatically loads/unloads model
 | Qwen Image 2512 | `qwen-image-2512` | 50 (6*) | ~15GB | GGUF Q5_K_M, optional Turbo-LoRA for 6 steps |
 | Ovis Image 7B   | `ovis-image-7b`   | 50      | ~20GB | **Not installed** — weights removed to reclaim disk. Requires custom diffusers fork; re-download `AIDC-AI/Ovis-Image-7B` to re-register |
 | Krea 2 Turbo    | `krea-2-turbo`    | 8       | ~13GB (≤768–896 base) | 12B MMDiT, FP8 weight-only, high quality, guidance off; gated (needs `HF_TOKEN`) |
+| Qwen Image 2.1  | `qwen-image-2.1`  | 40 (6‡) | ~10GB | Uncensored (no safety filter) GGUF Q8_0 7B DiT + NF4 Qwen3-VL-8B text encoder, model CPU offload. Text/typography rendering, portraits, native 2K, native transparency (`transparent`); also an img2img model (same pipeline, no reload). Qwen Research License |
 
 \* With `use_lora: true`, Qwen Image 2512 uses 6 steps instead of 50.
 † Any number of user LoRAs from `data/loras/` can be stacked per request via the `loras` field — see `GET /loras` and `POST /generate/{model}`. Standard LoRA checkpoints only (Civitai/ComfyUI `lora_A`/`lora_B` format); LyCORIS LoKr files are not supported by the loader.
+‡ With `use_lora: true`, Qwen Image 2.1 uses the Viggle 6-step turbo LoRA (opt-in): 5–7 steps snap to the published schedules, ≥8 runs a 9-step hybrid — see model-specific defaults below. The model is registered only when both the GGUF (`abenzerps/Qwen-Image-2.1-Uncensored-GGUF`) and the `Qwen/Qwen-Image-2.1` base repo components are in the HF cache.
+
+To bootstrap the `qwen-image-2.1` weights (one-off, ~34GB; the base repo's bf16
+transformer weights are skipped because the GGUF replaces them, but its config is needed).
+The turbo LoRA (1.3GB) downloads on first `use_lora: true`:
+
+```bash
+docker exec -i silly-media-silly-media-1 python -c "
+from huggingface_hub import hf_hub_download, snapshot_download
+hf_hub_download('abenzerps/Qwen-Image-2.1-Uncensored-GGUF', 'qwen-image-2.1-UC-Q8_0.gguf')
+snapshot_download('Qwen/Qwen-Image-2.1', allow_patterns=[
+    'model_index.json', 'processor/*', 'scheduler/*', 'text_encoder/*', 'vae/*',
+    'transformer/config.json'])
+"
+```
 
 ### Audio Models
 
@@ -84,6 +100,7 @@ snapshot_download('Lightricks/LTX-2.5-Diffusers', ignore_patterns=[
 | Model           | ID                | VRAM  | Notes                                                 |
 | --------------- | ----------------- | ----- | ----------------------------------------------------- |
 | Qwen Image Edit | `qwen-image-edit` | ~20GB | AI-guided image editing with natural language prompts |
+| Qwen Image 2.1  | `qwen-image-2.1`  | ~10GB | Same model/pipeline as the `qwen-image-2.1` image model (switching between generate and edit doesn't reload). Up to 10 images per edit (`reference_images`), RGBA in/out (`transparent`), outputs up to 3072px; 40 steps (6 with `use_lora`) |
 
 ### LLM Models
 
@@ -125,11 +142,11 @@ Check API and model status.
 {
   "status": "healthy",
   "models_loaded": ["z-image-turbo"],
-  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo"],
+  "available_image_models": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo", "qwen-image-2.1"],
   "available_audio_models": ["xtts-v2", "maya", "demucs"],
   "available_video_models": ["ltx-2.5"],
   "available_vision_models": ["qwen3-vl-8b"],
-  "available_img2img_models": ["qwen-image-edit"],
+  "available_img2img_models": ["qwen-image-edit", "qwen-image-2.1"],
   "available_llm_models": ["huihui-qwen3-4b"],
   "available_music_models": ["ace-step", "ace-step-quality"],
   "available_model3d_models": ["hunyuan3d-2"]
@@ -145,7 +162,7 @@ List available and loaded models by type.
 ```json
 {
   "image": {
-    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo"],
+    "available": ["z-image", "z-image-turbo", "qwen-image-2512", "krea-2-turbo", "qwen-image-2.1"],
     "loaded": ["z-image-turbo"]
   },
   "audio": {
@@ -161,7 +178,7 @@ List available and loaded models by type.
     "loaded": []
   },
   "img2img": {
-    "available": ["qwen-image-edit"],
+    "available": ["qwen-image-edit", "qwen-image-2.1"],
     "loaded": []
   },
   "llm": {
@@ -181,7 +198,7 @@ List available and loaded models by type.
 
 ### `GET /progress`
 
-Get the current image generation progress (useful for polling).
+Get the current image generation progress (useful for polling). `total_steps` is the model's real step count for the request (e.g. 6 for a `qwen-image-2.1` turbo run, 9 for its hybrid).
 
 **Response (when generating)**
 
@@ -256,7 +273,8 @@ Generate an image using the specified model.
   "height": "int, optional (64-2048)",
   "aspect_ratio": "string, optional",
   "base_size": "int, optional (256-2048, default 1024)",
-  "use_lora": "bool, optional (default false, only for qwen-image-2512)",
+  "use_lora": "bool, optional (default false, only for qwen-image-2512 and qwen-image-2.1)",
+  "transparent": "bool, optional (default false, only for qwen-image-2.1 — returns an RGBA PNG; ignored by other models)",
   "loras": "array, optional — [{\"name\": \"...\", \"scale\": 1.0}, ...] stacks any number of LoRAs from data/loras (Z-Image models only; scale 0.0-2.0, default 1.0)",
   "lora": "string, optional — deprecated single-LoRA form, merged into loras",
   "lora_scale": "float, optional (0.0-2.0, default 1.0) — strength for the deprecated lora field"
@@ -273,6 +291,7 @@ Generate an image using the specified model.
 - `qwen-image-2512`: 50 steps, true_cfg_scale 4.0 (or 6 steps, cfg 1.0 with `use_lora: true`)
 - `ovis-image-7b`: 50 steps, cfg_scale 5.0 (not installed — see model table)
 - `krea-2-turbo`: 8 steps, `cfg_scale` **and** `negative_prompt` ignored (guidance disabled — only the positive prompt is encoded). FP8-quantized 12B transformer (~13GB resident); on a desktop-shared 24GB GPU prefer base ≤768–896 — a 1024×1024 square can OOM under concurrent desktop GPU load.
+- `qwen-image-2.1`: 40 steps, cfg_scale 1.0 (trained to sample without guidance). `cfg_scale` > 1 enables true CFG with `negative_prompt` (`" "` if empty), ~2x slower. With `use_lora: true` (opt-in Viggle turbo LoRA `Viggle/Qwen-Image-2.1-viggle-turbo` v0.3 r256, applied unmerged with its own scheduler): default 6 steps; `num_inference_steps` ≤7 snaps to the published 5/6/7-step sigma schedules; ≥8 runs a 9-step hybrid (7 turbo steps, then the base model finishes the last 2 — finer detail and better small text, ~1.5x the 6-step time). Under turbo `cfg_scale` is forced to 1.0 and `negative_prompt` is ignored. `transparent: true` wraps the prompt in the official RGBA template (`This is an RGBA image with transparency. {prompt} The image has alpha channel and the background is transparent.`) and returns an RGBA PNG; without it the output is RGB like every other model. Native 2K: use `base_size` 2048 with any `aspect_ratio` (see Image Sizing).
 
 **Response**
 
@@ -330,6 +349,23 @@ Use a preset with optional base size:
 | `3:2`  | Landscape | 1216 × 832           |
 | `16:9` | Landscape | 1344 × 768           |
 | `21:9` | Ultrawide | 1536 × 640           |
+
+**Qwen Image 2.1 sizes**
+
+`qwen-image-2.1` renders natively up to 2K, so `base_size` 1536 / 2048 work with every
+preset (dimensions are floored to multiples of 64, so they land slightly under the
+model's official 2K table, e.g. 2752 × 1536 for 16:9):
+
+| Value  | 1K (`base_size` 1024) | 1.5K (`base_size` 1536) | 2K (`base_size` 2048) |
+| ------ | --------------------- | ----------------------- | --------------------- |
+| `1:1`  | 1024 × 1024           | 1536 × 1536             | 2048 × 2048           |
+| `3:4`  | 832 × 1152            | 1280 × 1728             | 1728 × 2304           |
+| `2:3`  | 832 × 1216            | 1216 × 1856             | 1664 × 2496           |
+| `9:16` | 704 × 1344            | 1152 × 2048             | 1472 × 2688           |
+| `4:3`  | 1152 × 832            | 1728 × 1280             | 2304 × 1728           |
+| `3:2`  | 1216 × 832            | 1856 × 1216             | 2496 × 1664           |
+| `16:9` | 1344 × 768            | 2048 × 1152             | 2688 × 1536           |
+| `21:9` | 1536 × 640            | 2304 × 960              | 3072 × 1280           |
 
 ### 3. Default
 
@@ -543,7 +579,7 @@ cutout — the non-pixel-art sibling of `/pixelart/generate`. Key differences:
 - **Prompt is used verbatim** — no pixel-art style injection. You write the framing.
 - **Smooth downscale** (LANCZOS) instead of nearest-neighbor, so realistic art doesn't get crunchy.
 - **Any image model** (not just `z-image-turbo`) and **non-square sizes** (full-body characters at 3:4, etc.).
-- **Optional background removal** (rembg u2net) for a transparent PNG, same as pixelart.
+- **Optional background removal** (rembg u2net) for a transparent PNG, same as pixelart. With `qwen-image-2.1` the cutout is rendered natively by the model instead (no rembg).
 
 Pipeline: generate at full resolution → optionally remove background → optionally
 smooth-resize the longest side to `output_size` (aspect preserved).
@@ -575,8 +611,8 @@ Generate a non-pixel-art sprite from a text prompt.
 | Field                 | Type   | Required | Default         | Description                                                                     |
 | --------------------- | ------ | -------- | --------------- | ------------------------------------------------------------------------------- |
 | `prompt`              | string | Yes      | -               | Generation prompt, used **verbatim** (write your own framing)                   |
-| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `qwen-image-2512`, `krea-2-turbo`) |
-| `remove_background`   | bool   | No       | `true`          | Remove background via rembg → transparent cutout                                |
+| `model`               | string | No       | `z-image-turbo` | Image model id (`z-image`, `z-image-turbo`, `z-image-turbo-pm`, `qwen-image-2512`, `krea-2-turbo`, `qwen-image-2.1`) |
+| `remove_background`   | bool   | No       | `true`          | Remove background via rembg → transparent cutout. With `qwen-image-2.1` the transparency is generated natively (`transparent: true`) and rembg is skipped — cleaner edges and hair |
 | `output_size`         | int    | No       | `null`          | Longest-side target (8-2048), aspect preserved; omit to keep full resolution    |
 | `negative_prompt`     | string | No       | `""`            | Negative prompt                                                                 |
 | `num_inference_steps` | int    | No       | model default   | Denoising steps (1-100)                                                         |
@@ -636,7 +672,9 @@ Edit existing images using AI-guided natural language prompts. The model can cha
 - **Emotion Changes**: Make subjects happy, sad, angry, surprised, etc.
 - **Pose Adjustments**: Change body poses and positions
 - **Style Transfer**: Apply artistic styles or visual effects
-- **Preserve Dimensions**: Output matches input image dimensions by default
+- **Preserve Dimensions**: Output matches input image dimensions by default (`qwen-image-edit`); `qwen-image-2.1` defaults to ~1MP at the input image's aspect
+- **Multi-Image Composition** (`qwen-image-2.1`): Up to 9 extra `reference_images` (10 images total). The main image is "image 1", references are "image 2", "image 3"… in the prompt, e.g. `Put the person from image 2 into the scene of image 1`
+- **Transparency** (`qwen-image-2.1`): `transparent: true` returns an RGBA PNG; automatic when the input image has an alpha channel (RGBA inputs are kept as RGBA for this model, other models still receive RGB). For an opaque input, `transparent: true` turns the edit into a cutout: if the prompt doesn't mention transparency, `Make the background transparent.` is appended. Wording matters — "Remove the background and make it transparent, keep only …" works reliably, while "extract …", "RGBA" or "onto a transparent background" phrasings tend to erase the subject too
 
 ### `GET /img2img/models`
 
@@ -646,14 +684,14 @@ List available img2img models.
 
 ```json
 {
-  "available": ["qwen-image-edit"],
+  "available": ["qwen-image-edit", "qwen-image-2.1"],
   "loaded": []
 }
 ```
 
 ### `GET /img2img/progress`
 
-Get the current img2img edit progress (useful for polling during edits).
+Get the current img2img edit progress (useful for polling during edits). `total_steps` reflects the model's real step count (e.g. 6 for a `qwen-image-2.1` turbo edit).
 
 **Response (when editing)**
 
@@ -682,7 +720,7 @@ Edit an image using base64-encoded image in JSON body.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model ID (e.g., `qwen-image-edit`) |
+| `model` | string | Model ID (`qwen-image-edit`, `qwen-image-2.1`) |
 
 **Request Body**
 
@@ -691,12 +729,14 @@ Edit an image using base64-encoded image in JSON body.
   "image": "base64_encoded_image_data...",
   "prompt": "Make the person look happy and smiling",
   "negative_prompt": " ",
-  "num_inference_steps": 20,
-  "true_cfg_scale": 4.0,
+  "num_inference_steps": null,
+  "true_cfg_scale": null,
   "seed": null,
   "width": null,
   "height": null,
-  "use_lora": false
+  "use_lora": false,
+  "reference_images": null,
+  "transparent": false
 }
 ```
 
@@ -705,24 +745,28 @@ Edit an image using base64-encoded image in JSON body.
 | `image`               | string | Yes      | -       | Base64 encoded image (PNG, JPG)                                           |
 | `prompt`              | string | Yes      | -       | Edit instruction for the image                                            |
 | `negative_prompt`     | string | No       | `" "`   | Negative prompt (model requires non-empty)                                |
-| `num_inference_steps` | int    | No       | `20`    | Number of inference steps (1-100)                                         |
-| `true_cfg_scale`      | float  | No       | `4.0`   | CFG scale for guidance (1.0-20.0)                                         |
+| `num_inference_steps` | int    | No       | `null`  | Number of inference steps (1-100); omit for the model default: `qwen-image-edit` 20, `qwen-image-2.1` 40 (6 with `use_lora`) |
+| `true_cfg_scale`      | float  | No       | `null`  | CFG scale for guidance (1.0-20.0); omit for the model default: `qwen-image-edit` 4.0, `qwen-image-2.1` 1.0 (= off; >1 enables true CFG, ~2x slower) |
 | `seed`                | int    | No       | `null`  | Random seed (-1 or null for random)                                       |
-| `width`               | int    | No       | `null`  | Output width (64-2048, defaults to input image width)                     |
-| `height`              | int    | No       | `null`  | Output height (64-2048, defaults to input image height)                   |
-| `use_lora`            | bool   | No       | `false` | Use Lightning LoRA for faster inference (recommended: 4-6 steps, CFG 1.0) |
+| `width`               | int    | No       | `null`  | Output width (64-3072, max side per model: `qwen-image-edit` 2048, `qwen-image-2.1` 3072). Default: input width (`qwen-image-edit`); ~1MP at the input's aspect, multiples of 32 (`qwen-image-2.1`) |
+| `height`              | int    | No       | `null`  | Output height (64-3072, same per-model max and defaults as `width`)       |
+| `use_lora`            | bool   | No       | `false` | Use the model's speed LoRA: `qwen-image-edit` Lightning (recommended: 4-6 steps, CFG 1.0); `qwen-image-2.1` 6-step turbo (5-7 steps snap to the published schedules, ≥8 = 9-step hybrid; CFG forced to 1.0) |
+| `reference_images`    | array  | No       | `null`  | Extra base64 images (max 9) — `image 2`, `image 3`… in the prompt. `qwen-image-2.1` only (400 on other models) |
+| `transparent`         | bool   | No       | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`; automatic when the input image has alpha) |
 
-> **Lightning LoRA**: When `use_lora: true`, use `num_inference_steps: 4-6` and `true_cfg_scale: 1.0` for optimal results. Higher CFG values may cause artifacts with distilled models. The LoRA (`lightx2v/Qwen-Image-Lightning`) uses the EulerAncestral scheduler for best quality.
+> **Lightning LoRA** (`qwen-image-edit`): When `use_lora: true`, use `num_inference_steps: 4-6` and `true_cfg_scale: 1.0` for optimal results. Higher CFG values may cause artifacts with distilled models. The LoRA (`lightx2v/Qwen-Image-Lightning`) uses the EulerAncestral scheduler for best quality.
+
+> **Turbo LoRA** (`qwen-image-2.1`): `use_lora: true` loads the Viggle 6-step turbo LoRA with its own scheduler — omit `num_inference_steps` for 6 steps (5-7 snap to the published schedules; ≥8 runs the 9-step hybrid). `true_cfg_scale` is forced to 1.0 and `negative_prompt` ignored under turbo.
 
 **Response**
 
 - Content-Type: `image/png`
-- Body: Raw PNG bytes
+- Body: Raw PNG bytes (RGBA when `transparent` / alpha input on `qwen-image-2.1`, otherwise RGB)
 
 **Errors**
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request or missing image field |
+| 400 | Invalid request or missing image field, `width`/`height` above the model's max side, `reference_images` on a model that doesn't support them |
 | 404 | Model not found |
 | 500 | Edit failed |
 
@@ -733,7 +777,7 @@ Edit an image using multipart file upload.
 **Path Parameters**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model ID (e.g., `qwen-image-edit`) |
+| `model` | string | Model ID (`qwen-image-edit`, `qwen-image-2.1`) |
 
 **Request** (multipart/form-data)
 | Field | Type | Required | Default | Description |
@@ -741,12 +785,14 @@ Edit an image using multipart file upload.
 | `image` | file | Yes | - | Image file to edit |
 | `prompt` | string | Yes | - | Edit instruction for the image |
 | `negative_prompt` | string | No | `" "` | Negative prompt |
-| `num_inference_steps` | int | No | `20` | Number of inference steps |
-| `true_cfg_scale` | float | No | `4.0` | CFG scale for guidance |
+| `num_inference_steps` | int | No | `null` | Number of inference steps (omit for the model default) |
+| `true_cfg_scale` | float | No | `null` | CFG scale for guidance (omit for the model default) |
 | `seed` | int | No | `null` | Random seed |
-| `width` | int | No | `null` | Output width (defaults to input image width) |
-| `height` | int | No | `null` | Output height (defaults to input image height) |
-| `use_lora` | bool | No | `false` | Use Lightning LoRA for faster inference |
+| `width` | int | No | `null` | Output width (defaults as in the JSON endpoint) |
+| `height` | int | No | `null` | Output height (defaults as in the JSON endpoint) |
+| `use_lora` | bool | No | `false` | Use the model's speed LoRA (Lightning / 6-step turbo) |
+| `transparent` | bool | No | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`) |
+| `reference_images` | file | No | - | Extra reference image (repeat the field for several, max 9) — `qwen-image-2.1` only |
 
 **Response**
 
@@ -756,8 +802,9 @@ Edit an image using multipart file upload.
 **Errors**
 | Code | Description |
 |------|-------------|
-| 400 | Invalid image file |
+| 400 | Invalid image file, size above the model's max side, or `reference_images` on an unsupported model |
 | 404 | Model not found |
+| 422 | Invalid form field values |
 | 500 | Edit failed |
 
 ---
@@ -2217,6 +2264,57 @@ curl -X POST http://localhost:4201/generate/krea-2-turbo \
   -o fox.png
 ```
 
+#### Qwen Image 2.1
+
+```bash
+# Base model (40 steps, no CFG) — strong at text and typography
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A vintage travel poster for Vilnius with the headline \"VILNIUS\" in bold art deco lettering",
+    "aspect_ratio": "3:4"
+  }' \
+  -o poster.png
+
+# Turbo LoRA (6 steps)
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A close-up portrait of an elderly fisherman, soft window light",
+    "use_lora": true
+  }' \
+  -o portrait_fast.png
+
+# 9-step hybrid (7 turbo steps + 2 base steps) — finer detail, better small text
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A cafe chalkboard menu listing coffee drinks and prices",
+    "use_lora": true,
+    "num_inference_steps": 9
+  }' \
+  -o menu.png
+
+# Native 2K, 16:9 (2688×1536)
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A misty pine forest at dawn, wide landscape photography",
+    "aspect_ratio": "16:9",
+    "base_size": 2048
+  }' \
+  -o forest_2k.png
+
+# Transparent sticker (RGBA PNG)
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A cute cartoon cat sticker with a thick white outline",
+    "transparent": true
+  }' \
+  -o sticker.png
+```
+
 ### Image Editing (Img2Img)
 
 #### Edit Image (Base64 JSON)
@@ -2252,6 +2350,65 @@ curl -X POST http://localhost:4201/img2img/edit/qwen-image-edit/upload \
   -F "prompt=Change pose to sitting down" \
   -F "num_inference_steps=25" \
   -o sitting.png
+```
+
+#### Qwen Image 2.1 Edit
+
+```bash
+IMAGE_B64=$(base64 -w 0 input.png)
+
+# Single-image edit (40 steps; add "use_lora": true for 6 steps)
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image\": \"$IMAGE_B64\",
+    \"prompt\": \"Change the season to winter, with snow on the ground\"
+  }" \
+  -o winter.png
+```
+
+#### Multi-Reference Composition (Qwen Image 2.1)
+
+```bash
+# Main image = image 1, reference_images = image 2, image 3, ... (max 9)
+SCENE_B64=$(base64 -w 0 scene.png)
+PERSON_B64=$(base64 -w 0 person.png)
+
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image\": \"$SCENE_B64\",
+    \"reference_images\": [\"$PERSON_B64\"],
+    \"prompt\": \"Put the person from image 2 into the scene of image 1\"
+  }" \
+  -o composite.png
+```
+
+#### Transparent Extraction (Qwen Image 2.1)
+
+```bash
+IMAGE_B64=$(base64 -w 0 product.jpg)
+
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image\": \"$IMAGE_B64\",
+    \"prompt\": \"Remove the background and make it transparent, keep only the sneaker.\",
+    \"transparent\": true
+  }" \
+  -o sneaker.png
+```
+
+#### Multi-Reference Upload (Qwen Image 2.1)
+
+```bash
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1/upload \
+  -F "image=@room.png" \
+  -F "reference_images=@sofa.png" \
+  -F "reference_images=@lamp.png" \
+  -F "prompt=Place the sofa from image 2 and the lamp from image 3 into the room of image 1" \
+  -F "use_lora=true" \
+  -o furnished.png
 ```
 
 ### TTS Generation

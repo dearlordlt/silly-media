@@ -323,7 +323,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.IMAGE
+                vram_manager.get_model_info(m).has_type(ModelType.IMAGE)
             ],
         },
         "audio": {
@@ -331,7 +331,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.AUDIO
+                vram_manager.get_model_info(m).has_type(ModelType.AUDIO)
             ],
         },
         "video": {
@@ -339,7 +339,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.VIDEO
+                vram_manager.get_model_info(m).has_type(ModelType.VIDEO)
             ],
         },
         "vision": {
@@ -347,7 +347,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.VISION
+                vram_manager.get_model_info(m).has_type(ModelType.VISION)
             ],
         },
         "img2img": {
@@ -355,7 +355,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.IMG2IMG
+                vram_manager.get_model_info(m).has_type(ModelType.IMG2IMG)
             ],
         },
         "llm": {
@@ -363,7 +363,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.LLM
+                vram_manager.get_model_info(m).has_type(ModelType.LLM)
             ],
         },
         "music": {
@@ -371,7 +371,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.MUSIC
+                vram_manager.get_model_info(m).has_type(ModelType.MUSIC)
             ],
         },
         "model3d": {
@@ -379,7 +379,7 @@ async def list_models():
             "loaded": [
                 m for m in vram_manager.get_loaded_models()
                 if vram_manager.get_model_info(m) and
-                vram_manager.get_model_info(m).model_type == ModelType.MODEL3D
+                vram_manager.get_model_info(m).has_type(ModelType.MODEL3D)
             ],
         },
     }
@@ -461,7 +461,11 @@ async def generate_image(
                 return callback_kwargs
 
             # Start progress tracking
-            total_steps = request.num_inference_steps or model_instance.default_steps
+            # Models with turbo/hybrid schedules report their real step count
+            if hasattr(model_instance, "progress_total"):
+                total_steps = model_instance.progress_total(request)
+            else:
+                total_steps = request.num_inference_steps or model_instance.default_steps
             progress.start(total_steps)
 
             try:

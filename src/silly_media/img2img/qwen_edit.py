@@ -19,6 +19,10 @@ class QwenImageEditModel(BaseImg2ImgModel):
     model_id = "ovedrive/Qwen-Image-Edit-2511-4bit"
     display_name = "Qwen Image Edit"
     estimated_vram_gb = 20.0
+    max_side = 2048
+
+    default_steps = 20
+    default_cfg = 4.0
 
     def __init__(self) -> None:
         super().__init__()
@@ -90,6 +94,9 @@ class QwenImageEditModel(BaseImg2ImgModel):
         width = request.width if request.width is not None else image.size[0]
         height = request.height if request.height is not None else image.size[1]
 
+        steps = request.num_inference_steps or self.default_steps
+        cfg = request.true_cfg_scale if request.true_cfg_scale is not None else self.default_cfg
+
         # Setup generator for reproducible results
         generator = None
         if request.seed is not None and request.seed >= 0:
@@ -97,7 +104,7 @@ class QwenImageEditModel(BaseImg2ImgModel):
 
         logger.info(
             f"Editing image: {image.size[0]}x{image.size[1]} -> {width}x{height}, "
-            f"steps={request.num_inference_steps}, cfg={request.true_cfg_scale}, "
+            f"steps={steps}, cfg={cfg}, "
             f"use_lora={request.use_lora}, prompt=****"
         )
 
@@ -106,8 +113,8 @@ class QwenImageEditModel(BaseImg2ImgModel):
             "image": image,
             "prompt": request.prompt,
             "negative_prompt": request.negative_prompt or " ",
-            "num_inference_steps": request.num_inference_steps,
-            "true_cfg_scale": request.true_cfg_scale,
+            "num_inference_steps": steps,
+            "true_cfg_scale": cfg,
             "generator": generator,
             "width": width,
             "height": height,

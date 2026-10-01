@@ -44,7 +44,8 @@ async def generate_sprite(request: SpriteRequest):
 
     Pipeline:
     1. Generate at full resolution with the chosen image model (prompt used as-is)
-    2. Optionally remove the background via rembg (transparent cutout)
+    2. Optionally remove the background via rembg (transparent cutout); models
+       with native transparency (qwen-image-2.1) generate the cutout directly
     3. Optionally smooth-downscale (LANCZOS) so the longest side == output_size
 
     Returns a PNG (RGBA, transparent if background removal is enabled).
@@ -65,8 +66,18 @@ async def generate_sprite(request: SpriteRequest):
                 return callback_kwargs
 
             # Best-effort total for the progress bar (cosmetic).
-            total_steps = request.num_inference_steps or (9 if "turbo" in request.model else 30)
+            if hasattr(model_instance, "progress_total"):
+                total_steps = model_instance.progress_total(request)
+            else:
+                total_steps = request.num_inference_steps or (9 if "turbo" in request.model else 30)
             progress.start(total_steps)
+
+            # Models that render transparency natively (qwen-image-2.1) make the
+            # cutout themselves, so rembg is skipped.
+            native_alpha = request.remove_background and getattr(
+                model_instance, "supports_transparency", False
+            )
+            gen_request = request.model_copy(update={"transparent": True}) if native_alpha else request
 
             try:
                 # SpriteRequest is a GenerateRequest subclass with width/height
@@ -76,16 +87,16 @@ async def generate_sprite(request: SpriteRequest):
                 # Some models (e.g. ovis) don't accept a progress callback.
                 gen = model_instance.generate
                 if "progress_callback" in inspect.signature(gen).parameters:
-                    image = await asyncio.to_thread(gen, request, progress_callback)
+                    image = await asyncio.to_thread(gen, gen_request, progress_callback)
                 else:
-                    image = await asyncio.to_thread(gen, request)
+                    image = await asyncio.to_thread(gen, gen_request)
             finally:
                 progress.finish()
 
             processed = await asyncio.to_thread(
                 process_sprite,
                 image,
-                remove_bg=request.remove_background,
+                remove_bg=request.remove_background and not native_alpha,
                 output_size=request.output_size,
             )
 

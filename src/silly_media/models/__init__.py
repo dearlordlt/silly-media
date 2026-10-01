@@ -50,3 +50,17 @@ try:
     __all__.append("Krea2TurboModel")
 except ImportError:
     pass  # Krea2Pipeline not available in this diffusers version
+
+# Qwen-Image-2.1 Uncensored (GGUF) needs diffusers main with QwenImage21Pipeline. Its
+# weights are a GGUF + partial base repo download, so only offer it once both are
+# cached. Also registered as an img2img model (same instance) in img2img/__init__.py.
+try:
+    from diffusers import QwenImage21Pipeline  # noqa: F401 - check if available
+
+    from .qwen_image21 import QwenImage21Model
+
+    if QwenImage21Model.weights_cached():
+        ModelRegistry.register("qwen-image-2.1", QwenImage21Model)
+        __all__.append("QwenImage21Model")
+except ImportError:
+    pass  # QwenImage21Pipeline not available in this diffusers version

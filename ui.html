@@ -884,6 +884,59 @@
       background: var(--accent);
       color: white;
     }
+    .edit-model-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .edit-model-row label {
+      font-size: 0.85rem;
+      margin: 0;
+    }
+    .edit-model-row select {
+      flex: 1;
+      margin: 0;
+    }
+    .edit-ref-thumbs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .edit-ref-thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--surface2);
+    }
+    .edit-ref-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .edit-ref-thumb span {
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      right: 0;
+      font-size: 0.65rem;
+      text-align: center;
+      background: rgba(0,0,0,0.6);
+    }
+    .edit-ref-thumb button {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      padding: 0 5px;
+      font-size: 0.7rem;
+      line-height: 1.4;
+    }
+    .edit-chip.needs-ref {
+      border: 1px dashed var(--text-dim);
+    }
     .edit-progress {
       margin: 8px 0;
       padding: 6px 8px;
@@ -1363,6 +1416,38 @@
     .help-close:hover { color: var(--text); }
 
     /* Settings modal */
+    .preset-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .preset-chips .btn-small.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .qwen21-section {
+      border: 1px solid var(--surface2);
+      border-radius: 8px;
+      padding: 4px 10px 10px;
+      margin: 8px 0;
+    }
+    /* Checkerboard behind images so transparent (RGBA) results are visible */
+    .preview-container img,
+    .gallery-grid img,
+    #editModalImg,
+    .edit-result-thumb img,
+    .modal img {
+      background-color: #ddd;
+      background-image:
+        linear-gradient(45deg, #bbb 25%, transparent 25%),
+        linear-gradient(-45deg, #bbb 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #bbb 75%),
+        linear-gradient(-45deg, transparent 75%, #bbb 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+
     .settings-modal {
       display: none;
       position: fixed;
@@ -1651,6 +1736,28 @@
         </div>
       </div>
 
+      <div id="qwen21Section" class="qwen21-section" style="display:none">
+        <label>Qwen 2.1 Size</label>
+        <div class="preset-chips" id="qwen21SizeChips">
+          <button class="btn-secondary btn-small" data-size="1024" onclick="applyQwen21Size(1024)" title="~1MP, fastest">1K</button>
+          <button class="btn-secondary btn-small" data-size="1536" onclick="applyQwen21Size(1536)" title="~2.4MP">1.5K</button>
+          <button class="btn-secondary btn-small" data-size="2048" onclick="applyQwen21Size(2048)" title="~4MP, native 2K">2K native</button>
+        </div>
+        <label>Qwen 2.1 Settings</label>
+        <div class="preset-chips">
+          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('turbo6')" title="Turbo LoRA, 6 steps, no CFG">Turbo 6</button>
+          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('turbo9')" title="7 turbo + 2 base steps: finer detail, better small text">Turbo 9 hybrid</button>
+          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('base40')" title="Base model, 40 steps, no CFG (default)">Base 40</button>
+          <button class="btn-secondary btn-small" onclick="applyQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 4 with negative prompt (~2x slower)">Base 40 + CFG 4</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+          <input type="checkbox" id="transparent" onchange="saveSettings()" style="width:auto;margin:0">
+          <span>Transparent background (RGBA PNG)</span>
+        </label>
+        <label>Prompt Presets</label>
+        <div class="preset-chips" id="qwen21PromptChips"></div>
+      </div>
+
       <div class="collapsible-header" onclick="toggleCollapsible('advancedSection')">
         <label style="margin:0;cursor:pointer">Advanced Settings</label>
         <span id="advancedSection-icon">+</span>
@@ -1680,13 +1787,14 @@
           <option value="z-image-turbo" selected>Z-Image Turbo</option>
           <option value="z-image-turbo-pm">Z-Image Turbo PM</option>
           <option value="qwen-image-2512">Qwen Image 2512</option>
+          <option value="qwen-image-2.1">Qwen Image 2.1 Uncensored</option>
           <option value="krea-2-turbo">Krea 2 Turbo</option>
         </select>
 
         <div id="loraOptions" style="display: none;">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 8px;">
             <input type="checkbox" id="useLora" onchange="onLoraChange()" style="width: auto; margin: 0;">
-            <span>Use Turbo LoRA (6 steps, faster)</span>
+            <span id="useLoraLabel">Use Turbo LoRA (6 steps, faster)</span>
           </label>
         </div>
 
@@ -1966,6 +2074,14 @@ Results:
       <div class="edit-modal-controls">
         <h3>Edit Image</h3>
 
+        <div class="edit-model-row">
+          <label for="editModel">Model</label>
+          <select id="editModel" onchange="onEditModelChange()">
+            <option value="qwen-image-edit">Qwen Image Edit</option>
+            <option value="qwen-image-2.1">Qwen Image 2.1 Uncensored</option>
+          </select>
+        </div>
+
         <div class="edit-custom-prompt">
           <label>Custom Prompt</label>
           <textarea id="editCustomPrompt" placeholder="Enter custom edit instruction..."></textarea>
@@ -1981,11 +2097,48 @@ Results:
           <div class="edit-preset-chips" id="poseChips"></div>
         </div>
 
+        <div id="editQwen21Section" style="display:none">
+          <div class="edit-preset-section">
+            <h4>Qwen 2.1 Edits</h4>
+            <div class="edit-preset-chips" id="qwen21EditChips"></div>
+          </div>
+          <div class="edit-preset-section">
+            <h4>Reference Images <button class="btn-secondary btn-small" onclick="clearEditReferences()">Clear</button></h4>
+            <div class="edit-clothes-hint">The edited image is "image 1"; references become image 2, 3, … (up to 9)</div>
+            <input type="file" id="editRefInput" accept="image/*" multiple onchange="addEditReferences(this.files); this.value=''">
+            <div class="edit-ref-thumbs" id="editRefThumbs"></div>
+          </div>
+          <div class="edit-options-grid">
+            <div class="edit-clothes-option">
+              <label>
+                <input type="checkbox" id="editTransparent">
+                Transparent background
+              </label>
+            </div>
+            <div class="edit-clothes-option">
+              <label>
+                Size
+                <select id="editSize" style="margin:0;padding:2px 4px;font-size:0.8rem">
+                  <option value="auto">Match input (~1MP)</option>
+                  <option value="1536">1.5K</option>
+                  <option value="2048">2K</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div class="preset-chips">
+            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('turbo6')" title="Turbo LoRA, 6 steps">Turbo 6</button>
+            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('turbo9')" title="7 turbo + 2 base steps">Turbo 9 hybrid</button>
+            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('base40')" title="Base model, 40 steps, no CFG">Base 40</button>
+            <button class="btn-secondary btn-small" onclick="applyEditQwen21Preset('base40cfg')" title="Base model, 40 steps, true CFG 4 (~2x slower)">Base 40 + CFG 4</button>
+          </div>
+        </div>
+
         <div class="edit-options-grid">
           <div class="edit-clothes-option" id="editLoraOption">
             <label>
               <input type="checkbox" id="editUseLora" onchange="toggleLoraOption()">
-              Lightning LoRA (fast)
+              <span id="editUseLoraLabel">Lightning LoRA (fast)</span>
             </label>
           </div>
           <div class="edit-clothes-option" id="editNegativeOption">
@@ -2117,6 +2270,8 @@ Results:
     async function init() {
       db = await openDB();
       loadSavedSettings();
+      lastModel = document.getElementById('model').value;
+      renderQwen21PromptChips();
       fetchZLoras();
       loadHistory();
       loadNegHistory();
@@ -2264,6 +2419,7 @@ Results:
         apiUrl: document.getElementById('apiUrl').value,
         model: document.getElementById('model').value,
         useLora: document.getElementById('useLora').checked,
+        transparent: document.getElementById('transparent').checked,
         zLoras: zLoraState,
         negativePrompt: document.getElementById('negativePrompt').value,
         batchJson: document.getElementById('batchJson').value,
@@ -2303,6 +2459,7 @@ Results:
         if (s.apiUrl) document.getElementById('apiUrl').value = s.apiUrl;
         if (s.model) document.getElementById('model').value = s.model;
         if (s.useLora !== undefined) document.getElementById('useLora').checked = s.useLora;
+        if (s.transparent !== undefined) document.getElementById('transparent').checked = s.transparent;
         if (s.zLoras) zLoraState = s.zLoras;
         // Update UI to show/hide LoRA options based on selected model (without triggering save)
         updateLoraVisibility();
@@ -2661,6 +2818,7 @@ Results:
       // Range sliders with auto-save
       document.getElementById('baseSize').oninput = (e) => {
         document.getElementById('baseSizeValue').textContent = e.target.value;
+        updateQwen21SizeChips();
         saveSettings();
       };
       document.getElementById('steps').oninput = (e) => {
@@ -2677,6 +2835,7 @@ Results:
         const custom = e.target.value === 'custom';
         document.getElementById('customSize').style.display = custom ? 'block' : 'none';
         document.getElementById('baseSizeRow').style.display = custom ? 'none' : 'block';
+        updateQwen21SizeChips();
         saveSettings();
       };
 
@@ -2774,11 +2933,14 @@ Results:
 
       // Add use_lora for models that support it
       const model = document.getElementById('model').value;
-      if (model === 'qwen-image-2512') {
+      if (hasTurboLora(model)) {
         const useLora = document.getElementById('useLora').checked;
         if (useLora) {
           settings.use_lora = true;
         }
+      }
+      if (model === 'qwen-image-2.1' && document.getElementById('transparent').checked) {
+        settings.transparent = true;
       }
 
       // Stacked LoRAs for Z-Image models
@@ -2866,74 +3028,141 @@ Results:
         .map(l => ({ name: l.name, scale: Number(zLoraState[l.name].scale) || 1.0 }));
     }
 
+    // Models with a turbo LoRA toggle (use_lora): steps/cfg with and without it
+    const TURBO_LORA_DEFAULTS = {
+      'qwen-image-2512': { label: 'Use Turbo LoRA (6 steps, faster)', on: [6, 1.0], off: [50, 4.0] },
+      'qwen-image-2.1': { label: 'Use Turbo LoRA (6 steps, ~5x faster; 9 steps = hybrid)', on: [6, 1.0], off: [40, 1.0] },
+    };
+
+    function hasTurboLora(model) {
+      return model in TURBO_LORA_DEFAULTS;
+    }
+
+    function setStepsCfg(steps, cfg) {
+      document.getElementById('steps').value = steps;
+      document.getElementById('stepsValue').textContent = steps;
+      document.getElementById('cfgScale').value = cfg;
+      document.getElementById('cfgScaleValue').textContent = Number(cfg).toFixed(1);
+    }
+
     // Helper to update LoRA visibility without triggering save (used during load)
     function updateLoraVisibility() {
       const model = document.getElementById('model').value;
       const loraOptions = document.getElementById('loraOptions');
-      loraOptions.style.display = model === 'qwen-image-2512' ? 'block' : 'none';
+      loraOptions.style.display = hasTurboLora(model) ? 'block' : 'none';
+      if (hasTurboLora(model)) {
+        document.getElementById('useLoraLabel').textContent = TURBO_LORA_DEFAULTS[model].label;
+      }
       document.getElementById('zLoraSection').style.display = isZImageModel(model) ? 'block' : 'none';
+      document.getElementById('qwen21Section').style.display = model === 'qwen-image-2.1' ? 'block' : 'none';
+      updateQwen21SizeChips();
     }
 
     // Model change handler - show/hide LoRA options and update defaults
+    let lastModel = null;
     function onModelChange() {
       const model = document.getElementById('model').value;
-      document.getElementById('zLoraSection').style.display = isZImageModel(model) ? 'block' : 'none';
-      const loraOptions = document.getElementById('loraOptions');
-      const stepsInput = document.getElementById('steps');
-      const cfgInput = document.getElementById('cfgScale');
-      const cfgValue = document.getElementById('cfgScaleValue');
+      // Qwen 2.1 turbo is opt-in: always start from the base model when switching to it
+      if (model === 'qwen-image-2.1' && lastModel !== model) {
+        document.getElementById('useLora').checked = false;
+      }
+      lastModel = model;
+      updateLoraVisibility();
 
-      // Show LoRA option only for qwen-image-2512
-      if (model === 'qwen-image-2512') {
-        loraOptions.style.display = 'block';
-        // Check if LoRA is enabled and set defaults accordingly
-        const useLora = document.getElementById('useLora').checked;
-        if (useLora) {
-          stepsInput.value = 6;
-          cfgInput.value = 1.0;
-          if (cfgValue) cfgValue.textContent = '1.0';
-        } else {
-          stepsInput.value = 50;
-          cfgInput.value = 4.0;
-          if (cfgValue) cfgValue.textContent = '4.0';
-        }
-      } else {
-        loraOptions.style.display = 'none';
-        // Set defaults based on model
-        if (model === 'z-image-turbo' || model === 'z-image-turbo-pm') {
-          stepsInput.value = 9;
-          cfgInput.value = 0.0;
-          if (cfgValue) cfgValue.textContent = '0.0';
-        } else if (model === 'z-image') {
-          stepsInput.value = 30;
-          cfgInput.value = 4.0;
-          if (cfgValue) cfgValue.textContent = '4.0';
-        } else if (model === 'krea-2-turbo') {
-          stepsInput.value = 8;
-          cfgInput.value = 0.0;
-          if (cfgValue) cfgValue.textContent = '0.0';
-        }
+      if (hasTurboLora(model)) {
+        const d = TURBO_LORA_DEFAULTS[model];
+        const [steps, cfg] = document.getElementById('useLora').checked ? d.on : d.off;
+        setStepsCfg(steps, cfg);
+      } else if (model === 'z-image-turbo' || model === 'z-image-turbo-pm') {
+        setStepsCfg(9, 0.0);
+      } else if (model === 'z-image') {
+        setStepsCfg(30, 4.0);
+      } else if (model === 'krea-2-turbo') {
+        setStepsCfg(8, 0.0);
       }
       saveSettings();
     }
 
     // LoRA checkbox change handler
     function onLoraChange() {
-      const useLora = document.getElementById('useLora').checked;
-      const stepsInput = document.getElementById('steps');
-      const cfgInput = document.getElementById('cfgScale');
-      const cfgValue = document.getElementById('cfgScaleValue');
-
-      if (useLora) {
-        stepsInput.value = 6;
-        cfgInput.value = 1.0;
-        if (cfgValue) cfgValue.textContent = '1.0';
-      } else {
-        stepsInput.value = 50;
-        cfgInput.value = 4.0;
-        if (cfgValue) cfgValue.textContent = '4.0';
-      }
+      const model = document.getElementById('model').value;
+      const d = TURBO_LORA_DEFAULTS[model] || TURBO_LORA_DEFAULTS['qwen-image-2512'];
+      const [steps, cfg] = document.getElementById('useLora').checked ? d.on : d.off;
+      setStepsCfg(steps, cfg);
       saveSettings();
+    }
+
+    // --- Qwen-Image 2.1 presets ---
+    const QWEN21_PRESETS = {
+      turbo6: { useLora: true, steps: 6, cfg: 1.0 },
+      turbo9: { useLora: true, steps: 9, cfg: 1.0 },
+      base40: { useLora: false, steps: 40, cfg: 1.0 },
+      base40cfg: { useLora: false, steps: 40, cfg: 4.0, negative: 'blurry, low quality, distorted, deformed, bad anatomy, watermark, jpeg artifacts' },
+    };
+
+    function applyQwen21Preset(name) {
+      const p = QWEN21_PRESETS[name];
+      document.getElementById('useLora').checked = p.useLora;
+      setStepsCfg(p.steps, p.cfg);
+      const neg = document.getElementById('negativePrompt');
+      if (p.negative && !neg.value.trim()) neg.value = p.negative;
+      saveSettings();
+      showToast(`Qwen 2.1: ${p.useLora ? 'turbo' : 'base'} ${p.steps} steps, CFG ${p.cfg}`);
+    }
+
+    // Size presets keep the aspect ratio and scale the pixel area (~1MP / ~2.4MP / ~4MP)
+    function applyQwen21Size(base) {
+      const aspect = document.getElementById('aspectRatio');
+      if (aspect.value === 'custom') {
+        const w = parseInt(document.getElementById('width').value) || 1024;
+        const h = parseInt(document.getElementById('height').value) || 1024;
+        const scale = Math.sqrt((base * base) / (w * h));
+        // Custom sizes are capped at 2048 per side by the API; use an aspect ratio for wider 2K
+        const fit = Math.min(scale, 2048 / Math.max(w, h));
+        document.getElementById('width').value = Math.max(64, Math.floor(w * fit / 64) * 64);
+        document.getElementById('height').value = Math.max(64, Math.floor(h * fit / 64) * 64);
+      } else {
+        document.getElementById('baseSize').value = base;
+        document.getElementById('baseSizeValue').textContent = base;
+      }
+      updateQwen21SizeChips();
+      saveSettings();
+    }
+
+    function updateQwen21SizeChips() {
+      const base = document.getElementById('baseSize').value;
+      const custom = document.getElementById('aspectRatio').value === 'custom';
+      document.querySelectorAll('#qwen21SizeChips button').forEach(b => {
+        b.classList.toggle('active', !custom && b.dataset.size === base);
+      });
+    }
+
+    const QWEN21_PROMPT_PRESETS = [
+      { label: 'Typography poster', prompt: 'A bold typographic poster with the headline "MIDNIGHT JAZZ" in large art-deco lettering, subtitle "Live every Friday at The Blue Room" in a clean sans-serif below, gold and deep navy palette, geometric ornaments, high contrast print design' },
+      { label: 'Neon sign', prompt: 'A glowing neon sign that reads "OPEN ALL NIGHT" mounted on a brick wall, rainy night, pink and cyan reflections on wet pavement, cinematic photo, shallow depth of field' },
+      { label: 'Sticker / sprite', transparent: true, prompt: 'A cute cartoon fox mascot sticker, full body, waving, thick clean outline, flat vibrant colors, centered' },
+      { label: 'Game asset', transparent: true, prompt: 'A single ornate fantasy treasure chest game asset, three-quarter view, hand-painted style, soft rim light, centered, isolated object' },
+      { label: 'Product shot', prompt: 'Studio product photograph of a matte black ceramic coffee mug on a seamless warm grey backdrop, soft box lighting from the left, subtle reflection, crisp detail, commercial catalog style' },
+      { label: 'Portrait lighting', prompt: 'Cinematic close-up portrait of a woman in her thirties by a rain-streaked window at dusk, warm tungsten key light and cool blue fill, natural skin texture, 85mm lens, shallow depth of field, film grain' },
+      { label: 'Infographic', prompt: 'A clean infographic titled "How Coffee Is Made" with five numbered steps: 1 Harvest, 2 Process, 3 Roast, 4 Grind, 5 Brew, each with a simple flat icon and a one-line caption, pastel colors, white background' },
+      { label: 'Menu board', prompt: 'A rustic chalkboard cafe menu titled "Today\'s Specials" listing: Avocado Toast $9, Shakshuka $12, Blueberry Pancakes $10, Flat White $4.50, hand-lettered chalk style, small doodles of coffee cups' },
+    ];
+
+    function renderQwen21PromptChips() {
+      const el = document.getElementById('qwen21PromptChips');
+      el.innerHTML = '';
+      QWEN21_PROMPT_PRESETS.forEach(p => {
+        const b = document.createElement('button');
+        b.className = 'btn-secondary btn-small';
+        b.textContent = p.label;
+        b.title = p.prompt;
+        b.onclick = () => {
+          document.getElementById('prompt').value = p.prompt;
+          document.getElementById('transparent').checked = !!p.transparent;
+          saveSettings();
+        };
+        el.appendChild(b);
+      });
     }
 
     // Progress polling (generation progress in preview container)
@@ -3021,7 +3250,7 @@ Results:
         const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
         // Save to gallery
-        const id = await saveImage(blob, settings);
+        const id = await saveImage(blob, { ...settings, model: getModel() });
         await loadGallery();
 
         // Show preview with prompt
@@ -3627,6 +3856,15 @@ Results:
       document.getElementById('cfgScaleValue').textContent = s.cfg_scale || 5;
       document.getElementById('seed').value = s.seed || -1;
 
+      // Model-specific options (older images don't store the model)
+      if (s.model && [...document.getElementById('model').options].some(o => o.value === s.model)) {
+        document.getElementById('model').value = s.model;
+        lastModel = s.model;
+        updateLoraVisibility();
+      }
+      document.getElementById('useLora').checked = !!s.use_lora;
+      document.getElementById('transparent').checked = !!s.transparent;
+
       if (s.width && s.height) {
         document.getElementById('aspectRatio').value = 'custom';
         document.getElementById('customSize').style.display = 'block';
@@ -3643,6 +3881,8 @@ Results:
         }
       }
 
+      updateQwen21SizeChips();
+      saveSettings();
       closeModal();
       showToast('Settings applied');
     }
@@ -3909,8 +4149,128 @@ Be thorough and specific in your description.`;
       { id: 'dancing', label: 'Dancing', prompt: 'Change pose to dancing' },
     ];
 
+    // Qwen-Image 2.1 edit presets. needsRef: uses "image 2" (a reference image);
+    // transparent: returns an RGBA cutout.
+    const QWEN21_EDITS = [
+      { id: 'cutout', label: 'Transparent Cutout', transparent: true, prompt: 'Remove the background and make it transparent, keep only the main subject exactly as it is.' },
+      { id: 'bg_beach', label: 'Sunset Beach BG', prompt: 'Replace the background with a sunset beach, keep the subject unchanged.' },
+      { id: 'bg_studio', label: 'Studio BG', prompt: 'Replace the background with a clean light-grey photo studio backdrop with soft shadows, keep the subject unchanged.' },
+      { id: 'insert_ref', label: 'Add Image 2 Subject', needsRef: true, prompt: 'Put the subject from image 2 into the scene of image 1, matching the lighting, perspective and scale, keep everything else unchanged.' },
+      { id: 'group', label: 'Combine People', needsRef: true, prompt: 'Combine the person from image 1 and the person from image 2 into one natural photo of them standing side by side, keep both identities and outfits unchanged.' },
+      { id: 'outfit_ref', label: 'Wear Image 2 Outfit', needsRef: true, prompt: 'Dress the person from image 1 in the outfit shown in image 2, keep the face, pose and background unchanged.' },
+      { id: 'oil', label: 'Oil Painting', prompt: 'Restyle the image as a classical oil painting with visible brush strokes, keep the composition unchanged.' },
+      { id: 'anime', label: 'Anime Style', prompt: 'Restyle the image as a high-quality anime illustration with clean line art and cel shading, keep the composition unchanged.' },
+      { id: 'golden', label: 'Golden Hour', prompt: 'Relight the scene with warm, soft golden-hour sunlight coming from the left, keep everything else unchanged.' },
+      { id: 'night', label: 'Night Scene', prompt: 'Turn the scene into night with moonlight and warm practical lights, keep the subject unchanged.' },
+    ];
+
+    // Turbo / speed LoRA defaults per edit model: [steps, cfg] with and without it
+    const EDIT_MODEL_DEFAULTS = {
+      'qwen-image-edit': { label: 'Lightning LoRA (fast)', on: [6, 1], off: [20, 4], minOn: 4, minOff: 10 },
+      'qwen-image-2.1': { label: 'Turbo LoRA (6 steps; 9 = hybrid)', on: [6, 1], off: [40, 1], minOn: 5, minOff: 10 },
+    };
+
     let selectedEmotions = new Set();
     let selectedPoses = new Set();
+    let selectedQwen21Edits = new Set();
+    let editReferenceImages = []; // [{dataUrl, b64}] for qwen-image-2.1 (image 2, 3, ...)
+    let editOriginalSize = null;  // [w, h] of the image being edited
+
+    function getEditModel() {
+      return document.getElementById('editModel').value;
+    }
+
+    async function refreshEditModels() {
+      const select = document.getElementById('editModel');
+      try {
+        const resp = await fetch(`${getApiUrl()}/img2img/models`, { signal: AbortSignal.timeout(5000) });
+        if (!resp.ok) return;
+        const available = (await resp.json()).available || [];
+        const current = select.value;
+        [...select.options].forEach(o => { o.disabled = !available.includes(o.value); });
+        if (select.selectedOptions[0]?.disabled) {
+          select.value = available.includes('qwen-image-edit') ? 'qwen-image-edit' : (available[0] || current);
+          onEditModelChange();
+        }
+      } catch (e) {
+        // Keep the static list if the backend can't be reached
+      }
+    }
+
+    function onEditModelChange() {
+      try { localStorage.setItem('editModel', getEditModel()); } catch (e) {}
+      applyEditModelSettings();
+    }
+
+    // Reset LoRA/steps/cfg to the selected model's defaults and show its controls
+    function applyEditModelSettings() {
+      const model = getEditModel();
+      const d = EDIT_MODEL_DEFAULTS[model] || EDIT_MODEL_DEFAULTS['qwen-image-edit'];
+      document.getElementById('editUseLoraLabel').textContent = d.label;
+      document.getElementById('editUseLora').checked = false;
+      document.getElementById('editQwen21Section').style.display = model === 'qwen-image-2.1' ? 'block' : 'none';
+      toggleLoraOption();
+      renderEditChips();
+    }
+
+    function applyEditQwen21Preset(name) {
+      const p = { turbo6: [true, 6, 1], turbo9: [true, 9, 1], base40: [false, 40, 1], base40cfg: [false, 40, 4] }[name];
+      document.getElementById('editUseLora').checked = p[0];
+      toggleLoraOption();
+      setEditStepsCfg(p[1], p[2]);
+    }
+
+    function setEditStepsCfg(steps, cfg) {
+      document.getElementById('editSteps').value = steps;
+      document.getElementById('editStepsValue').textContent = steps;
+      document.getElementById('editCfgScale').value = cfg;
+      document.getElementById('editCfgScaleValue').textContent = cfg;
+    }
+
+    function addEditReferences(files) {
+      const room = 9 - editReferenceImages.length;
+      const list = [...files].slice(0, Math.max(0, room));
+      if (files.length > list.length) showToast('Up to 9 reference images');
+      list.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          editReferenceImages.push({ dataUrl: reader.result, b64: reader.result.split(',')[1] });
+          renderEditReferences();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function removeEditReference(index) {
+      editReferenceImages.splice(index, 1);
+      renderEditReferences();
+    }
+
+    function clearEditReferences() {
+      editReferenceImages = [];
+      renderEditReferences();
+    }
+
+    function renderEditReferences() {
+      const el = document.getElementById('editRefThumbs');
+      el.innerHTML = editReferenceImages.map((r, i) => `
+        <div class="edit-ref-thumb">
+          <img src="${r.dataUrl}" alt="image ${i + 2}">
+          <span>image ${i + 2}</span>
+          <button class="btn-danger" onclick="removeEditReference(${i})" title="Remove">&times;</button>
+        </div>`).join('');
+      renderEditChips();
+    }
+
+    // Output size for qwen-image-2.1 edits: null = model default (~1MP at the input's aspect)
+    function getEditOutputSize(sizeMode) {
+      if (!sizeMode || sizeMode === 'auto' || !editOriginalSize) return null;
+      const [w0, h0] = editOriginalSize;
+      const area = parseInt(sizeMode) ** 2;
+      let w = Math.sqrt(area * w0 / h0), h = w * h0 / w0;
+      const fit = Math.min(1, 3072 / Math.max(w, h));
+      return [Math.max(32, Math.round(w * fit / 32) * 32), Math.max(32, Math.round(h * fit / 32) * 32)];
+    }
     let editImageId = null;
     let editCancelled = false;
     let editResultImages = []; // Store {id, dataUrl, label} for download and persistence
@@ -3941,7 +4301,17 @@ Be thorough and specific in your description.`;
       editImageId = originalId;
       selectedEmotions.clear();
       selectedPoses.clear();
+      selectedQwen21Edits.clear();
+      editReferenceImages = [];
+      renderEditReferences();
+      document.getElementById('editTransparent').checked = false;
+      document.getElementById('editSize').value = 'auto';
       editCancelled = false;
+
+      editOriginalSize = null;
+      const sizeProbe = new Image();
+      sizeProbe.onload = () => { editOriginalSize = [sizeProbe.naturalWidth, sizeProbe.naturalHeight]; };
+      sizeProbe.src = originalImg.data;
 
       // Set image to original
       document.getElementById('editModalImg').src = originalImg.data;
@@ -3957,15 +4327,16 @@ Be thorough and specific in your description.`;
       document.getElementById('editNegativePrompt').value = '';
       document.getElementById('editNegativeOption').classList.remove('enabled');
 
-      // Reset LoRA option (always unchecked by default)
-      document.getElementById('editUseLora').checked = false;
-
-      // Reset edit settings to defaults (non-LoRA values)
-      document.getElementById('editSteps').min = 10;
-      document.getElementById('editSteps').value = 20;
-      document.getElementById('editStepsValue').textContent = '20';
-      document.getElementById('editCfgScale').value = 4;
-      document.getElementById('editCfgScaleValue').textContent = '4';
+      // Restore the last-used edit model; LoRA always starts unchecked with that
+      // model's default steps/cfg
+      try {
+        const savedModel = localStorage.getItem('editModel');
+        if (savedModel && [...document.getElementById('editModel').options].some(o => o.value === savedModel)) {
+          document.getElementById('editModel').value = savedModel;
+        }
+      } catch (e) {}
+      applyEditModelSettings();
+      refreshEditModels();
 
       // Reset seed settings
       document.getElementById('editSeedMode').value = 'random';
@@ -4033,6 +4404,10 @@ Be thorough and specific in your description.`;
         const steps = s.steps || 20;
         const cfgScale = s.cfgScale || 4.0;
         const useLora = s.useLora || false;
+        const model = s.model || 'qwen-image-edit';
+        const transparent = s.transparent || false;
+        const sizeMode = s.sizeMode || 'auto';
+        const refCount = s.refCount || 0;
         const seed = s.seed ?? null;  // null means random was used
         const basePrompt = s.basePrompt || '';
         const clothedPrompt = s.clothedPrompt || '';
@@ -4056,6 +4431,10 @@ Be thorough and specific in your description.`;
           steps,
           cfgScale,
           useLora,
+          model,
+          transparent,
+          sizeMode,
+          refCount,
           seed,
           basePrompt,
           clothedPrompt
@@ -4078,10 +4457,17 @@ Be thorough and specific in your description.`;
       document.getElementById('poseChips').innerHTML = EDIT_POSES.map(p =>
         `<div class="edit-chip ${selectedPoses.has(p.id) ? 'selected' : ''}" onclick="toggleEditChip('pose', '${p.id}')">${p.label}</div>`
       ).join('');
+
+      // Qwen 2.1 edit chips (dashed = needs a reference image)
+      document.getElementById('qwen21EditChips').innerHTML = QWEN21_EDITS.map(q => {
+        const cls = [selectedQwen21Edits.has(q.id) ? 'selected' : '', q.needsRef ? 'needs-ref' : ''].join(' ');
+        const title = q.needsRef ? 'Needs a reference image (image 2)' : (q.transparent ? 'Returns a transparent PNG' : '');
+        return `<div class="edit-chip ${cls}" title="${title}" onclick="toggleEditChip('qwen21', '${q.id}')">${q.label}</div>`;
+      }).join('');
     }
 
     function toggleEditChip(type, id) {
-      const set = type === 'emotion' ? selectedEmotions : selectedPoses;
+      const set = type === 'emotion' ? selectedEmotions : type === 'pose' ? selectedPoses : selectedQwen21Edits;
       if (set.has(id)) {
         set.delete(id);
       } else {
@@ -4126,26 +4512,11 @@ Be thorough and specific in your description.`;
 
     function toggleLoraOption() {
       const useLora = document.getElementById('editUseLora').checked;
-      const stepsInput = document.getElementById('editSteps');
-      const cfgInput = document.getElementById('editCfgScale');
-      const stepsValue = document.getElementById('editStepsValue');
-      const cfgValue = document.getElementById('editCfgScaleValue');
-
-      if (useLora) {
-        // Lightning LoRA optimal settings - allow lower step counts
-        stepsInput.min = 4;
-        stepsInput.value = 6;
-        cfgInput.value = 1;
-        stepsValue.textContent = '6';
-        cfgValue.textContent = '1';
-      } else {
-        // Default settings - restore normal min
-        stepsInput.min = 10;
-        stepsInput.value = 20;
-        cfgInput.value = 4;
-        stepsValue.textContent = '20';
-        cfgValue.textContent = '4';
-      }
+      const d = EDIT_MODEL_DEFAULTS[getEditModel()] || EDIT_MODEL_DEFAULTS['qwen-image-edit'];
+      // LoRA settings allow lower step counts
+      document.getElementById('editSteps').min = useLora ? d.minOn : d.minOff;
+      const [steps, cfg] = useLora ? d.on : d.off;
+      setEditStepsCfg(steps, cfg);
     }
 
     function toggleSeedInput() {
@@ -4321,6 +4692,18 @@ Be thorough and specific in your description.`;
         }
       });
 
+      // Qwen 2.1 presets (only offered for that model)
+      if (getEditModel() === 'qwen-image-2.1') {
+        QWEN21_EDITS.forEach(q => {
+          if (!selectedQwen21Edits.has(q.id)) return;
+          if (q.needsRef && editReferenceImages.length === 0) {
+            showToast(`"${q.label}" needs a reference image — skipped`);
+            return;
+          }
+          prompts.push({ label: q.label, prompt: q.prompt, negative_prompt: baseNegative, transparent: !!q.transparent });
+        });
+      }
+
       return prompts;
     }
 
@@ -4329,6 +4712,7 @@ Be thorough and specific in your description.`;
       const steps = overrideSettings?.steps ?? parseInt(document.getElementById('editSteps').value);
       const cfgScale = overrideSettings?.cfgScale ?? parseFloat(document.getElementById('editCfgScale').value);
       const useLora = overrideSettings?.useLora ?? document.getElementById('editUseLora').checked;
+      const model = overrideSettings?.model ?? getEditModel();
 
       const payload = {
         image: base64Data,
@@ -4344,7 +4728,18 @@ Be thorough and specific in your description.`;
         payload.seed = seed;
       }
 
-      const response = await fetch(`${getApiUrl()}/img2img/edit/qwen-image-edit`, {
+      if (model === 'qwen-image-2.1') {
+        if (overrideSettings?.transparent ?? document.getElementById('editTransparent').checked) {
+          payload.transparent = true;
+        }
+        const size = getEditOutputSize(overrideSettings?.sizeMode ?? document.getElementById('editSize').value);
+        if (size) [payload.width, payload.height] = size;
+        if (editReferenceImages.length) {
+          payload.reference_images = editReferenceImages.map(r => r.b64);
+        }
+      }
+
+      const response = await fetch(`${getApiUrl()}/img2img/edit/${model}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -4449,7 +4844,12 @@ Be thorough and specific in your description.`;
 
         try {
           const seed = getEditSeed();
-          const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed);
+          const editOpts = {
+            model: getEditModel(),
+            transparent: !!prompts[i].transparent || document.getElementById('editTransparent').checked,
+            sizeMode: document.getElementById('editSize').value,
+          };
+          const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed, editOpts);
 
           // Increment completed count (timing is tracked by polling based on active state)
           editCompletedCount++;
@@ -4471,6 +4871,10 @@ Be thorough and specific in your description.`;
             steps: parseInt(document.getElementById('editSteps').value),
             cfgScale: parseFloat(document.getElementById('editCfgScale').value),
             useLora: document.getElementById('editUseLora').checked,
+            model: editOpts.model,
+            transparent: editOpts.model === 'qwen-image-2.1' && editOpts.transparent,
+            sizeMode: editOpts.sizeMode,
+            refCount: editOpts.model === 'qwen-image-2.1' ? editReferenceImages.length : 0,
             // Store seed used (null means random was used)
             seed: seed,
             // Store base prompt and clothed prompt for dressed variants
@@ -4502,6 +4906,10 @@ Be thorough and specific in your description.`;
             steps: genSettings.steps,
             cfgScale: genSettings.cfgScale,
             useLora: genSettings.useLora,
+            model: genSettings.model,
+            transparent: genSettings.transparent,
+            sizeMode: genSettings.sizeMode,
+            refCount: genSettings.refCount,
             seed: genSettings.seed,
             basePrompt: genSettings.basePrompt,
             clothedPrompt: genSettings.clothedPrompt
@@ -4633,8 +5041,15 @@ Be thorough and specific in your description.`;
         const storedSettings = {
           steps: item.steps || 20,
           cfgScale: item.cfgScale || 4.0,
-          useLora: item.useLora || false
+          useLora: item.useLora || false,
+          model: item.model || 'qwen-image-edit',
+          transparent: item.transparent || false,
+          sizeMode: item.sizeMode || 'auto'
         };
+        // Reference images aren't stored per edit; reuse the ones currently loaded
+        if ((item.refCount || 0) > 0 && editReferenceImages.length !== item.refCount) {
+          throw new Error(`This edit used ${item.refCount} reference image(s); load the same ones to regenerate`);
+        }
 
         // Use stored seed if it was a fixed seed, otherwise use random (null)
         // This preserves the batch behavior: fixed seed = same seed, random = new random
@@ -4663,6 +5078,10 @@ Be thorough and specific in your description.`;
           steps: storedSettings.steps,
           cfgScale: storedSettings.cfgScale,
           useLora: storedSettings.useLora,
+          model: storedSettings.model,
+          transparent: storedSettings.transparent,
+          sizeMode: storedSettings.sizeMode,
+          refCount: item.refCount || 0,
           seed: seedToUse,
           basePrompt: item.basePrompt || '',
           clothedPrompt: item.clothedPrompt || ''
@@ -5306,7 +5725,7 @@ Be thorough and specific in your description.`;
           const blob = await response.blob();
 
           // Save with folder
-          await saveImage(blob, settings, folderName);
+          await saveImage(blob, { ...settings, model: getModel() }, folderName);
           completed++;
 
           // Update progress
@@ -5436,7 +5855,7 @@ Be thorough and specific in your description.`;
           const blob = await response.blob();
 
           // Save with folder
-          await saveImage(blob, settings, folderName);
+          await saveImage(blob, { ...settings, model: getModel() }, folderName);
           completed++;
 
           // Update progress

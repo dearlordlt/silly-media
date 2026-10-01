@@ -50,6 +50,36 @@ def _materialized_model_init():
         PreTrainedModel.get_init_context = classmethod(orig)
 
 
+def _reinit_rotary_buffers(*roots: torch.nn.Module) -> int:
+    """Recompute RoPE inv_freq buffers that loading left uninitialized.
+
+    inv_freq is a non-persistent buffer (not in the checkpoint). With the meta-device
+    context stripped by _materialized_model_init, transformers >=5.17 allocates it
+    uninitialized and its _init_weights pass, which normally recomputes rotary
+    buffers, never touches it — so every RotaryEmbedding held garbage (~1e-17 / 0)
+    and the text encoder emitted NaN. Mirrors that recompute; returns modules fixed.
+    """
+    from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+
+    fixed = 0
+    for root in roots:
+        for module in root.modules():
+            if "RotaryEmbedding" not in type(module).__name__ or not hasattr(module, "original_inv_freq"):
+                continue
+            init_fns = {
+                "axial": getattr(module, "compute_axial_rope_parameters", None),
+                "default": getattr(module, "compute_default_rope_parameters", None),
+                **ROPE_INIT_FUNCTIONS,
+            }
+            value, _ = init_fns[module.rope_type](module.config)
+            with torch.no_grad():
+                for name in ("inv_freq", "original_inv_freq"):
+                    buf = getattr(module, name)
+                    buf.copy_(value.to(device=buf.device, dtype=buf.dtype))
+            fixed += 1
+    return fixed
+
+
 class AceStepModel(BaseMusicModel):
     """ACE-Step v1.5 Turbo - 8-step inference, waveform-based VAE."""
 
@@ -90,6 +120,9 @@ class AceStepModel(BaseMusicModel):
         if not ok:
             self._dit_handler = None
             raise RuntimeError(f"ACE-Step model failed to initialize: {status}")
+
+        modules = [v for v in vars(self._dit_handler).values() if isinstance(v, torch.nn.Module)]
+        logger.info(f"Recomputed {_reinit_rotary_buffers(*modules)} RoPE buffers")
 
         # LLM handler - create but don't initialize (DiT-only mode)
         from acestep.llm_inference import LLMHandler

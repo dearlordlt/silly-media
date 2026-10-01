@@ -91,6 +91,8 @@
           <option value="z-image">z-image (quality)</option>
           <option value="qwen-image-2512">qwen-image-2512</option>
           <option value="ovis-image-7b">ovis-image-7b</option>
+          <option value="krea-2-turbo">krea-2-turbo (Krea 2 Turbo)</option>
+          <option value="qwen-image-2.1">qwen-image-2.1 (Qwen Image 2.1)</option>
         </select>
         <label>Subject (how the reference is framed)</label>
         <select id="subject">
@@ -222,11 +224,12 @@
       try {
         const r = await fetch(`${API_BASE}/models`);
         const d = await r.json();
-        const loaded = [];
-        for (const k of ['image','model3d']) (d[k]?.loaded || []).forEach(x => loaded.push(x));
+        const imageLoaded = d.image?.loaded || [];
+        const model3dLoaded = d.model3d?.loaded || [];
         let label = 'working…';
-        if (loaded.some(x => x.includes('image') && !x.includes('3d'))) label = '🖼️ generating reference image…';
-        if (loaded.includes('hunyuan3d-2')) label = '🧊 building 3D mesh + texture…';
+        // Any loaded text->image model (z-image, krea-2-turbo, qwen-image-2.1, ...) means the reference is being made.
+        if (imageLoaded.length) label = '🖼️ generating reference image…';
+        if (model3dLoaded.includes('hunyuan3d-2')) label = '🧊 building 3D mesh + texture…';
         const secs = ((Date.now() - t0) / 1000).toFixed(0);
         document.getElementById('phase').innerHTML = `${label} <span class="t">(${secs}s)</span>`;
       } catch (e) { /* ignore */ }

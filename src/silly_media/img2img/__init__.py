@@ -1,6 +1,6 @@
 """Img2img module for Silly Media."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from .base import BaseImg2ImgModel
@@ -9,11 +9,13 @@ if TYPE_CHECKING:
 class Img2ImgRegistry:
     """Registry for img2img models."""
 
-    _models: dict[str, type["BaseImg2ImgModel"]] = {}
+    # A class, or any factory returning the instance (lets a model shared with the
+    # image registry hand back that same instance).
+    _models: dict[str, Callable[[], "BaseImg2ImgModel"]] = {}
     _instances: dict[str, "BaseImg2ImgModel"] = {}
 
     @classmethod
-    def register(cls, name: str, model_class: type["BaseImg2ImgModel"]) -> None:
+    def register(cls, name: str, model_class: Callable[[], "BaseImg2ImgModel"]) -> None:
         """Register an img2img model class."""
         cls._models[name] = model_class
 
@@ -44,6 +46,13 @@ def _register_models() -> None:
     from .qwen_edit import QwenImageEditModel
 
     Img2ImgRegistry.register("qwen-image-edit", QwenImageEditModel)
+
+    # Qwen-Image-2.1 does text-to-image and editing with one pipeline: reuse the image
+    # registry's instance so the VRAM manager sees a single model under both types.
+    from ..models import ModelRegistry
+
+    if "qwen-image-2.1" in ModelRegistry.get_available_models():
+        Img2ImgRegistry.register("qwen-image-2.1", lambda: ModelRegistry.get_model("qwen-image-2.1"))
 
 
 _register_models()

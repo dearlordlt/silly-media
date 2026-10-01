@@ -70,6 +70,13 @@ RUN sed -i 's/from transformers.pytorch_utils import isin_mps_friendly as isin/f
     /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/tortoise/autoregressive.py && \
     grep -n 'from torch import isin' /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/tortoise/autoregressive.py
 
+# transformers >=5.17 generate() no longer hands XTTS's GPT inference model an
+# attention_mask on decode steps; it only used the mask's length (= cached tokens + 1)
+# to place the position embedding, so derive that from the KV cache instead.
+RUN sed -i 's/attention_mask.shape\[1\] - (prefix_len + 1), attention_mask.device/(attention_mask.shape[1] if attention_mask is not None else past_key_values.get_seq_length() + 1) - (prefix_len + 1), emb.device/' \
+    /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/xtts/gpt_inference.py && \
+    grep -n 'past_key_values.get_seq_length() + 1' /app/.venv/lib/python3.10/site-packages/TTS/tts/layers/xtts/gpt_inference.py
+
 # Install ACE-Step 1.5 from GitHub with --no-deps (runtime deps in pyproject.toml)
 # Patch Python version requirement (1.5 pins ==3.11.* but works fine with 3.10)
 RUN git clone --depth 1 https://github.com/ace-step/ACE-Step-1.5.git /app/ace-step-1.5 && \

@@ -1,6 +1,6 @@
 """Utility modules for image processing and other helpers."""
 
-from .hf_cache import repo_cached
+from .hf_cache import drop_tree_cache, repo_cached
 from .image_processing import (
     process_pixel_art,
     remove_background,
@@ -8,6 +8,7 @@ from .image_processing import (
 )
 
 __all__ = [
+    "drop_tree_cache",
     "process_pixel_art",
     "remove_background",
     "repo_cached",

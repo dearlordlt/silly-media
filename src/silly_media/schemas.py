@@ -97,10 +97,17 @@ class GenerateRequest(BaseModel):
         int, Field(default=1024, ge=256, le=2048, description="Base size for aspect ratio calculation")
     ] = 1024
 
-    # LoRA option for models that support it (e.g., Qwen-Image-2512 with Turbo-LoRA)
+    # LoRA option for models that support it (Qwen-Image-2512 / Qwen-Image-2.1 turbo LoRAs)
     use_lora: Annotated[
         bool,
         Field(default=False, description="Use Turbo LoRA for faster inference (model-dependent)"),
+    ] = False
+
+    # Native transparency for models that support it (qwen-image-2.1): wraps the prompt
+    # in the model's RGBA template and returns a PNG with alpha. Ignored by other models.
+    transparent: Annotated[
+        bool,
+        Field(default=False, description="Generate a transparent (RGBA) image (model-dependent, e.g. qwen-image-2.1)"),
     ] = False
 
     # Named LoRAs from the lora_dir (e.g. "my-lora" -> data/loras/my-lora.safetensors).
@@ -233,7 +240,7 @@ class SpriteRequest(GenerateRequest):
     # Which image model to generate with (sprite endpoint has no path param).
     model: Annotated[
         str,
-        Field(default="z-image-turbo", description="Image model id (z-image, z-image-turbo, qwen-image-2512, krea-2-turbo) — see /health for what's actually registered"),
+        Field(default="z-image-turbo", description="Image model id (z-image, z-image-turbo, z-image-turbo-pm, qwen-image-2512, qwen-image-2.1, krea-2-turbo) — see /health for what's actually registered. qwen-image-2.1 renders transparency natively instead of using rembg"),
     ] = "z-image-turbo"
 
     # Background removal (rembg) — produces a transparent cutout.

@@ -13,7 +13,7 @@ from typing import Any, Callable
 import torch
 from PIL import Image
 
-from ..utils import repo_cached
+from ..utils import drop_tree_cache, repo_cached
 from .base import BaseVideoModel
 from .schemas import I2VRequest, T2VRequest
 
@@ -102,26 +102,6 @@ class LTX25VideoModel(BaseVideoModel):
         self._videos_dir = Path("data/videos")
         self._videos_dir.mkdir(parents=True, exist_ok=True)
 
-    @staticmethod
-    def _drop_tree_cache(repo_id: str) -> None:
-        """Remove huggingface_hub's cached tree listing (disk + in-memory) for a repo."""
-        import shutil
-
-        from huggingface_hub.constants import HF_HUB_CACHE
-
-        trees = Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}" / "trees"
-        if trees.exists():
-            shutil.rmtree(trees, ignore_errors=True)
-        try:
-            from huggingface_hub import _tree_cache
-
-            with _tree_cache._IN_MEMORY_TREE_CACHE_LOCK:
-                for key in list(_tree_cache._IN_MEMORY_TREE_CACHE):
-                    if f"models--{repo_id.replace('/', '--')}" in key:
-                        del _tree_cache._IN_MEMORY_TREE_CACHE[key]
-        except Exception:  # private API — tolerate hub refactors
-            pass
-
     @classmethod
     def weights_cached(cls) -> bool:
         """True when both the GGUF file and the base repo snapshot are on disk."""
@@ -188,7 +168,7 @@ class LTX25VideoModel(BaseVideoModel):
         # read_tree_cache returning None makes the check a no-op, and every component
         # the pipeline actually needs is on disk.
         if local_only:
-            self._drop_tree_cache(BASE_MODEL)
+            drop_tree_cache(BASE_MODEL)
 
         # Components passed in are excluded from the snapshot download, so this pulls
         # only the small parts (VAEs, vocoder, connectors, scheduler, tokenizer) — not

@@ -13,23 +13,45 @@ class Img2ImgRequest(BaseModel):
     negative_prompt: str = Field(
         default=" ", description="Negative prompt (model requires non-empty)"
     )
-    num_inference_steps: int = Field(
-        default=20, ge=1, le=100, description="Number of inference steps"
+    num_inference_steps: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Number of inference steps (omit for the model default: qwen-image-edit 20, qwen-image-2.1 40 / 6 turbo)",
     )
-    true_cfg_scale: float = Field(
-        default=4.0, ge=1.0, le=20.0, description="CFG scale for guidance"
+    true_cfg_scale: float | None = Field(
+        default=None,
+        ge=1.0,
+        le=20.0,
+        description="CFG scale for guidance (omit for the model default: qwen-image-edit 4.0, qwen-image-2.1 1.0 = off)",
     )
     seed: int | None = Field(
         default=None, ge=-1, description="Random seed (-1 or None for random)"
     )
     width: int | None = Field(
-        default=None, ge=64, le=2048, description="Output width (defaults to input image width)"
+        default=None,
+        ge=64,
+        le=3072,
+        description="Output width (default: input width; qwen-image-2.1 ~1MP at the input's aspect). Max is per model",
     )
     height: int | None = Field(
-        default=None, ge=64, le=2048, description="Output height (defaults to input image height)"
+        default=None,
+        ge=64,
+        le=3072,
+        description="Output height (default: input height; qwen-image-2.1 ~1MP at the input's aspect). Max is per model",
     )
     use_lora: bool = Field(
-        default=False, description="Use Lightning LoRA for faster inference (4-6 steps, CFG 1.0)"
+        default=False,
+        description="Use the model's speed LoRA (qwen-image-edit: Lightning; qwen-image-2.1: 6-step turbo)",
+    )
+    reference_images: list[str] | None = Field(
+        default=None,
+        max_length=9,
+        description="Extra base64 reference images (image 2, 3, ... in the prompt); models that support it only",
+    )
+    transparent: bool = Field(
+        default=False,
+        description="Return a transparent (RGBA) result (qwen-image-2.1; automatic when the input has alpha)",
     )
 
 

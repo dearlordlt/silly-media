@@ -746,6 +746,78 @@
       padding: 4px 8px;
       font-size: 0.8rem;
     }
+
+    /* Checkerboard behind transparent (RGBA) results */
+    .checkerboard {
+      background-color: #2a2a40;
+      background-image:
+        linear-gradient(45deg, #3b3b55 25%, transparent 25%),
+        linear-gradient(-45deg, #3b3b55 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #3b3b55 75%),
+        linear-gradient(-45deg, transparent 75%, #3b3b55 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+
+    /* Model-specific (qwen-image-2.1) controls */
+    .model-section {
+      display: none;
+      margin-bottom: 10px;
+    }
+    .model-section.visible { display: block; }
+    .settings-presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin: 4px 0 8px;
+    }
+    .ref-thumbs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .ref-thumb {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--bg);
+      border: 1px solid var(--surface2);
+    }
+    .ref-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .ref-thumb .ref-label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      font-size: 0.65rem;
+      text-align: center;
+      padding: 1px 0;
+    }
+    .ref-thumb .ref-remove {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      font-size: 0.65rem;
+      line-height: 18px;
+    }
+    .ref-thumb .ref-remove:hover { background: var(--accent); }
+    .ref-hint-warn { color: var(--accent); }
+    .chip.fill-chip { border: 1px dashed var(--text-dim); }
+    input[type="range"]:disabled { opacity: 0.4; }
   </style>
 </head>
 <body>
@@ -820,6 +892,25 @@
             <textarea id="customPrompt" placeholder="Enter custom edit instruction..."></textarea>
           </div>
 
+          <!-- Reference images (qwen-image-2.1 only) -->
+          <div class="model-section" id="q21RefSection">
+            <h4>Reference Images
+              <button class="btn-secondary btn-small" onclick="document.getElementById('refFileInput').click()">Add reference images</button>
+              <button class="btn-secondary btn-small" id="refClearBtn" onclick="clearReferenceImages()" style="display:none">Clear</button>
+            </h4>
+            <input type="file" id="refFileInput" accept="image/*" multiple style="display:none" onchange="handleRefFileSelect(event)">
+            <div class="hint-text" style="margin-top:2px">The main image is "image 1"; references are "image 2", "image 3", ... in the prompt (max 9).</div>
+            <div class="ref-thumbs" id="refThumbs"></div>
+          </div>
+
+          <!-- Qwen 2.1 edit presets (qwen-image-2.1 only) -->
+          <div class="preset-section model-section" id="q21PresetSection">
+            <h4>Qwen 2.1 Edits</h4>
+            <div class="preset-chips" id="q21Chips"></div>
+            <div class="hint-text ref-hint-warn" id="q21RefHint" style="display:none; margin-top:4px"></div>
+            <div class="hint-text" style="margin-top:4px">Dashed chips insert an editable prompt into Custom Prompt.</div>
+          </div>
+
           <!-- Emotion chips -->
           <div class="preset-section">
             <h4>Emotions <button class="btn-secondary btn-small" onclick="toggleAllEmotions()">All</button></h4>
@@ -870,7 +961,7 @@
             <div class="option-item">
               <label>
                 <input type="checkbox" id="useLora" onchange="toggleLoraOption()">
-                Lightning LoRA (fast)
+                <span id="useLoraLabel">Lightning LoRA (fast)</span>
               </label>
             </div>
             <div class="option-item">
@@ -904,6 +995,36 @@
               </div>
             </div>
           </div>
+          <div class="hint-text" id="modelSettingsHint" style="display:none"></div>
+
+          <!-- Qwen 2.1 settings (qwen-image-2.1 only) -->
+          <div class="model-section" id="q21SettingsSection">
+            <label>Settings presets</label>
+            <div class="settings-presets">
+              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('turbo6')">Turbo 6</button>
+              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('turbo9')">Turbo 9 hybrid</button>
+              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('base40')">Base 40</button>
+              <button class="btn-secondary btn-small" onclick="applyQ21SettingsPreset('base40cfg4')">Base 40 + CFG 4</button>
+            </div>
+            <div class="settings-row">
+              <div class="setting-item">
+                <label>Output size</label>
+                <select id="q21SizeSelect" onchange="updateSizeHint()">
+                  <option value="match">Match input (~1MP)</option>
+                  <option value="1.5k">1.5K</option>
+                  <option value="2k">2K</option>
+                  <option value="original">Original size</option>
+                </select>
+                <div class="hint-text" id="q21SizeHint"></div>
+              </div>
+              <div class="setting-item option-item" style="padding-top:20px">
+                <label>
+                  <input type="checkbox" id="q21Transparent">
+                  Transparent background
+                </label>
+              </div>
+            </div>
+          </div>
 
           <!-- Seed -->
           <div class="settings-row">
@@ -920,7 +1041,7 @@
             </div>
             <div class="setting-item">
               <label>Model</label>
-              <select id="modelSelect">
+              <select id="modelSelect" onchange="onModelChange()">
                 <option value="qwen-image-edit">qwen-image-edit</option>
               </select>
             </div>
@@ -1137,6 +1258,41 @@
       { id: 'oversized-shirt', label: 'Oversized Shirt', prompt: 'Wearing only an oversized shirt, no pants, bare legs' },
     ];
 
+    // qwen-image-2.1 only. Extra flags:
+    //   transparent: request an RGBA result with the background removed
+    //   needsRef:    prompt mentions "image 2" (at least one reference image required)
+    //   fill:        clicking inserts the prompt into Custom Prompt so the [placeholder] can be edited
+    const EDIT_QWEN21 = [
+      { id: 'q21-extract', label: 'Extract Subject', transparent: true,
+        // Wording matters: "extract"/"RGBA"/"onto a transparent background" phrasings
+        // tend to erase the subject; this one reliably produces a cutout.
+        prompt: 'Remove the background and make it transparent, keep only the main subject exactly as it is.' },
+      { id: 'q21-bg-beach', label: 'Background: Sunset Beach',
+        prompt: 'Replace the background with a sunset beach: golden sand, gentle waves and a warm orange and pink sky near the horizon. Keep the subject unchanged: same face, pose, clothing and proportions. Match the subject lighting to the warm sunset light so it blends naturally.' },
+      { id: 'q21-insert-ref', label: 'Put Image 2 Subject into Scene', needsRef: true,
+        prompt: 'Place the main subject from image 2 into the scene of image 1. Keep the scene of image 1 unchanged and keep the identity, appearance and clothing of the subject from image 2. Match the perspective, scale, lighting direction, color temperature and shadows of image 1 so the subject looks naturally photographed in that scene.' },
+      { id: 'q21-combine-people', label: 'Combine People (1 + 2)', needsRef: true,
+        prompt: 'Combine the person from image 1 and the person from image 2 into one natural photo of them standing side by side. Preserve both faces, hairstyles, body types and outfits exactly. Use consistent lighting, perspective and scale for both people, with a simple matching background, as if taken with one camera in a single shot.' },
+      { id: 'q21-oil', label: 'Oil Painting',
+        prompt: 'Restyle the image as a classical oil painting on canvas: visible thick brushstrokes, rich layered colors, soft blended shadows and subtle canvas texture. Keep the same composition, subject, pose and facial features.' },
+      { id: 'q21-anime', label: 'Anime Illustration',
+        prompt: 'Restyle the image as a high-quality anime illustration: clean line art, cel shading, vibrant colors, expressive anime eyes and a softly painted background. Keep the same composition, pose, hairstyle and outfit.' },
+      { id: 'q21-golden-hour', label: 'Relight: Golden Hour',
+        prompt: 'Relight the scene with soft golden-hour sunlight coming from a low angle on one side: warm orange highlights, long soft shadows, gentle rim light on hair and shoulders. Keep the subject, pose, composition and background content unchanged.' },
+      { id: 'q21-sign-text', label: 'Replace Sign Text', fill: true,
+        prompt: 'Replace the text on the sign with "[NEW TEXT]". Match the original font style, size, color, perspective and lighting of the sign. Keep everything else unchanged.' },
+      { id: 'q21-remove', label: 'Remove Object', fill: true,
+        prompt: 'Remove the [OBJECT OR PERSON] from the image and fill the area with a natural continuation of the surrounding background. Keep everything else unchanged, with no visible traces, blur or artifacts.' },
+      { id: 'q21-outfit', label: 'Change Outfit', fill: true,
+        prompt: 'Change the outfit of the person to [NEW OUTFIT]. Keep the same face, hairstyle, body shape, pose, background and lighting. The new clothing should fit naturally with realistic folds and shadows.' },
+    ];
+
+    const QWEN21_MODEL = 'qwen-image-2.1';
+    const QWEN21_MAX_SIDE = 3072;
+    const QWEN21_MAX_REFS = 9;
+    const QWEN21_SIZE_TARGETS = { '1.5k': 1536, '2k': 2048 };
+    const MODEL_STORAGE_KEY = 'sillyMediaImg2ImgModel';
+
     const DEFAULT_NEGATIVE = 'ugly, deformed, disfigured, low quality, blurry, bad anatomy, extra limbs, male, penis, masculine, man, boy';
     const CLOTHES_NEGATIVE = 'clothes, clothing, dressed, bra, underwear, panties, shirt, dress, bikini, swimsuit, lingerie';
 
@@ -1148,6 +1304,8 @@
     let selectedLocations = new Set();
     let selectedBody = new Set();
     let selectedOutfits = new Set();
+    let selectedQwen21 = new Set();
+    let referenceImages = [];  // Data URLs of qwen-image-2.1 reference images ("image 2", "image 3", ...)
     let composeMode = true;  // true = combine chips into one prompt, false = each chip = separate image
     let currentOriginalId = null;  // Selected original in sidebar (null = all)
     let sourceImageData = null;    // Current source image data URL
@@ -1173,7 +1331,7 @@
     async function init() {
       db = await openDB();
       await fetchModels();
-      renderChips();
+      applyModelSettings();  // also renders chips
       await loadSidebar();
       await loadResults();
       setupEventListeners();
@@ -1211,7 +1369,7 @@
       return db.transaction(STORE_EDITS, mode).objectStore(STORE_EDITS);
     }
 
-    function generateThumbnail(dataUrl) {
+    function generateThumbnail(dataUrl, keepAlpha = false) {
       return new Promise((resolve) => {
         const img = new Image();
         img.onload = () => {
@@ -1225,7 +1383,8 @@
           canvas.width = w;
           canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.7));
+          // JPEG drops alpha, so transparent results keep a PNG thumbnail
+          resolve(keepAlpha ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.7));
         };
         img.onerror = () => resolve(dataUrl);
         img.src = dataUrl;
@@ -1244,7 +1403,7 @@
     }
 
     async function saveEdit(originalId, dataUrl, metadata) {
-      const thumbnail = await generateThumbnail(dataUrl);
+      const thumbnail = await generateThumbnail(dataUrl, !!metadata.hasAlpha);
       return new Promise((resolve, reject) => {
         const store = editTransaction('readwrite');
         const item = {
@@ -1367,6 +1526,212 @@
       } catch (e) {
         // Use default
       }
+      // Restore last used model if it is still available
+      const saved = loadSavedModel();
+      const select = document.getElementById('modelSelect');
+      if (saved && [...select.options].some(o => o.value === saved)) select.value = saved;
+    }
+
+    function loadSavedModel() {
+      try { return localStorage.getItem(MODEL_STORAGE_KEY); } catch (e) { return null; }
+    }
+
+    function saveSelectedModel(model) {
+      try { localStorage.setItem(MODEL_STORAGE_KEY, model); } catch (e) { /* storage unavailable */ }
+    }
+
+    // =================== MODEL-SPECIFIC SETTINGS ===================
+    function getSelectedModel() {
+      return document.getElementById('modelSelect').value;
+    }
+
+    function isQwen21(model = getSelectedModel()) {
+      return model === QWEN21_MODEL;
+    }
+
+    // EDIT_QWEN21 chips only take part in prompts while qwen-image-2.1 is selected
+    function activeQwen21Items() {
+      return isQwen21() ? EDIT_QWEN21 : [];
+    }
+
+    function onModelChange() {
+      saveSelectedModel(getSelectedModel());
+      applyModelSettings();
+    }
+
+    // Reset LoRA toggle + sliders to the selected model's defaults and show/hide its controls
+    function applyModelSettings() {
+      const q21 = isQwen21();
+      document.getElementById('useLoraLabel').textContent = q21 ? 'Turbo LoRA (6 steps)' : 'Lightning LoRA (fast)';
+      for (const id of ['q21RefSection', 'q21PresetSection', 'q21SettingsSection']) {
+        document.getElementById(id).classList.toggle('visible', q21);
+      }
+      document.getElementById('useLora').checked = false;
+      toggleLoraOption();
+      updateSizeHint();
+      renderChips();
+    }
+
+    function setSlider(id, value) {
+      const slider = document.getElementById(`${id}Slider`);
+      slider.value = value;
+      document.getElementById(`${id}Value`).textContent = slider.value;
+    }
+
+    function applyQ21SettingsPreset(name) {
+      const presets = {
+        turbo6: { lora: true, steps: 6, cfg: 1 },
+        turbo9: { lora: true, steps: 9, cfg: 1 },
+        base40: { lora: false, steps: 40, cfg: 1 },
+        base40cfg4: { lora: false, steps: 40, cfg: 4 },
+      };
+      const p = presets[name];
+      if (!p) return;
+      document.getElementById('useLora').checked = p.lora;
+      toggleLoraOption();
+      setSlider('steps', p.steps);
+      setSlider('cfg', p.cfg);
+    }
+
+    // =================== OUTPUT SIZE (qwen-image-2.1) ===================
+    function getImageSize(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+      });
+    }
+
+    // Scale (w, h) down so the long side fits the model limit, then floor both to multiples of 32
+    function clampToModelSize(w, h) {
+      const scale = Math.min(1, QWEN21_MAX_SIDE / Math.max(w, h));
+      return {
+        width: Math.max(32, Math.floor((w * scale) / 32) * 32),
+        height: Math.max(32, Math.floor((h * scale) / 32) * 32),
+      };
+    }
+
+    // Returns {width, height} to send, or null to let the server pick (~1MP at the input aspect)
+    function computeOutputSize(mode, srcW, srcH) {
+      if (!srcW || !srcH || mode === 'match') return null;
+      if (mode === 'original') return clampToModelSize(srcW, srcH);
+      const target = QWEN21_SIZE_TARGETS[mode];
+      if (!target) return null;
+      const aspect = srcW / srcH;
+      let w = Math.max(32, Math.round(target * Math.sqrt(aspect) / 32) * 32);
+      let h = Math.max(32, Math.round(target / Math.sqrt(aspect) / 32) * 32);
+      if (Math.max(w, h) > QWEN21_MAX_SIDE) return clampToModelSize(w, h);
+      return { width: w, height: h };
+    }
+
+    function updateSizeHint() {
+      const hint = document.getElementById('q21SizeHint');
+      const img = document.getElementById('sourceImg');
+      const mode = document.getElementById('q21SizeSelect').value;
+      if (!sourceImageData || !img.naturalWidth) { hint.textContent = ''; return; }
+      const size = computeOutputSize(mode, img.naturalWidth, img.naturalHeight);
+      hint.textContent = size
+        ? `Output: ${size.width}×${size.height}`
+        : `Input ${img.naturalWidth}×${img.naturalHeight} → ~1MP, same aspect`;
+    }
+
+    // Snapshot of qwen-image-2.1 options from the UI (used for every image of a batch)
+    async function getQwen21Options() {
+      const sizeMode = document.getElementById('q21SizeSelect').value;
+      let size = null;
+      if (sizeMode !== 'match' && sourceImageData) {
+        const src = await getImageSize(sourceImageData);
+        if (src) size = computeOutputSize(sizeMode, src.width, src.height);
+      }
+      return {
+        transparent: document.getElementById('q21Transparent').checked,
+        sizeMode,
+        width: size?.width ?? null,
+        height: size?.height ?? null,
+        referenceImages: referenceImages.slice(),
+      };
+    }
+
+    // =================== REFERENCE IMAGES (qwen-image-2.1) ===================
+    function readFileAsDataURL(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function handleRefFileSelect(e) {
+      const files = [...e.target.files].filter(f => f.type.startsWith('image/'));
+      e.target.value = '';  // Reset for re-upload
+      const room = QWEN21_MAX_REFS - referenceImages.length;
+      if (files.length > room) showToast(`Max ${QWEN21_MAX_REFS} reference images; ${files.length - Math.max(room, 0)} skipped`);
+      for (const file of files.slice(0, Math.max(room, 0))) {
+        referenceImages.push(await readFileAsDataURL(file));
+      }
+      renderReferenceImages();
+    }
+
+    function removeReferenceImage(index) {
+      referenceImages.splice(index, 1);
+      renderReferenceImages();
+    }
+
+    function clearReferenceImages() {
+      referenceImages = [];
+      renderReferenceImages();
+    }
+
+    function renderReferenceImages() {
+      document.getElementById('refThumbs').innerHTML = referenceImages.map((src, i) => `
+        <div class="ref-thumb">
+          <img src="${src}" alt="image ${i + 2}">
+          <div class="ref-label">image ${i + 2}</div>
+          <button class="ref-remove" onclick="removeReferenceImage(${i})" title="Remove">&#10005;</button>
+        </div>
+      `).join('');
+      document.getElementById('refClearBtn').style.display = referenceImages.length ? 'inline-block' : 'none';
+      updateRefHint();
+    }
+
+    // Warn when a selected preset refers to "image 2" but no reference is loaded
+    function updateRefHint() {
+      const hint = document.getElementById('q21RefHint');
+      const needsRef = getSelectedItems(EDIT_QWEN21, selectedQwen21).some(item => item.needsRef);
+      if (needsRef && referenceImages.length === 0) {
+        hint.textContent = 'This preset needs a reference image: use "Add reference images" (it becomes image 2).';
+        hint.style.display = 'block';
+      } else {
+        hint.style.display = 'none';
+      }
+    }
+
+    // =================== TRANSPARENCY ===================
+    // True when a (PNG) result has any non-opaque pixel; checked on a downscaled copy
+    function imageHasAlpha(dataUrl) {
+      if (!dataUrl.startsWith('data:image/png') && !dataUrl.startsWith('data:image/webp')) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, 256 / Math.max(img.width, img.height));
+          const w = Math.max(1, Math.round(img.width * scale));
+          const h = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] < 255) { resolve(true); return; }
+          }
+          resolve(false);
+        };
+        img.onerror = () => resolve(false);
+        img.src = dataUrl;
+      });
     }
 
     // =================== HELPERS ===================
@@ -1425,6 +1790,9 @@
 
       // Init compose mode switch visual
       document.getElementById('composeModeSwitch').classList.toggle('active', composeMode);
+
+      // Recompute the qwen-image-2.1 output size hint whenever the source image changes
+      document.getElementById('sourceImg').addEventListener('load', updateSizeHint);
     }
 
     function handlePaste(e) {
@@ -1485,6 +1853,7 @@
       document.getElementById('originalName').value = '';
       document.getElementById('resultsSection').style.display = 'none';
       document.getElementById('resultsGrid').innerHTML = '';
+      updateSizeHint();
     }
 
     // =================== CHIPS ===================
@@ -1502,11 +1871,22 @@
           `<div class="chip ${cat.selected.has(item.id) ? 'selected' : ''}" onclick="toggleChip('${cat.type}', '${item.id}')">${item.label}</div>`
         ).join('');
       }
+      // qwen-image-2.1 presets: dashed "fill" chips insert an editable prompt instead of being selected
+      document.getElementById('q21Chips').innerHTML = EDIT_QWEN21.map(item => {
+        const cls = item.fill ? 'fill-chip' : (selectedQwen21.has(item.id) ? 'selected' : '');
+        const title = item.fill ? 'Inserts into Custom Prompt - edit the [placeholder]' : (item.needsRef ? 'Needs a reference image (image 2)' : '');
+        return `<div class="chip ${cls}" title="${title}" onclick="toggleChip('qwen21', '${item.id}')">${item.label}</div>`;
+      }).join('');
+      updateRefHint();
       updateComposePreview();
     }
 
     function toggleChip(type, id) {
-      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits };
+      if (type === 'qwen21') {
+        const item = EDIT_QWEN21.find(i => i.id === id);
+        if (item?.fill) { insertFillPrompt(item.prompt); return; }
+      }
+      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits, qwen21: selectedQwen21 };
       const set = setMap[type];
       if (composeMode) {
         // In compose mode: single-select per category (clicking another deselects the previous)
@@ -1521,7 +1901,23 @@
         if (set.has(id)) set.delete(id);
         else set.add(id);
       }
+      // Selecting "Extract Subject" in compose mode also ticks Transparent background
+      // (in batch mode the flag is applied per image instead, see getEditPrompts)
+      if (type === 'qwen21' && composeMode && set.has(id) && EDIT_QWEN21.find(i => i.id === id)?.transparent) {
+        document.getElementById('q21Transparent').checked = true;
+      }
       renderChips();
+    }
+
+    // Put a template prompt into Custom Prompt and select its [PLACEHOLDER] for typing
+    function insertFillPrompt(prompt) {
+      const textarea = document.getElementById('customPrompt');
+      textarea.value = prompt;
+      textarea.focus();
+      const start = prompt.indexOf('[');
+      const end = prompt.indexOf(']', start);
+      if (start >= 0 && end > start) textarea.setSelectionRange(start, end + 1);
+      updateComposePreview();
     }
 
     function toggleAllEmotions() {
@@ -1584,7 +1980,7 @@
 
       // In compose mode, trim selections to max 1 per category
       if (composeMode) {
-        for (const set of [selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits]) {
+        for (const set of [selectedQwen21, selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits]) {
           if (set.size > 1) {
             const first = set.values().next().value;
             set.clear();
@@ -1609,6 +2005,7 @@
       if (custom) parts.push(custom);
 
       for (const [items, selected] of [
+        [activeQwen21Items(), selectedQwen21],
         [EDIT_EMOTIONS, selectedEmotions],
         [EDIT_POSES, selectedPoses],
         [EDIT_COMPOSITIONS, selectedCompositions],
@@ -1627,7 +2024,7 @@
       }
 
       preview.style.display = 'block';
-      previewText.textContent = parts.join('. ');
+      previewText.textContent = joinPromptParts(parts);
     }
 
     // =================== OPTIONS ===================
@@ -1635,6 +2032,26 @@
       const useLora = document.getElementById('useLora').checked;
       const stepsInput = document.getElementById('stepsSlider');
       const cfgInput = document.getElementById('cfgSlider');
+      const hint = document.getElementById('modelSettingsHint');
+      cfgInput.disabled = false;
+      hint.style.display = 'none';
+      if (isQwen21()) {
+        // qwen-image-2.1: base 40 steps / CFG 1 (off); Viggle turbo LoRA 6 steps, CFG forced to 1
+        if (useLora) {
+          stepsInput.min = 5;
+          setSlider('steps', 6);
+          setSlider('cfg', 1);
+          cfgInput.disabled = true;
+          hint.textContent = 'Turbo: steps 5-7 = turbo only, 8+ = 9-step hybrid (7 turbo + 2 base, more detail). CFG is forced to 1.';
+        } else {
+          stepsInput.min = 10;
+          setSlider('steps', 40);
+          setSlider('cfg', 1);
+          hint.textContent = 'CFG 1 = off. CFG above 1 enables true CFG (uses the negative prompt, about 2x slower).';
+        }
+        hint.style.display = 'block';
+        return;
+      }
       if (useLora) {
         stepsInput.min = 4;
         stepsInput.value = 6;
@@ -1675,6 +2092,11 @@
       return (negativeEnabled && customNegative) ? customNegative : DEFAULT_NEGATIVE;
     }
 
+    // Join prompt fragments with ". " without doubling periods of fragments that already end in one
+    function joinPromptParts(parts) {
+      return parts.map(p => p.trim().replace(/\.+$/, '')).join('. ');
+    }
+
     function getSelectedItems(items, selected) {
       return items.filter(item => selected.has(item.id));
     }
@@ -1688,6 +2110,8 @@
         // Compose mode: combine one from each category into a single prompt
         const parts = [];
         const labels = [];
+        let transparent = false;
+        let needsRef = false;
 
         if (customPrompt) {
           parts.push(customPrompt);
@@ -1695,6 +2119,7 @@
         }
 
         const categories = [
+          { items: activeQwen21Items(), selected: selectedQwen21 },
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
@@ -1708,6 +2133,8 @@
           for (const item of sel) {
             parts.push(item.prompt);
             labels.push(item.label);
+            if (item.transparent) transparent = true;
+            if (item.needsRef) needsRef = true;
           }
         }
 
@@ -1719,8 +2146,10 @@
 
           prompts.push({
             label: labels.join(' + '),
-            prompt: parts.join('. '),
+            prompt: joinPromptParts(parts),
             negative_prompt: neg,
+            transparent,
+            needsRef,
           });
         }
       } else {
@@ -1730,6 +2159,7 @@
         if (customPrompt) allSelected.push({ label: 'Custom', prompt: customPrompt });
 
         const categories = [
+          { items: activeQwen21Items(), selected: selectedQwen21 },
           { items: EDIT_EMOTIONS, selected: selectedEmotions },
           { items: EDIT_POSES, selected: selectedPoses },
           { items: EDIT_COMPOSITIONS, selected: selectedCompositions },
@@ -1740,7 +2170,7 @@
 
         for (const cat of categories) {
           for (const item of getSelectedItems(cat.items, cat.selected)) {
-            allSelected.push({ label: item.label, prompt: item.prompt });
+            allSelected.push({ label: item.label, prompt: item.prompt, transparent: !!item.transparent, needsRef: !!item.needsRef });
           }
         }
 
@@ -1753,6 +2183,8 @@
             label: item.label,
             prompt: item.prompt,
             negative_prompt: neg,
+            transparent: !!item.transparent,
+            needsRef: !!item.needsRef,
           });
         }
       }
@@ -1765,7 +2197,7 @@
       const steps = overrideSettings?.steps ?? parseInt(document.getElementById('stepsSlider').value);
       const cfgScale = overrideSettings?.cfgScale ?? parseFloat(document.getElementById('cfgSlider').value);
       const useLora = overrideSettings?.useLora ?? document.getElementById('useLora').checked;
-      const model = document.getElementById('modelSelect').value;
+      const model = overrideSettings?.model ?? getSelectedModel();
 
       const payload = {
         image: base64Data,
@@ -1776,6 +2208,19 @@
         use_lora: useLora,
       };
       if (seed !== null && seed !== undefined) payload.seed = seed;
+
+      // qwen-image-2.1 extras (other models get exactly the fields above)
+      if (isQwen21(model)) {
+        const q21 = overrideSettings?.qwen21 ?? await getQwen21Options();
+        payload.transparent = !!q21.transparent;
+        if (q21.width && q21.height) {
+          payload.width = q21.width;
+          payload.height = q21.height;
+        }
+        if (q21.referenceImages?.length) {
+          payload.reference_images = q21.referenceImages.map(d => d.split(',')[1]);
+        }
+      }
 
       const response = await fetch(`${getApiUrl()}/img2img/edit/${model}`, {
         method: 'POST',
@@ -1866,6 +2311,20 @@
         return;
       }
 
+      // Snapshot settings for the whole batch (changing the model resets sliders)
+      const model = getSelectedModel();
+      const runSettings = {
+        model,
+        steps: parseInt(document.getElementById('stepsSlider').value),
+        cfgScale: parseFloat(document.getElementById('cfgSlider').value),
+        useLora: document.getElementById('useLora').checked,
+      };
+      const q21Options = isQwen21(model) ? await getQwen21Options() : null;
+      if (q21Options && q21Options.referenceImages.length === 0 && prompts.some(p => p.needsRef)) {
+        showToast('That preset needs a reference image (image 2) - add one first');
+        return;
+      }
+
       // Save original if not already saved
       let originalId = currentOriginalId;
       if (!originalId) {
@@ -1929,7 +2388,8 @@
 
         try {
           const seed = getEditSeed();
-          const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed);
+          const q21 = q21Options ? { ...q21Options, transparent: q21Options.transparent || !!prompts[i].transparent } : null;
+          const blob = await editSingleImage(base64Data, prompt, negative_prompt, seed, { ...runSettings, qwen21: q21 });
           completedCount++;
 
           const dataUrl = await new Promise((resolve) => {
@@ -1942,14 +2402,24 @@
             prompt,
             negative_prompt,
             label,
-            steps: parseInt(document.getElementById('stepsSlider').value),
-            cfgScale: parseFloat(document.getElementById('cfgSlider').value),
-            useLora: document.getElementById('useLora').checked,
+            steps: runSettings.steps,
+            cfgScale: runSettings.cfgScale,
+            useLora: runSettings.useLora,
             seed,
             basePrompt: basePrompt || '',
             clothedPrompt: clothedPrompt || '',
-            model: document.getElementById('modelSelect').value,
+            model,
+            hasAlpha: await imageHasAlpha(dataUrl),
           };
+          if (q21) {
+            Object.assign(metadata, {
+              transparent: q21.transparent,
+              sizeMode: q21.sizeMode,
+              width: q21.width,
+              height: q21.height,
+              referenceCount: q21.referenceImages.length,
+            });
+          }
 
           await saveEdit(originalId, dataUrl, metadata);
           completed++;
@@ -2110,7 +2580,7 @@
       document.getElementById('downloadBtn').style.display = edits.length > 0 ? 'inline-block' : 'none';
 
       grid.innerHTML = edits.map(edit => `
-        <div class="result-thumb ${selectedEdits.has(edit.id) ? 'selected' : ''}"
+        <div class="result-thumb ${selectedEdits.has(edit.id) ? 'selected' : ''} ${edit.hasAlpha ? 'checkerboard' : ''}"
              data-id="${edit.id}"
              onclick="openImageModal(${edit.id})">
           <img src="${edit.thumbnail || edit.data}" alt="${edit.label || 'Edit'}" loading="lazy">
@@ -2262,6 +2732,7 @@
       showingOriginal = false;
 
       document.getElementById('modalImg').src = edit.data;
+      document.getElementById('modalImg').classList.toggle('checkerboard', !!edit.hasAlpha);
       document.getElementById('compareBtn').textContent = 'Show Original';
 
       // Get original for compare
@@ -2277,6 +2748,7 @@
         <div class="image-modal-meta"><strong>Steps:</strong> ${edit.steps || '--'} | <strong>CFG:</strong> ${edit.cfgScale || '--'}</div>
         <div class="image-modal-meta"><strong>LoRA:</strong> ${edit.useLora ? 'Yes' : 'No'} | <strong>Seed:</strong> ${edit.seed ?? 'Random'}</div>
         <div class="image-modal-meta"><strong>Model:</strong> ${edit.model || 'qwen-image-edit'}</div>
+        ${isQwen21(edit.model) ? `<div class="image-modal-meta"><strong>Size:</strong> ${edit.width && edit.height ? `${edit.width}×${edit.height}` : 'Match input (~1MP)'} | <strong>Transparent:</strong> ${edit.transparent ? 'Yes' : 'No'} | <strong>References:</strong> ${edit.referenceCount || 0}</div>` : ''}
         <div class="image-modal-meta"><strong>Date:</strong> ${formatDate(edit.timestamp)}</div>
       `;
 
@@ -2343,11 +2815,29 @@
         if (!orig) throw new Error('Original image not found');
         const base64Data = orig.data.split(',')[1];
 
+        const model = edit.model || 'qwen-image-edit';
         const storedSettings = {
+          model,
           steps: edit.steps || 20,
           cfgScale: edit.cfgScale || 4.0,
           useLora: edit.useLora || false,
         };
+        let q21Meta = null;
+        if (isQwen21(model)) {
+          // Reference images are not stored per edit; reuse the currently loaded ones if the count matches
+          const refCount = edit.referenceCount || 0;
+          if (refCount > 0 && referenceImages.length !== refCount) {
+            throw new Error(`This edit used ${refCount} reference image(s) - load the same ${refCount} again to regenerate`);
+          }
+          q21Meta = {
+            transparent: !!edit.transparent,
+            sizeMode: edit.sizeMode || 'match',
+            width: edit.width || null,
+            height: edit.height || null,
+            referenceCount: refCount,
+          };
+          storedSettings.qwen21 = { ...q21Meta, referenceImages: refCount > 0 ? referenceImages.slice() : [] };
+        }
 
         const seedToUse = edit.seed ?? null;
         const blob = await editSingleImage(base64Data, edit.prompt, edit.negative_prompt || '', seedToUse, storedSettings);
@@ -2357,6 +2847,7 @@
           reader.onloadend = () => resolve(reader.result);
           reader.readAsDataURL(blob);
         });
+        const hasAlpha = await imageHasAlpha(newDataUrl);
 
         // Delete old, save new
         await deleteEditFromDB(modalEditId);
@@ -2370,12 +2861,15 @@
           seed: seedToUse,
           basePrompt: edit.basePrompt || '',
           clothedPrompt: edit.clothedPrompt || '',
-          model: edit.model || 'qwen-image-edit',
+          model,
+          hasAlpha,
+          ...(q21Meta || {}),
         });
 
         // Update modal
         modalEditId = newId;
         document.getElementById('modalImg').src = newDataUrl;
+        document.getElementById('modalImg').classList.toggle('checkerboard', hasAlpha);
         showToast('Regenerated successfully');
         await loadResults();
       } catch (error) {

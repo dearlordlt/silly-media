@@ -51,10 +51,15 @@ curl -X POST http://localhost:4201/tts/generate \
 
 | Model | ID | Notes |
 |-------|----|-------|
-| Z-Image | `z-image` | Full image model, higher quality |
-| Z-Image Turbo | `z-image-turbo` | Fast default model |
+| Z-Image | `z-image` | Full image model, higher quality, full CFG, stackable LoRAs |
+| Z-Image Turbo | `z-image-turbo` | Fast default model, stackable LoRAs |
+| Z-Image Turbo PM | `z-image-turbo-pm` | NSFW fine-tune from a local checkpoint (only when `data/checkpoints/z-image-turbo-pm.safetensors` exists) |
 | Qwen Image 2512 | `qwen-image-2512` | GGUF image model with optional LoRA turbo mode |
-| Ovis Image 7B | `ovis-image-7b` | Higher quality, slower |
+| Qwen Image 2.1 | `qwen-image-2.1` | Uncensored GGUF 7B; text/typography, portraits, native 2K, native transparency (RGBA), optional 6-step turbo LoRA; also an img2img model |
+| Krea 2 Turbo | `krea-2-turbo` | 12B FP8, high quality, 8 steps; gated (needs `HF_TOKEN`) |
+| Ovis Image 7B | `ovis-image-7b` | Optional/legacy: registered only when its weights are cached (currently not installed) |
+
+`z-image-turbo-pm`, `qwen-image-2.1` and `ovis-image-7b` are registered only when their weights are on disk; check `/health` for what is available.
 
 ### Audio Models
 
@@ -71,6 +76,7 @@ curl -X POST http://localhost:4201/tts/generate \
 | Video | HunyuanVideo 1.5 | `hunyuan-video` |
 | Vision | Qwen3-VL 8B | `qwen3-vl-8b` |
 | Img2Img | Qwen Image Edit | `qwen-image-edit` |
+| Img2Img | Qwen Image 2.1 (multi-image edits, transparency) | `qwen-image-2.1` |
 | LLM | Huihui Qwen3 4B | `huihui-qwen3-4b` |
 | Music | ACE-Step 1.5 Turbo / Quality | `ace-step`, `ace-step-quality` |
 

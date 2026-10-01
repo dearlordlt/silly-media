@@ -5,7 +5,7 @@ import gc
 import logging
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -47,10 +47,16 @@ class ModelInfo:
     model_type: ModelType
     estimated_vram_gb: float
     instance: Any  # The actual model instance
+    # Further types the same instance serves (e.g. a model doing both text-to-image
+    # and img2img), so it's listed under each without being loaded twice.
+    extra_types: set[ModelType] = field(default_factory=set)
 
     @property
     def is_loaded(self) -> bool:
         return self.instance.is_loaded
+
+    def has_type(self, model_type: ModelType) -> bool:
+        return model_type == self.model_type or model_type in self.extra_types
 
 
 class VRAMManager:
@@ -68,6 +74,7 @@ class VRAMManager:
         "z-image-turbo": 22.0,
         "ovis-image-7b": 20.0,
         "qwen-image-2512": 15.0,  # GGUF Q5_K_M quantization
+        "qwen-image-2.1": 10.0,  # GGUF Q8_0 7B DiT + NF4 Qwen3-VL text encoder, model offload
         "krea-2-turbo": 14.0,  # 12B MMDiT, FP8 weight-only quantization
         "xtts-v2": 2.0,
         "demucs": 2.0,
@@ -109,7 +116,18 @@ class VRAMManager:
         instance: Loadable,
         estimated_vram_gb: float | None = None,
     ) -> None:
-        """Register a model with the VRAM manager."""
+        """Register a model with the VRAM manager.
+
+        Registering an already-known name with the same instance adds `model_type`
+        to it instead of replacing the entry.
+        """
+        existing = self._models.get(name)
+        if existing is not None and existing.instance is instance:
+            if not existing.has_type(model_type):
+                existing.extra_types.add(model_type)
+            logger.info(f"Registered model: {name} (also {model_type.value})")
+            return
+
         vram = estimated_vram_gb or self.VRAM_ESTIMATES.get(name, 10.0)
         self._models[name] = ModelInfo(
             name=name,
@@ -306,7 +324,7 @@ class VRAMManager:
         """Get list of available models, optionally filtered by type."""
         if model_type is None:
             return list(self._models.keys())
-        return [name for name, info in self._models.items() if info.model_type == model_type]
+        return [name for name, info in self._models.items() if info.has_type(model_type)]
 
     def get_model_info(self, name: str) -> ModelInfo | None:
         """Get info about a specific model."""

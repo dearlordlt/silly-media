@@ -129,12 +129,19 @@ def generate_image(
     lora: Optional[str] = None,
     lora_scale: float = 1.0,
     loras: Optional[list[str]] = None,
+    use_lora: bool = False,
+    transparent: bool = False,
 ) -> list:
     """Text-to-image. Models: z-image-turbo (fast, default), z-image,
     z-image-turbo-pm (NSFW fine-tune, honors cfg_scale up to ~1.5), qwen-image-2512,
-    ovis-image-7b, krea-2-turbo (12B, high quality, ~8 steps). Use aspect_ratio
-    (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) + base_size, OR explicit width/height
-    (64-2048). loras: stack any number of installed LoRAs (see list_loras), each entry
+    qwen-image-2.1 (uncensored 7B, great text rendering, native 2K + transparency;
+    40 steps / cfg 1 by default, use_lora=True = 6-step turbo, 9 steps with turbo =
+    higher-detail hybrid), ovis-image-7b, krea-2-turbo (12B, high quality, ~8 steps).
+    Use aspect_ratio (1:1,16:9,9:16,4:5,3:4,2:3,5:4,4:3,3:2,21:9) + base_size (1024
+    default; 1536/2048 for qwen-image-2.1's 1.5K/2K), OR explicit width/height
+    (64-2048). use_lora: turbo LoRA on qwen-image-2512 / qwen-image-2.1.
+    transparent: RGBA PNG with transparent background (qwen-image-2.1 only).
+    loras: stack any number of installed LoRAs (see list_loras), each entry
     "name" or "name:scale" (e.g. ["style-a", "style-b:0.7"]); Z-Image models only.
     lora/lora_scale are the legacy single-LoRA form. Returns the image inline
     and the saved PNG path."""
@@ -163,6 +170,8 @@ def generate_image(
             "lora": lora,
             "lora_scale": lora_scale if lora else None,
             "loras": lora_specs,
+            "use_lora": use_lora or None,
+            "transparent": transparent or None,
         }
     )
     with _client() as c:
@@ -221,8 +230,9 @@ def generate_sprite(
     transparent cutout (rembg). output_size smooth-downscales the longest side
     (LANCZOS), aspect preserved; omit to keep full res. Supports non-square via
     aspect_ratio (e.g. 3:4 for characters) or explicit width/height. Pick model:
-    z-image (quality), z-image-turbo (fast, default), qwen-image-2512 (portraits).
-    Returns image inline + saved PNG path."""
+    z-image (quality), z-image-turbo (fast, default), qwen-image-2512 (portraits),
+    qwen-image-2.1 (renders the transparent background natively instead of rembg —
+    cleaner edges, hair, glass). Returns image inline + saved PNG path."""
     payload = _drop_none(
         {
             "prompt": prompt,
@@ -253,19 +263,32 @@ def edit_image(
     prompt: str,
     model: str = "qwen-image-edit",
     negative_prompt: str = " ",
-    num_inference_steps: int = 20,
-    true_cfg_scale: float = 4.0,
+    num_inference_steps: Optional[int] = None,
+    true_cfg_scale: Optional[float] = None,
     seed: Optional[int] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
     use_lora: bool = False,
+    reference_image_paths: Optional[list[str]] = None,
+    transparent: bool = False,
 ) -> list:
     """Img2img edit: transform an existing image (give an absolute path) per the prompt.
-    negative_prompt must be non-empty (defaults to a single space). With use_lora=True use
-    4-6 steps + true_cfg_scale=1.0 (Lightning LoRA). Returns edited image inline + path."""
+    Models: qwen-image-edit (default; 20 steps, true_cfg_scale 4.0; use_lora=True =
+    Lightning, use 4-6 steps + true_cfg_scale=1.0) and qwen-image-2.1 (uncensored;
+    40 steps, cfg 1.0 by default; use_lora=True = 6-step turbo; output defaults to
+    ~1MP at the input's aspect). Omit steps/cfg to get the model's defaults.
+    qwen-image-2.1 only: reference_image_paths adds up to 9 more images, referred to
+    in the prompt as image 2, 3, ... (the main image is image 1), e.g. "put the
+    person from image 2 into the scene of image 1"; transparent=True returns an RGBA
+    cutout (also automatic when the input has alpha); phrase it like "Remove the
+    background and make it transparent, keep only the dog" ("extract"/"RGBA" wordings
+    tend to erase the subject).
+    Returns edited image inline + path."""
     payload = _drop_none(
         {
             "image": _b64_of(image_path),
+            "reference_images": [_b64_of(p) for p in reference_image_paths] if reference_image_paths else None,
+            "transparent": transparent or None,
             "prompt": prompt,
             "negative_prompt": negative_prompt or " ",
             "num_inference_steps": num_inference_steps,
