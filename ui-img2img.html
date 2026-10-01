@@ -951,6 +951,12 @@
             <div class="preset-chips" id="outfitChips"></div>
           </div>
 
+          <!-- Shoe chips -->
+          <div class="preset-section">
+            <h4>Shoes <button class="btn-secondary btn-small" onclick="toggleAllShoes()">All</button></h4>
+            <div class="preset-chips" id="shoeChips"></div>
+          </div>
+
           <!-- Compose preview -->
           <div class="compose-preview" id="composePreview" style="display:none">
             <strong>Preview:</strong> <span id="composePreviewText">Select chips to compose a prompt...</span>
@@ -1258,6 +1264,31 @@
       { id: 'oversized-shirt', label: 'Oversized Shirt', prompt: 'Wearing only an oversized shirt, no pants, bare legs' },
     ];
 
+    const EDIT_SHOES = [
+      { id: 'stilettos', label: 'Stiletto Heels', prompt: 'Wearing glossy black stiletto high heels with very thin tall heels' },
+      { id: 'red-pumps', label: 'Red Pumps', prompt: 'Wearing shiny red patent leather pointed-toe pumps with high stiletto heels' },
+      { id: 'red-sole', label: 'Red-Sole Pumps', prompt: 'Wearing black patent leather high heel pumps with glossy red soles' },
+      { id: 'platform-heels', label: 'Platform Heels', prompt: 'Wearing high platform heels with a thick front platform and tall stiletto heels' },
+      { id: 'platform-sandals', label: 'Platform Sandals', prompt: 'Wearing very high strappy platform sandals with thin straps across the toes and around the ankles' },
+      { id: 'pleasers', label: 'Pole Dancer Heels', prompt: 'Wearing extreme clear perspex platform stripper heels with 8-inch stiletto heels' },
+      { id: 'strappy-sandals', label: 'Strappy Sandals', prompt: 'Wearing delicate strappy high heel sandals with thin straps, bare painted toes visible' },
+      { id: 'ankle-strap', label: 'Ankle-Strap Heels', prompt: 'Wearing open-toe high heels with a thin buckled ankle strap' },
+      { id: 'gladiator', label: 'Lace-Up Gladiator Heels', prompt: 'Wearing lace-up gladiator high heel sandals with straps wrapping up the calves' },
+      { id: 'peep-toe', label: 'Peep-Toe Heels', prompt: 'Wearing peep-toe high heels with a small open toe' },
+      { id: 'mules', label: 'Heeled Mules', prompt: 'Wearing backless high heel mules with pointed toes' },
+      { id: 'clear-heels', label: 'Clear Heels', prompt: 'Wearing transparent clear vinyl high heel sandals with clear stiletto heels' },
+      { id: 'mary-janes', label: 'Mary Jane Heels', prompt: 'Wearing glossy Mary Jane high heels with a strap across the instep' },
+      { id: 'wedges', label: 'Wedge Sandals', prompt: 'Wearing high wedge sandals with ankle ties' },
+      { id: 'ankle-boots', label: 'Stiletto Ankle Boots', prompt: 'Wearing sleek black leather stiletto ankle boots' },
+      { id: 'knee-boots', label: 'Knee-High Boots', prompt: 'Wearing tight knee-high leather boots with high stiletto heels' },
+      { id: 'otk-boots', label: 'Over-the-Knee Boots', prompt: 'Wearing over-the-knee suede boots with high stiletto heels' },
+      { id: 'thigh-boots', label: 'Thigh-High Boots', prompt: 'Wearing glossy thigh-high patent leather boots with high stiletto heels' },
+      { id: 'latex-boots', label: 'Latex Platform Boots', prompt: 'Wearing shiny black latex thigh-high platform boots with very high heels' },
+      { id: 'ballet-heels', label: 'Ballet Heels', prompt: 'Wearing extreme black ballet boot heels that force the feet into a pointed tiptoe position' },
+      { id: 'kitten-heels', label: 'Kitten Heels', prompt: 'Wearing elegant pointed kitten heels with short slim heels' },
+      { id: 'barefoot', label: 'Barefoot', prompt: 'Barefoot, no shoes, bare feet with painted toenails' },
+    ];
+
     // qwen-image-2.1 only. Extra flags:
     //   transparent: request an RGBA result with the background removed
     //   needsRef:    prompt mentions "image 2" (at least one reference image required)
@@ -1304,6 +1335,7 @@
     let selectedLocations = new Set();
     let selectedBody = new Set();
     let selectedOutfits = new Set();
+    let selectedShoes = new Set();
     let selectedQwen21 = new Set();
     let referenceImages = [];  // Data URLs of qwen-image-2.1 reference images ("image 2", "image 3", ...)
     let composeMode = true;  // true = combine chips into one prompt, false = each chip = separate image
@@ -1865,6 +1897,7 @@
         { el: 'locationChips', items: EDIT_LOCATIONS, selected: selectedLocations, type: 'location' },
         { el: 'bodyChips', items: EDIT_BODY, selected: selectedBody, type: 'body' },
         { el: 'outfitChips', items: EDIT_OUTFITS, selected: selectedOutfits, type: 'outfit' },
+        { el: 'shoeChips', items: EDIT_SHOES, selected: selectedShoes, type: 'shoe' },
       ];
       for (const cat of categories) {
         document.getElementById(cat.el).innerHTML = cat.items.map(item =>
@@ -1886,7 +1919,7 @@
         const item = EDIT_QWEN21.find(i => i.id === id);
         if (item?.fill) { insertFillPrompt(item.prompt); return; }
       }
-      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits, qwen21: selectedQwen21 };
+      const setMap = { emotion: selectedEmotions, pose: selectedPoses, composition: selectedCompositions, location: selectedLocations, body: selectedBody, outfit: selectedOutfits, shoe: selectedShoes, qwen21: selectedQwen21 };
       const set = setMap[type];
       if (composeMode) {
         // In compose mode: single-select per category (clicking another deselects the previous)
@@ -1971,6 +2004,12 @@
       renderChips();
     }
 
+    function toggleAllShoes() {
+      if (selectedShoes.size === EDIT_SHOES.length) selectedShoes.clear();
+      else EDIT_SHOES.forEach(o => selectedShoes.add(o.id));
+      renderChips();
+    }
+
     function toggleComposeMode() {
       composeMode = !composeMode;
       const sw = document.getElementById('composeModeSwitch');
@@ -1980,7 +2019,7 @@
 
       // In compose mode, trim selections to max 1 per category
       if (composeMode) {
-        for (const set of [selectedQwen21, selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits]) {
+        for (const set of [selectedQwen21, selectedEmotions, selectedPoses, selectedCompositions, selectedLocations, selectedBody, selectedOutfits, selectedShoes]) {
           if (set.size > 1) {
             const first = set.values().next().value;
             set.clear();
@@ -2012,6 +2051,7 @@
         [EDIT_LOCATIONS, selectedLocations],
         [EDIT_BODY, selectedBody],
         [EDIT_OUTFITS, selectedOutfits],
+        [EDIT_SHOES, selectedShoes],
       ]) {
         for (const item of items) {
           if (selected.has(item.id)) parts.push(item.prompt);
@@ -2126,6 +2166,7 @@
           { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_BODY, selected: selectedBody },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
+          { items: EDIT_SHOES, selected: selectedShoes },
         ];
 
         for (const cat of categories) {
@@ -2166,6 +2207,7 @@
           { items: EDIT_LOCATIONS, selected: selectedLocations },
           { items: EDIT_BODY, selected: selectedBody },
           { items: EDIT_OUTFITS, selected: selectedOutfits },
+          { items: EDIT_SHOES, selected: selectedShoes },
         ];
 
         for (const cat of categories) {
