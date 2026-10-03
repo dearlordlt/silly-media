@@ -9,6 +9,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadModelViewer } from '../../components/ModelViewer'
+import { PresetPicker } from './PresetPicker'
+import { DEFAULT_TIER, DEFAULT_USE_CASE, QUALITY_TIERS, USE_CASES, resolvePreset, styledPrompt } from './presets'
+import type { Subject } from './presets'
 import { Boxes, Download, Eraser, ImagePlus, Loader2, RefreshCw, Sparkles, Upload } from 'lucide-react'
 import type { Model3DRequest, Model3DResult } from '../../lib/types'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
@@ -19,55 +22,28 @@ import { ImageDrop } from '../../components/ImageDrop'
 import { useHandoffImage } from '../../lib/handoff'
 import { ModelBadge } from '../../components/Progress'
 import {
-  Button, Chip, EmptyState, IconButton, Input, Label, Panel, Section, Segmented, Select, Slider, Switch, Textarea,
+  Button, EmptyState, IconButton, Input, Label, Panel, Section, Segmented, Select, Slider, Switch, Textarea,
 } from '../../components/ui/primitives'
 
 type Mode = 'text' | 'image'
-type Subject = NonNullable<Model3DRequest['subject']>
+
+const PRESET_KEY = 'silly-3d-preset'
+
+function loadPresetChoice(): { useCase: string; tier: number } {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(PRESET_KEY) ?? 'null')
+    if (raw && typeof raw === 'object' && 'useCase' in raw && 'tier' in raw
+      && typeof raw.useCase === 'string' && USE_CASES.some((u) => u.id === raw.useCase)
+      && typeof raw.tier === 'number' && raw.tier >= 0 && raw.tier < QUALITY_TIERS.length) {
+      return { useCase: raw.useCase, tier: raw.tier }
+    }
+  } catch { /* ignore corrupt storage */ }
+  return { useCase: DEFAULT_USE_CASE, tier: DEFAULT_TIER }
+}
+
 type ViewerBg = 'dark' | 'grey' | 'light'
 
 const RECENT_LIMIT = 24
-
-/** Goal presets from the legacy ui-3d.html: map "what you're making" to good knobs. */
-const PRESETS = {
-  lowpoly: {
-    label: '🧍 Low-poly character', faces: 6000, octree: 256, steps: 30, guidance: 5.5, texture: true,
-    model: 'z-image-turbo', subject: 'character',
-    desc: 'Stylized game character (RuneScape-ish). Few faces, flat-shaded look.',
-  },
-  blocky: {
-    label: '🟫 Blocky / voxel', faces: 1500, octree: 128, steps: 20, guidance: 5.0, texture: true,
-    model: 'z-image-turbo', subject: 'character',
-    desc: 'Chunky Minecraft-ish style. Very low detail, fast.',
-  },
-  realistic: {
-    label: '👤 Realistic figure', faces: 80000, octree: 384, steps: 50, guidance: 5.5, texture: true,
-    model: 'z-image', subject: 'character',
-    desc: 'High-detail person/creature from a full image. Heavier + slower.',
-  },
-  prop: {
-    label: '⚔️ Prop / item', faces: 8000, octree: 256, steps: 30, guidance: 6.0, texture: true,
-    model: 'z-image-turbo', subject: 'object',
-    desc: 'A single object: sword, tool, gadget. Isolated, no character.',
-  },
-  building: {
-    label: '🏛️ Building / structure', faces: 25000, octree: 384, steps: 40, guidance: 5.5, texture: true,
-    model: 'z-image', subject: 'building',
-    desc: 'House, tower, ruin. More faces for flat architectural detail.',
-  },
-  sculpt: {
-    label: '🗿 Sculpt (no texture)', faces: 150000, octree: 512, steps: 50, guidance: 5.5, texture: false,
-    model: 'z-image', subject: 'auto',
-    desc: 'Clean high-res shape only — good for 3D print or re-texturing.',
-  },
-} satisfies Record<string, {
-  label: string; faces: number; octree: number; steps: number; guidance: number; texture: boolean
-  model: string; subject: Subject; desc: string
-}>
-type PresetKey = keyof typeof PRESETS
-const PRESET_KEYS = Object.keys(PRESETS) as PresetKey[]
-const DEFAULT_PRESET: PresetKey = 'lowpoly'
-
 const VIEWER_BG: Record<ViewerBg, string> = { dark: '#0d1117', grey: '#3a3f4b', light: '#e9e9ee' }
 
 // model-viewer loading + JSX typing live in components/ModelViewer.
@@ -101,11 +77,13 @@ export function ThreeDPage() {
   const models = useModels()
   const imageModels = models.data?.image.available ?? []
 
-  const initial = PRESETS[DEFAULT_PRESET]
+  const [choice, setChoice] = useState(loadPresetChoice)
+  const [initial] = useState(() => resolvePreset(choice.useCase, choice.tier, []))
   const [mode, setMode] = useState<Mode>('text')
   const [prompt, setPrompt] = useState('')
   const [subject, setSubject] = useState<Subject>(initial.subject)
-  const [imageModel, setImageModel] = useState<string>(initial.model)
+  const [imageModel, setImageModel] = useState<string>(initial.imageModel)
+  const [matchStyle, setMatchStyle] = useState(true)
   const [image, setImage] = useState<string | null>(null)
   const [seed, setSeed] = useState(-1)
 
@@ -120,7 +98,7 @@ export function ThreeDPage() {
   const [guidance, setGuidance] = useState(initial.guidance)
   const [texture, setTexture] = useState(initial.texture)
   const [targetFaces, setTargetFaces] = useState(initial.faces)
-  const [preset, setPreset] = useState<PresetKey | null>(DEFAULT_PRESET)
+  const [custom, setCustom] = useState(false)
 
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<string | null>(null)
@@ -222,17 +200,22 @@ export function ThreeDPage() {
     return imageModels.includes(imageModel) ? imageModels : [imageModel, ...imageModels]
   }, [imageModels, imageModel])
 
-  const applyPreset = (key: PresetKey) => {
-    const p = PRESETS[key]
+  const resolved = useMemo(() => resolvePreset(choice.useCase, choice.tier, imageModels), [choice, imageModels])
+
+  const applyPreset = (next: { useCase: string; tier: number }) => {
+    const p = resolvePreset(next.useCase, next.tier, imageModels)
     setTargetFaces(p.faces)
     setOctreeResolution(p.octree)
     setSteps(p.steps)
     setGuidance(p.guidance)
     setTexture(p.texture)
     setSubject(p.subject)
-    if (imageModels.length === 0 || imageModels.includes(p.model)) setImageModel(p.model)
-    setPreset(key)
-    log(`Preset "${p.label}": ${p.faces} faces, octree ${p.octree}, ${p.steps} steps, texture ${p.texture ? 'on' : 'off'}.`)
+    setImageModel(p.imageModel)
+    setChoice(next)
+    setCustom(false)
+    localStorage.setItem(PRESET_KEY, JSON.stringify(next))
+    const uc = USE_CASES.find((u) => u.id === next.useCase)?.label ?? next.useCase
+    log(`Preset ${uc} · ${QUALITY_TIERS[next.tier].label}: ${p.faces.toLocaleString()} faces, octree ${p.octree}, ${p.steps} steps, texture ${p.texture ? 'on' : 'off'}.`)
   }
 
   const canGenerate = mode === 'text' ? prompt.trim().length > 0 : !!image
@@ -252,7 +235,7 @@ export function ThreeDPage() {
         seed,
       }
       if (mode === 'text') {
-        body.text = prompt.trim()
+        body.text = matchStyle ? styledPrompt(prompt, resolved.style) : prompt.trim()
         body.subject = subject
         body.image_model = imageModel
       } else if (image) {
@@ -294,7 +277,7 @@ export function ThreeDPage() {
           texture,
           target_faces: targetFaces,
           mode,
-          preset: preset ?? undefined,
+          preset: custom ? 'custom' : `${choice.useCase}:${QUALITY_TIERS[choice.tier].id}`,
         },
       })
       toast.success('Model generated', formatBytes(res.blob.size))
@@ -326,7 +309,7 @@ export function ThreeDPage() {
   }
 
   /** Mark the preset as "custom" once a knob is changed by hand. */
-  const tweak = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPreset(null) }
+  const tweak = <T,>(set: (v: T) => void) => (v: T) => { set(v); setCustom(true) }
 
   return (
     <div className="flex h-full">
@@ -351,16 +334,15 @@ export function ThreeDPage() {
           />
 
           <Section title="Preset">
-            <div className="flex flex-wrap gap-1.5">
-              {PRESET_KEYS.map((key) => (
-                <Chip key={key} active={preset === key} title={PRESETS[key].desc} onClick={() => applyPreset(key)}>
-                  {PRESETS[key].label}
-                </Chip>
-              ))}
-            </div>
-            <p className="min-h-[16px] text-[11.5px] leading-relaxed text-ink-faint">
-              {preset ? PRESETS[preset].desc : 'Custom settings.'}
-            </p>
+            <PresetPicker
+              useCase={choice.useCase}
+              tier={choice.tier}
+              resolved={resolved}
+              custom={custom}
+              onUseCase={(id) => applyPreset({ ...choice, useCase: id })}
+              onTier={(i) => applyPreset({ ...choice, tier: i })}
+              onReapply={() => applyPreset(choice)}
+            />
           </Section>
 
           {mode === 'text' ? (
@@ -376,6 +358,15 @@ export function ThreeDPage() {
                   rows={4}
                   placeholder="low-poly RuneScape-style female, blonde ponytail, blue eyes"
                 />
+              </div>
+              <div className="rounded-lg border border-line bg-bg px-2.5 py-2">
+                <Switch checked={matchStyle} onChange={setMatchStyle} label="Match reference style to quality" />
+                {matchStyle && (
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+                    Appends: <span className="text-ink-dim">“{resolved.style}”</span> — a photoreal reference decimated to
+                    a few thousand faces looks wrong; this steers the reference toward the target look.
+                  </p>
+                )}
               </div>
               <div>
                 <Label>Subject (how the reference is framed)</Label>
