@@ -34,13 +34,16 @@ import { ArtifactGrid } from '../../components/Artifact'
 import {
   CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
   QWEN21_EDIT_PRESETS, QWEN21_MAX_REFS, QWEN21_MODEL, QWEN21_SETTINGS_PRESETS, QWEN21_TEXTURE_NEGATIVE, SIZE_MODES,
-  computeOutputSize, joinPromptParts, modelDefaults,
+  computeOutputSize, customLabel, customPrompt, joinPromptParts, modelDefaults,
 } from './presets'
 import type { EditOption, SizeMode } from './presets'
 
 const MODEL_KEY = 'silly-edit-model'
 const QWEN21_GROUP = 'qwen21'
-const CUSTOM_LOCATION_ID = 'custom-location'
+/** Custom chip texts per category, newest first (persisted per profile). */
+const CUSTOM_CHIPS_KEY = 'silly-edit-custom-chips'
+const CUSTOM_CHIPS_MAX = 12
+const customId = (text: string) => `custom:${text.toLowerCase()}`
 
 type SeedMode = 'random' | 'fixed' | 'custom'
 
@@ -220,15 +223,20 @@ export function EditPage() {
   const [custom, setCustom] = useState('')
   const customRef = useRef<HTMLTextAreaElement>(null)
   const [selected, setSelected] = useState<Record<string, Set<string>>>({})
-  const [customLocation, setCustomLocation] = useState<string | null>(null)
-  const [locationDraft, setLocationDraft] = useState('')
+  const [customChips, setCustomChips] = useState<Record<string, string[]>>(() => kv.getJson<Record<string, string[]>>(CUSTOM_CHIPS_KEY, {}))
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [transparent, setTransparent] = useState(false)
 
-  const categories = useMemo(() => EDIT_CATEGORIES.map((c) => (
-    c.id === 'locations' && customLocation
-      ? { ...c, options: [{ id: CUSTOM_LOCATION_ID, label: customLocation, prompt: `Change location to ${customLocation}` }, ...c.options] }
-      : c
-  )), [customLocation])
+  useEffect(() => { kv.setJson(CUSTOM_CHIPS_KEY, customChips) }, [customChips])
+
+  const categories = useMemo(() => EDIT_CATEGORIES.map((c) => ({
+    ...c,
+    customIds: new Set((customChips[c.id] ?? []).map(customId)),
+    options: [
+      ...(customChips[c.id] ?? []).map((text) => ({ id: customId(text), label: customLabel(c.custom, text), prompt: customPrompt(c.custom, text) })),
+      ...c.options,
+    ],
+  })), [customChips])
 
   /** Compose mode: single-select per category; otherwise multi-select (one edit per chip). */
   const toggleChip = (group: string, id: string) => {
@@ -264,12 +272,31 @@ export function EditPage() {
     })
   }
 
-  const applyCustomLocation = () => {
-    const text = locationDraft.trim()
+  /** Add the category's typed text as a chip (or reuse an equal one) and select it. */
+  const applyCustom = (group: string) => {
+    const text = (drafts[group] ?? '').trim()
     if (!text) return
-    setCustomLocation(text)
-    setSelected((prev) => ({ ...prev, locations: new Set([CUSTOM_LOCATION_ID]) }))
-    setLocationDraft('')
+    const id = customId(text)
+    setCustomChips((prev) => {
+      const rest = (prev[group] ?? []).filter((t) => customId(t) !== id)
+      return { ...prev, [group]: [text, ...rest].slice(0, CUSTOM_CHIPS_MAX) }
+    })
+    setSelected((prev) => {
+      const set = composeMode ? new Set<string>() : new Set(prev[group] ?? [])
+      set.add(id)
+      return { ...prev, [group]: set }
+    })
+    setDrafts((prev) => ({ ...prev, [group]: '' }))
+  }
+
+  const removeCustom = (group: string, id: string) => {
+    setCustomChips((prev) => ({ ...prev, [group]: (prev[group] ?? []).filter((t) => customId(t) !== id) }))
+    setSelected((prev) => {
+      if (!prev[group]?.has(id)) return prev
+      const set = new Set(prev[group])
+      set.delete(id)
+      return { ...prev, [group]: set }
+    })
   }
 
   /** Dashed "fill" presets replace the instruction and select their [PLACEHOLDER]. */
@@ -295,7 +322,7 @@ export function EditPage() {
     if (composeMode && willSelect && preset.transparent) setTransparent(true)
   }
 
-  const resetSelections = () => { setSelected({}); setCustom(''); setCustomLocation(null) }
+  const resetSelections = () => { setSelected({}); setCustom('') }
 
   /* ------------------------------------------------------------ options */
   const [negativeOn, setNegativeOn] = useState(false)
@@ -582,7 +609,6 @@ export function EditPage() {
     const itemModel = item.model ?? model
     if (itemModel !== model && (!img2imgModels.length || img2imgModels.includes(itemModel))) changeModel(itemModel)
     setSelected({})
-    setCustomLocation(null)
     setClothesOn(false)
     setCustom(item.prompt)
     setUseLora(metaFlag(item, 'useLora'))
@@ -821,22 +847,30 @@ export function EditPage() {
             )}
           >
             <div className="flex flex-wrap gap-1.5">
-              {g.options.map((o) => (
+              {g.options.map((o) => g.customIds.has(o.id) ? (
+                <CustomChip
+                  key={o.id}
+                  label={o.label}
+                  title={o.prompt}
+                  active={!!selected[g.id]?.has(o.id)}
+                  onClick={() => toggleChip(g.id, o.id)}
+                  onRemove={() => removeCustom(g.id, o.id)}
+                />
+              ) : (
                 <Chip key={o.id} active={!!selected[g.id]?.has(o.id)} title={o.prompt} onClick={() => toggleChip(g.id, o.id)}>{o.label}</Chip>
               ))}
             </div>
-            {g.id === 'locations' && (
-              <div className="flex gap-2">
-                <Input
-                  className="flex-1"
-                  value={locationDraft}
-                  onChange={(e) => setLocationDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') applyCustomLocation() }}
-                  placeholder="Custom location…"
-                />
-                <Button size="sm" onClick={applyCustomLocation} disabled={!locationDraft.trim()}>Use</Button>
-              </div>
-            )}
+            <div className="flex gap-2">
+              <Input
+                className="flex-1"
+                value={drafts[g.id] ?? ''}
+                onChange={(e) => { const v = e.target.value; setDrafts((prev) => ({ ...prev, [g.id]: v })) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') applyCustom(g.id) }}
+                placeholder={g.custom.placeholder}
+                title={g.custom.prefix ? `Becomes: "${g.custom.prefix} …"` : 'Used as written'}
+              />
+              <Button size="sm" onClick={() => applyCustom(g.id)} disabled={!(drafts[g.id] ?? '').trim()}>Use</Button>
+            </div>
           </Section>
         ))}
 
@@ -1079,5 +1113,28 @@ export function EditPage() {
         onDelete={(item) => void deleteFromViewer(item)}
       />
     </div>
+  )
+}
+
+/** A user-added chip: same look as preset chips, dashed border, with a remove button. */
+function CustomChip({ label, title, active, onClick, onRemove }: {
+  label: string
+  title: string
+  active: boolean
+  onClick: () => void
+  onRemove: () => void
+}) {
+  return (
+    <span
+      className={clsx(
+        'inline-flex items-center rounded-full border border-dashed text-[12px] transition-colors',
+        active ? 'border-accent/60 bg-accent/20 text-ink' : 'border-line-strong bg-panel-2 text-ink-dim hover:text-ink',
+      )}
+    >
+      <button type="button" title={title} onClick={onClick} className="py-1 pl-2.5 pr-1">{label}</button>
+      <button type="button" title="Remove this custom chip" onClick={onRemove} className="grid h-5 w-5 place-items-center rounded-full pr-0.5 text-ink-faint hover:text-bad">
+        <X size={11} />
+      </button>
+    </span>
   )
 }

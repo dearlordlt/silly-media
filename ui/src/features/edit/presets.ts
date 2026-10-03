@@ -1,7 +1,9 @@
 /** Edit preset chips, ported from ui-img2img.html (prompt text used verbatim). */
 
 export interface EditOption { id: string; label: string; prompt: string }
-export interface EditCategory { id: string; label: string; options: EditOption[] }
+/** Free-text entry for a category: the typed text is turned into a prompt with `prefix` (unless it already starts with it). */
+export interface EditCustom { placeholder: string; prefix: string }
+export interface EditCategory { id: string; label: string; options: EditOption[]; custom: EditCustom }
 
 export const EDIT_EMOTIONS: EditOption[] = [
   { id: 'smiling', label: 'Smiling', prompt: 'Make the person smiling warmly, gentle smile' },
@@ -171,15 +173,29 @@ export const EDIT_SHOES: EditOption[] = [
 ]
 
 export const EDIT_CATEGORIES: EditCategory[] = [
-  { id: 'emotions', label: 'Emotions', options: EDIT_EMOTIONS },
-  { id: 'poses', label: 'Poses', options: EDIT_POSES },
-  { id: 'gazes', label: 'Gaze', options: EDIT_GAZES },
-  { id: 'composition', label: 'Composition', options: EDIT_COMPOSITIONS },
-  { id: 'locations', label: 'Locations', options: EDIT_LOCATIONS },
-  { id: 'body', label: 'Body', options: EDIT_BODY },
-  { id: 'outfits', label: 'Outfits', options: EDIT_OUTFITS },
-  { id: 'shoes', label: 'Shoes', options: EDIT_SHOES },
+  { id: 'emotions', label: 'Emotions', options: EDIT_EMOTIONS, custom: { placeholder: 'Custom emotion… (e.g. nervous, smirking)', prefix: 'Make the person look' } },
+  { id: 'poses', label: 'Poses', options: EDIT_POSES, custom: { placeholder: 'Custom pose… (e.g. sitting on the edge of a bed)', prefix: 'Change pose to' } },
+  { id: 'gazes', label: 'Gaze', options: EDIT_GAZES, custom: { placeholder: 'Custom gaze… (e.g. at the mirror)', prefix: 'Looking' } },
+  { id: 'composition', label: 'Composition', options: EDIT_COMPOSITIONS, custom: { placeholder: 'Custom framing, camera or lighting…', prefix: '' } },
+  { id: 'locations', label: 'Locations', options: EDIT_LOCATIONS, custom: { placeholder: 'Custom location…', prefix: 'Change location to' } },
+  { id: 'body', label: 'Body', options: EDIT_BODY, custom: { placeholder: 'Custom body / undress description…', prefix: '' } },
+  { id: 'outfits', label: 'Outfits', options: EDIT_OUTFITS, custom: { placeholder: 'Custom outfit… (e.g. a red leather jacket)', prefix: 'Wearing' } },
+  { id: 'shoes', label: 'Shoes', options: EDIT_SHOES, custom: { placeholder: 'Custom shoes… (e.g. white sneakers)', prefix: 'Wearing' } },
 ]
+
+/** Prompt for a custom chip: `prefix text`, without doubling a prefix the user already typed. */
+export function customPrompt(custom: EditCustom, text: string): string {
+  const t = text.trim()
+  if (!custom.prefix || t.toLowerCase().startsWith(custom.prefix.toLowerCase())) return t.charAt(0).toUpperCase() + t.slice(1)
+  return `${custom.prefix} ${t}`
+}
+
+/** Chip label for a custom entry: the text without the category prefix, capitalised like preset chips. */
+export function customLabel(custom: EditCustom, text: string): string {
+  let t = text.trim()
+  if (custom.prefix && t.toLowerCase().startsWith(custom.prefix.toLowerCase())) t = t.slice(custom.prefix.length).trim()
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
 
 /** A qwen-image-2.1 preset chip.
  *  transparent: request an RGBA cutout; needsRef: prompt mentions "image 2";
