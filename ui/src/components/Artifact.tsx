@@ -1,16 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { useNavigate } from '@tanstack/react-router'
-import { Boxes, Check, ChevronLeft, ChevronRight, Clapperboard, Download, Heart, RotateCcw, ScanEye, Star, Trash2, Wand2 } from 'lucide-react'
-import { HANDOFF_ROUTES, handOffImage, type HandoffTarget } from '../lib/handoff'
+import { Boxes, Check, ChevronLeft, ChevronRight, Clapperboard, Download, Heart, RotateCcw, ScanEye, Send, Star, Trash2, Wand2 } from 'lucide-react'
+import { HANDOFF_ROUTES, handOffItem, type HandoffTarget } from '../lib/handoff'
 import { ModelViewer, renderGlbPoster } from './ModelViewer'
 import type { MediaItem } from '../lib/library'
-import { itemFilename, library } from '../lib/library'
-import { downloadBlob, formatBytes, formatDuration } from '../lib/media'
+import { downloadItem, library } from '../lib/library'
+import { formatBytes, formatDuration } from '../lib/media'
+import { startItemDrag } from '../lib/drag'
+import { useCommands } from '../lib/commands'
+import type { Command } from '../lib/commands'
 import { Modal } from './ui/Modal'
-import { Button, EmptyState, IconButton } from './ui/primitives'
+import { Button, EmptyState } from './ui/primitives'
 import { useApp } from '../lib/store'
+import { AudioRow, claimPlayback } from './AudioRow'
+import { TagEditor } from './TagEditor'
+import { KIND_LABEL, itemTitle, modelLabel, relativeTime, removeItem } from './itemMeta'
 
 /* ------------------------------------------------------------ aspect ratio */
 
@@ -112,6 +118,76 @@ export function JustifiedGrid<T extends { id: string }>({ items, columns = 4, ga
   )
 }
 
+/* ------------------------------------------------------------- send to… */
+
+const SEND_TARGETS: { target: HandoffTarget; label: string; icon: ReactNode; key: string; hint: string }[] = [
+  { target: 'edit', label: 'Edit', icon: <Wand2 size={14} />, key: 'E', hint: 'Open in Edit as the source image' },
+  { target: 'vision', label: 'Vision', icon: <ScanEye size={14} />, key: 'V', hint: 'Describe with Vision' },
+  { target: 'video', label: 'Animate', icon: <Clapperboard size={14} />, key: 'A', hint: 'Animate (image to video)' },
+  { target: '3d', label: '3D', icon: <Boxes size={14} />, key: '3', hint: 'Image to 3D model' },
+]
+
+/** "Send to" button + menu for image tiles (stays open independently of hover). */
+function SendToMenu({ item, onOpenChange }: { item: MediaItem; onOpenChange: (open: boolean) => void }) {
+  const navigate = useNavigate()
+  const [open, setOpenState] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const setOpen = (v: boolean) => { setOpenState(v); onOpenChange(v) }
+  const setOpenRef = useRef(setOpen)
+  setOpenRef.current = setOpen
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: globalThis.MouseEvent) => {
+      if (e.target instanceof Node && ref.current?.contains(e.target)) return
+      setOpenRef.current(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenRef.current(false) }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <OverlayButton onClick={() => setOpen(!open)} title="Send to…" active={open}><Send size={13} /></OverlayButton>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-40 overflow-hidden rounded-lg border border-line bg-panel-2 py-1 shadow-2xl">
+          {SEND_TARGETS.map((t) => (
+            <button
+              key={t.target}
+              title={t.hint}
+              onClick={() => {
+                setOpen(false)
+                handOffItem(t.target, item)
+                void navigate({ to: HANDOFF_ROUTES[t.target] })
+              }}
+              className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] text-ink-dim hover:bg-panel-3 hover:text-ink"
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OverlayButton({ children, active, className, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { active?: boolean }) {
+  return (
+    <button
+      {...rest}
+      className={clsx(
+        'grid h-7 w-7 place-items-center rounded-md text-white/85 transition-colors hover:bg-white/15 hover:text-white',
+        active && 'bg-white/20 text-white',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
 /* -------------------------------------------------------------- the tile */
 
 export interface ArtifactTileProps {
@@ -120,62 +196,86 @@ export interface ArtifactTileProps {
   onReuse?: (item: MediaItem) => void
   onDelete?: (item: MediaItem) => void
   selected?: boolean
-  onToggleSelect?: (item: MediaItem) => void
+  /** The click event is passed so callers can implement Shift-click ranges. */
+  onToggleSelect?: (item: MediaItem, e: MouseEvent) => void
   extraActions?: (item: MediaItem) => ReactNode
 }
 
 export function ArtifactTile({ item, onOpen, onReuse, onDelete, selected, onToggleSelect, extraActions }: ArtifactTileProps) {
   const ratio = useMediaRatio(item)
   const { confirmDeletes } = useApp()
-
-  const remove = async () => {
-    if (onDelete) { onDelete(item); return }
-    if (confirmDeletes && !confirm('Delete this item?')) return
-    await library.remove(item.id)
-  }
+  const [menuOpen, setMenuOpen] = useState(false)
+  const title = itemTitle(item)
+  const model = modelLabel(item.model)
 
   return (
-    <div className={clsx(
-      'group relative overflow-hidden rounded-xl border bg-panel transition-colors',
-      selected ? 'border-accent ring-1 ring-accent' : 'border-line hover:border-line-strong',
-    )}>
-      <button className="block w-full" onClick={() => onOpen(item)} title={item.prompt ?? item.name}>
-        <div
-          className={clsx('relative w-full bg-bg', item.kind === 'model3d' ? 'bg-[radial-gradient(ellipse_at_center,#232a3a_0%,#0f1219_75%)]' : 'checker')}
-          style={{ aspectRatio: String(tileRatio(ratio)) }}
-        >
-          <MediaThumb item={item} />
-        </div>
-      </button>
+    <div
+      draggable
+      onDragStart={(e) => startItemDrag(e, item)}
+      className={clsx(
+        'group relative flex flex-col rounded-xl border bg-panel transition-colors',
+        selected ? 'border-accent ring-1 ring-accent' : 'border-line hover:border-line-strong',
+      )}
+    >
+      <div className="relative overflow-hidden rounded-t-[11px]">
+        <button className="block w-full" onClick={() => onOpen(item)} aria-label={`Open ${title}`}>
+          <div
+            className={clsx('relative w-full bg-bg', item.kind === 'model3d' ? 'bg-[radial-gradient(ellipse_at_center,#232a3a_0%,#0f1219_75%)]' : 'checker')}
+            style={{ aspectRatio: String(tileRatio(ratio)) }}
+          >
+            <MediaThumb item={item} />
+          </div>
+        </button>
+
+        {/* Hover: the full prompt over a gradient; clicks fall through to the media. */}
+        {item.prompt && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/85 via-black/25 to-transparent p-2.5 opacity-0 transition-opacity group-hover:opacity-100">
+            <p className="line-clamp-4 text-[11px] leading-snug text-white/90">{item.prompt}</p>
+          </div>
+        )}
+      </div>
 
       {onToggleSelect && (
         <button
-          onClick={(e) => { e.stopPropagation(); onToggleSelect(item) }}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect(item, e) }}
           className={clsx(
             'absolute left-2 top-2 grid h-5 w-5 place-items-center rounded border transition-opacity',
             selected ? 'border-accent bg-accent text-white' : 'border-white/50 bg-black/50 text-transparent opacity-0 group-hover:opacity-100',
           )}
           aria-label={selected ? 'Deselect' : 'Select'}
+          title="Select (Shift-click for a range)"
         >
           <Check size={12} />
         </button>
       )}
-      {item.favorite && <Star size={14} className="absolute right-2 top-2 fill-warn text-warn drop-shadow" />}
 
-      <div className="flex items-center justify-between gap-1 border-t border-line px-2 py-1.5">
-        <div className="min-w-0">
-          <div className="truncate text-[11.5px] text-ink-dim">{item.name || item.source}</div>
-          <div className="truncate text-[10.5px] text-ink-faint">
-            {item.width && item.height ? `${item.width}×${item.height} · ` : ''}{new Date(item.createdAt).toLocaleString()}
-          </div>
-        </div>
-        <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
-          {extraActions?.(item)}
-          {onReuse && <IconButton onClick={() => onReuse(item)} title="Reuse settings"><RotateCcw size={14} /></IconButton>}
-          <IconButton onClick={() => void library.update(item.id, { favorite: !item.favorite })} title="Favourite">
-            <Heart size={14} className={clsx(item.favorite && 'fill-warn text-warn')} />
-          </IconButton>
-          <IconButton onClick={() => void remove()} title="Delete"><Trash2 size={14} /></IconButton>
+      {item.favorite && (
+        <Star size={14} className={clsx('pointer-events-none absolute right-2 top-2 fill-warn text-warn drop-shadow transition-opacity', 'group-hover:opacity-0', menuOpen && 'opacity-0')} />
+      )}
+
+      <div className={clsx(
+        'absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-lg bg-black/60 p-0.5 backdrop-blur-sm transition-opacity',
+        '[&_button]:text-white/85',
+        menuOpen ? 'opacity-100' : 'opacity-0 focus-within:opacity-100 group-hover:opacity-100',
+      )}>
+        {extraActions?.(item)}
+        {onReuse && <OverlayButton onClick={() => onReuse(item)} title="Reuse settings"><RotateCcw size={13} /></OverlayButton>}
+        <OverlayButton onClick={() => void library.update(item.id, { favorite: !item.favorite })} title={item.favorite ? 'Unfavourite' : 'Favourite'}>
+          <Heart size={13} className={clsx(item.favorite && 'fill-warn text-warn')} />
+        </OverlayButton>
+        <OverlayButton onClick={() => downloadItem(item)} title="Download"><Download size={13} /></OverlayButton>
+        {item.kind === 'image' && <SendToMenu item={item} onOpenChange={setMenuOpen} />}
+        <OverlayButton onClick={() => void removeItem(item, confirmDeletes, onDelete)} title="Delete" className="hover:!text-bad">
+          <Trash2 size={13} />
+        </OverlayButton>
+      </div>
+
+      <div className="px-2.5 pb-2 pt-1.5">
+        <div className="line-clamp-2 h-[2.6em] text-[12px] leading-[1.3] text-ink" title={item.prompt ?? title}>{title}</div>
+        <div className="mt-1 flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[10.5px] text-ink-faint">
+          <span className="shrink-0 rounded bg-panel-3 px-1.5 py-px font-medium text-ink-dim">{KIND_LABEL[item.kind]}</span>
+          {model && <span className="min-w-0 truncate rounded border border-line px-1.5 py-px" title={item.model}>{model}</span>}
+          <span className="ml-auto shrink-0 pl-1" title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}</span>
         </div>
       </div>
     </div>
@@ -186,7 +286,12 @@ export function ArtifactTile({ item, onOpen, onReuse, onDelete, selected, onTogg
 export function MediaThumb({ item }: { item: MediaItem }) {
   const fill = 'absolute inset-0 h-full w-full object-contain'
   if (item.kind === 'image') {
-    return <img src={item.url} alt="" loading="lazy" decoding="async" className={clsx(fill, isTinyImage(item) && '[image-rendering:pixelated]')} />
+    return (
+      <img
+        src={item.thumbUrl ?? item.url} alt="" loading="lazy" decoding="async" draggable={false}
+        className={clsx(fill, isTinyImage(item) && '[image-rendering:pixelated]')}
+      />
+    )
   }
   if (item.kind === 'video') {
     return (
@@ -234,12 +339,7 @@ function ModelPoster({ item }: { item: MediaItem }) {
   }, [item.id, item.url, item.thumbUrl])
 
   if (item.thumbUrl) {
-    return (
-      <>
-        <img src={item.thumbUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 h-full w-full object-contain" />
-        <span className="absolute bottom-1.5 right-1.5 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9.5px] text-white/85">3D</span>
-      </>
-    )
+    return <img src={item.thumbUrl} alt="" loading="lazy" decoding="async" draggable={false} className="absolute inset-0 h-full w-full object-contain" />
   }
   return (
     <div className="absolute inset-0 grid place-items-center text-ink-faint">
@@ -253,7 +353,11 @@ function ModelPoster({ item }: { item: MediaItem }) {
 
 /* ------------------------------------------------------------ grid facade */
 
-/** Grid of generated artifacts with preview + per-item actions. */
+/**
+ * Grid of generated artifacts with preview + per-item actions. Visual media
+ * flows in justified rows; audio renders as compact full-width rows. Mixed
+ * lists keep their order (consecutive runs of each kind are grouped).
+ */
 export function ArtifactGrid({ items, onReuse, onDelete, columns = 4, empty, onOpen, selected, onToggleSelect, extraActions }: {
   items: MediaItem[]
   onReuse?: (item: MediaItem) => void
@@ -264,30 +368,63 @@ export function ArtifactGrid({ items, onReuse, onDelete, columns = 4, empty, onO
   /** Replaces the built-in preview modal when set. */
   onOpen?: (item: MediaItem) => void
   selected?: ReadonlySet<string>
-  onToggleSelect?: (item: MediaItem) => void
+  /** The click event is passed so callers can implement Shift-click ranges. */
+  onToggleSelect?: (item: MediaItem, e: MouseEvent) => void
   extraActions?: (item: MediaItem) => ReactNode
 }) {
   const [previewId, setPreviewId] = useState<string | null>(null)
+
+  const runs = useMemo(() => {
+    const out: { audio: boolean; items: MediaItem[] }[] = []
+    for (const it of items) {
+      const audio = it.kind === 'audio'
+      const last = out[out.length - 1]
+      if (last && last.audio === audio) last.items.push(it)
+      else out.push({ audio, items: [it] })
+    }
+    return out
+  }, [items])
 
   if (!items.length) {
     return <EmptyState title={empty?.title ?? 'Nothing here yet'} detail={empty?.detail} />
   }
 
+  const open = onOpen ?? ((i: MediaItem) => setPreviewId(i.id))
+
   return (
     <>
-      <JustifiedGrid items={items} columns={columns} ratioOf={ratioForLayout}>
-        {(item) => (
-          <ArtifactTile
-            item={item}
-            onOpen={onOpen ?? ((i) => setPreviewId(i.id))}
-            onReuse={onReuse}
-            onDelete={onDelete}
-            selected={selected?.has(item.id)}
-            onToggleSelect={onToggleSelect}
-            extraActions={extraActions}
-          />
-        )}
-      </JustifiedGrid>
+      <div className="flex flex-col gap-3">
+        {runs.map((run) => run.audio ? (
+          <div key={run.items[0].id} className="flex flex-col gap-1.5">
+            {run.items.map((item) => (
+              <AudioRow
+                key={item.id}
+                item={item}
+                onOpen={open}
+                onReuse={onReuse}
+                onDelete={onDelete}
+                selected={selected?.has(item.id)}
+                onToggleSelect={onToggleSelect}
+                extraActions={extraActions}
+              />
+            ))}
+          </div>
+        ) : (
+          <JustifiedGrid key={run.items[0].id} items={run.items} columns={columns} ratioOf={ratioForLayout}>
+            {(item) => (
+              <ArtifactTile
+                item={item}
+                onOpen={open}
+                onReuse={onReuse}
+                onDelete={onDelete}
+                selected={selected?.has(item.id)}
+                onToggleSelect={onToggleSelect}
+                extraActions={extraActions}
+              />
+            )}
+          </JustifiedGrid>
+        ))}
+      </div>
 
       {!onOpen && (
         <ArtifactModal
@@ -309,6 +446,11 @@ export function ratioForLayout(item: MediaItem): number {
 
 /* ------------------------------------------------------------------ modal */
 
+/**
+ * Item viewer. Keys: ←/→ browse, F favourite, D download, E edit, V vision,
+ * A animate, 3 image→3D (images only), Del delete. The same actions are in
+ * the command palette while it is open.
+ */
 export function ArtifactModal({ item, items, onSelect, onClose, onReuse }: {
   item: MediaItem | null
   /** Sibling items enabling prev/next (buttons + ←/→ keys). */
@@ -323,24 +465,62 @@ export function ArtifactModal({ item, items, onSelect, onClose, onReuse }: {
   const prev = index > 0 && items ? items[index - 1] : null
   const next = index >= 0 && items && index < items.length - 1 ? items[index + 1] : null
 
-  useEffect(() => {
-    if (!item || !onSelect) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === 'ArrowLeft' && prev) onSelect(prev)
-      if (e.key === 'ArrowRight' && next) onSelect(next)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [item, prev, next, onSelect])
-
-  if (!item) return null
-
-  const sendTo = (target: HandoffTarget) => {
-    handOffImage(target, item.blob)
+  const sendTo = (it: MediaItem, target: HandoffTarget) => {
+    handOffItem(target, it)
     onClose()
     void navigate({ to: HANDOFF_ROUTES[target] })
   }
+
+  const remove = async (it: MediaItem) => {
+    if (confirmDeletes && !confirm('Delete this item?')) return
+    const fallback = next ?? prev
+    await library.remove(it.id)
+    if (fallback && onSelect) onSelect(fallback)
+    else onClose()
+  }
+
+  // Single source for keys + palette: [key, command].
+  const actions: [string, Command][] = []
+  if (item) {
+    if (prev && onSelect) actions.push(['arrowleft', { id: 'library.viewer.prev', label: 'Previous item', group: 'Viewer', shortcut: '←', run: () => onSelect(prev) }])
+    if (next && onSelect) actions.push(['arrowright', { id: 'library.viewer.next', label: 'Next item', group: 'Viewer', shortcut: '→', run: () => onSelect(next) }])
+    actions.push(
+      ['f', { id: 'library.viewer.favorite', label: item.favorite ? 'Unfavourite item' : 'Favourite item', group: 'Viewer', shortcut: 'F', run: () => void library.update(item.id, { favorite: !item.favorite }) }],
+      ['d', { id: 'library.viewer.download', label: 'Download item', group: 'Viewer', shortcut: 'D', run: () => downloadItem(item) }],
+    )
+    if (item.kind === 'image') {
+      for (const t of SEND_TARGETS) {
+        actions.push([t.key.toLowerCase(), {
+          id: `library.viewer.${t.target}`, label: `${t.label}: ${t.hint}`, group: 'Viewer', shortcut: t.key, keywords: 'send to', run: () => sendTo(item, t.target),
+        }])
+      }
+    }
+    actions.push(['delete', { id: 'library.viewer.delete', label: 'Delete item', group: 'Viewer', shortcut: 'Del', run: () => void remove(item) }])
+  }
+
+  useCommands(actions.map(([, c]) => c))
+
+  const keyRef = useRef(actions)
+  keyRef.current = actions
+  const open = item != null
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable)) return
+      const hit = keyRef.current.find(([k]) => k === e.key.toLowerCase())
+      if (!hit) return
+      e.preventDefault()
+      hit[1].run()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!item) return null
+
+  const title = itemTitle(item)
 
   return (
     <Modal
@@ -348,30 +528,29 @@ export function ArtifactModal({ item, items, onSelect, onClose, onReuse }: {
       onClose={onClose}
       width="max-w-6xl"
       title={
-        <span className="flex items-center gap-2">
-          {item.name || `Generated ${item.kind}`}
-          {index >= 0 && items && <span className="text-[11px] font-normal text-ink-faint">{index + 1} / {items.length}</span>}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="max-w-[60ch] truncate" title={title}>{title}</span>
+          <span className="shrink-0 rounded bg-panel-3 px-1.5 py-px text-[10.5px] font-medium text-ink-dim">{KIND_LABEL[item.kind]}</span>
+          {index >= 0 && items && <span className="shrink-0 text-[11px] font-normal text-ink-faint">{index + 1} / {items.length}</span>}
         </span>
       }
       footer={
         <>
-          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={async () => {
-            if (confirmDeletes && !confirm('Delete this item?')) return
-            const fallback = next ?? prev
-            await library.remove(item.id)
-            if (fallback && onSelect) onSelect(fallback)
-            else onClose()
-          }}>Delete</Button>
+          <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => void remove(item)} title="Delete (Del)">Delete</Button>
+          <Button
+            variant="ghost" size="sm"
+            icon={<Heart size={14} className={clsx(item.favorite && 'fill-warn text-warn')} />}
+            onClick={() => void library.update(item.id, { favorite: !item.favorite })}
+            title={`${item.favorite ? 'Unfavourite' : 'Favourite'} (F)`}
+          >
+            {item.favorite ? 'Favourited' : 'Favourite'}
+          </Button>
+          <span className="flex-1" />
           {onReuse && <Button variant="secondary" size="sm" icon={<RotateCcw size={14} />} onClick={() => { onReuse(item); onClose() }}>Reuse settings</Button>}
-          {item.kind === 'image' && (
-            <>
-              <Button variant="outline" size="sm" icon={<Wand2 size={14} />} onClick={() => sendTo('edit')} title="Open in Edit as the source image">Edit</Button>
-              <Button variant="outline" size="sm" icon={<ScanEye size={14} />} onClick={() => sendTo('vision')} title="Describe with Vision">Vision</Button>
-              <Button variant="outline" size="sm" icon={<Clapperboard size={14} />} onClick={() => sendTo('video')} title="Animate (image to video)">Animate</Button>
-              <Button variant="outline" size="sm" icon={<Boxes size={14} />} onClick={() => sendTo('3d')} title="Image to 3D model">3D</Button>
-            </>
-          )}
-          <Button variant="primary" size="sm" icon={<Download size={14} />} onClick={() => downloadBlob(item.blob, itemFilename(item))}>Download</Button>
+          {item.kind === 'image' && SEND_TARGETS.map((t) => (
+            <Button key={t.target} variant="outline" size="sm" icon={t.icon} onClick={() => sendTo(item, t.target)} title={`${t.hint} (${t.key})`}>{t.label}</Button>
+          ))}
+          <Button variant="primary" size="sm" icon={<Download size={14} />} onClick={() => downloadItem(item)} title="Download (D)">Download</Button>
         </>
       }
     >
@@ -381,34 +560,41 @@ export function ArtifactModal({ item, items, onSelect, onClose, onReuse }: {
             <img src={item.url} alt="" className={clsx('max-h-[70vh] max-w-full object-contain', isTinyImage(item) && 'min-w-[256px] [image-rendering:pixelated]')} />
           )}
           {item.kind === 'video' && <video src={item.url} controls autoPlay loop className="max-h-[70vh] max-w-full rounded-lg" />}
-          {item.kind === 'audio' && <audio src={item.url} controls autoPlay className="w-full" />}
+          {item.kind === 'audio' && <audio src={item.url} controls autoPlay className="w-full" onPlay={(e) => claimPlayback(e.currentTarget)} />}
           {item.kind === 'model3d' && (
             <div className="h-[70vh] w-full">
               <ModelViewer key={item.id} src={item.url} toolbar className="h-full w-full" />
             </div>
           )}
           {prev && onSelect && (
-            <button onClick={() => onSelect(prev)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80" aria-label="Previous">
+            <button onClick={() => onSelect(prev)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80" aria-label="Previous" title="Previous (←)">
               <ChevronLeft size={18} />
             </button>
           )}
           {next && onSelect && (
-            <button onClick={() => onSelect(next)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80" aria-label="Next">
+            <button onClick={() => onSelect(next)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white hover:bg-black/80" aria-label="Next" title="Next (→)">
               <ChevronRight size={18} />
             </button>
           )}
         </div>
-        <dl className="space-y-3 text-[12.5px]">
-          <Row label="Source" value={item.source} />
-          <Row label="Model" value={item.model} />
-          <Row label="Size" value={formatBytes(item.blob.size)} />
-          {item.width && item.height ? <Row label="Dimensions" value={`${item.width} × ${item.height}`} /> : null}
-          {item.seed != null && <Row label="Seed" value={String(item.seed)} />}
-          {item.durationSeconds != null && <Row label="Duration" value={formatDuration(item.durationSeconds)} />}
-          <Row label="Created" value={new Date(item.createdAt).toLocaleString()} />
-          {item.prompt && <Row label="Prompt" value={item.prompt} mono copy />}
-          {item.negativePrompt && <Row label="Negative" value={item.negativePrompt} mono copy />}
-        </dl>
+        <div className="space-y-4">
+          <div>
+            <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint">Tags</div>
+            <TagEditor key={item.id} tags={item.tags} onChange={(tags) => void library.update(item.id, { tags })} />
+          </div>
+          <dl className="space-y-3 text-[12.5px]">
+            <Row label="Source" value={item.source} />
+            <Row label="Model" value={item.model} />
+            <Row label="Size" value={formatBytes(item.size)} />
+            {item.width && item.height ? <Row label="Dimensions" value={`${item.width} × ${item.height}`} /> : null}
+            {item.seed != null && <Row label="Seed" value={String(item.seed)} />}
+            {item.durationSeconds != null && <Row label="Duration" value={formatDuration(item.durationSeconds)} />}
+            <Row label="Created" value={new Date(item.createdAt).toLocaleString()} />
+            {item.name && item.name !== title && <Row label="Name" value={item.name} />}
+            {item.prompt && <Row label="Prompt" value={item.prompt} mono copy />}
+            {item.negativePrompt && <Row label="Negative" value={item.negativePrompt} mono copy />}
+          </dl>
+        </div>
       </div>
     </Modal>
   )

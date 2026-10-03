@@ -15,19 +15,25 @@ import {
   Save,
   Search,
   Sparkles,
-  Square,
   Trash2,
   UserRound,
   Volume2,
+  X,
 } from 'lucide-react'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
-import type { Actor, MayaActor, TTSHistoryEntry, TTSLanguage, TTSLanguageInfo } from '../../lib/types'
-import { ArtifactGrid } from '../../components/Artifact'
-import { library, useLibrary } from '../../lib/library'
+import type { SillyClient } from '../../lib/api'
+import type { Actor, MayaActor, MayaTTSRequest, TTSHistoryEntry, TTSLanguage, TTSLanguageInfo, TTSRequest } from '../../lib/types'
+import { downloadItem, library, useLibrary } from '../../lib/library'
 import type { MediaItem } from '../../lib/library'
 import { downloadBlob, formatBytes, formatDuration } from '../../lib/media'
 import { useHealth } from '../../lib/query'
 import { useApp } from '../../lib/store'
+import { jobs, usePageJobs } from '../../lib/jobs'
+import type { Job, JobContext } from '../../lib/jobs'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
+import { JobStrip } from '../../components/Progress'
+import { ArtifactGrid } from '../../components/Artifact'
+import { claimPlayback } from '../../components/AudioRow'
 import {
   Button,
   Chip,
@@ -45,8 +51,8 @@ import {
   Textarea,
 } from '../../components/ui/primitives'
 import { streamSpeech } from './speech'
-import type { StreamStats } from './speech'
 import { isBoolean, isNumber, isString, usePersisted } from './persist'
+import { queueLabel, useGpuAhead, wavDuration } from './jobQueue'
 import { AudioDrop, AudioFileList } from './AudioDrop'
 import { ActorDetailsModal, CreateActorModal, languageName } from './ActorModals'
 
@@ -59,27 +65,130 @@ const WARN_CHARS = 9_000
 const HISTORY_PAGE_SIZE = 10
 const HISTORY_FETCH_LIMIT = 200
 const MAYA_HISTORY_PREFIX = '[Maya] '
+const RECENT_PAGE_SIZE = 15
+/** `job.group` of speech generations. */
+const GROUP = 'speech'
 
 const LANGUAGE_CODES: readonly TTSLanguage[] = ['en', 'es', 'fr', 'de', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'ja', 'hu', 'ko', 'hi']
 const isLanguage = (v: unknown): v is TTSLanguage => typeof v === 'string' && LANGUAGE_CODES.some((c) => c === v)
 const isEngine = (v: unknown): v is Engine => v === 'xtts-v2' || v === 'maya'
 const isVoiceSource = (v: unknown): v is VoiceSource => v === 'actor' || v === 'upload'
 
-interface Output {
-  url: string
-  blob: Blob
+/** Queue-job payload (`job.data`) of a speech generation. */
+interface SpeechJobData {
+  kind: 'speech'
+  /** Voice shown to the user (actor, preset / description, uploaded clips). */
   label: string
   text: string
   engine: Engine
-  elapsed: number
   streamed: boolean
-  firstAudioMs: number | null
+  /** Saved-actor and Maya batch endpoints record server-side history. */
+  recordsHistory: boolean
+  elapsed?: number
+  firstAudioMs?: number | null
+}
+
+type SpeechRequest =
+  | { type: 'stream'; request: Parameters<typeof streamSpeech>[1] }
+  | { type: 'maya'; body: MayaTTSRequest }
+  | { type: 'clone'; params: Parameters<SillyClient['generateWithAudio']>[0] }
+  | { type: 'actor'; body: TTSRequest }
+
+const isSpeechData = (d: unknown): d is SpeechJobData => typeof d === 'object' && d !== null && 'kind' in d && d.kind === 'speech'
+
+/** Web Audio playback of the latest streamed speech; outlives its job until other audio starts. */
+let livePlayback: AbortController | null = null
+
+function stopLivePlayback() {
+  livePlayback?.abort()
+  livePlayback = null
+}
+
+/** Results already auto-played, so revisiting the page does not replay them. */
+const autoPlayed = new Set<string>()
+
+/**
+ * Queue-job body. Streaming plays while it downloads (free lane, so playback is
+ * immediate); the batch endpoints run on the GPU lane. Self-contained.
+ */
+async function runSpeech(client: SillyClient, req: SpeechRequest, base: SpeechJobData, meta: Record<string, unknown>, ctx: JobContext): Promise<void> {
+  const started = performance.now()
+  try {
+    let blob: Blob
+    let duration: number | null
+    let firstAudioMs: number | null = null
+    if (req.type === 'stream') {
+      stopLivePlayback()
+      const playback = new AbortController()
+      livePlayback = playback
+      const abort = () => playback.abort()
+      ctx.signal.addEventListener('abort', abort, { once: true })
+      try {
+        ctx.report({ message: 'Waiting for first audio…' })
+        const r = await streamSpeech(client, req.request, {
+          signal: playback.signal,
+          onProgress: (live) => ctx.report({
+            message: `Playing live · ${live.chunks} chunk${live.chunks === 1 ? '' : 's'} · ${live.seconds.toFixed(1)}s of audio`
+              + (live.firstAudioMs != null ? ` · first after ${(live.firstAudioMs / 1000).toFixed(1)}s` : ''),
+          }),
+        })
+        blob = r.blob
+        duration = r.seconds
+        firstAudioMs = r.firstAudioMs
+      } finally {
+        ctx.signal.removeEventListener('abort', abort)
+      }
+    } else {
+      ctx.report({ message: 'Generating speech' })
+      blob = req.type === 'maya'
+        ? await client.mayaTts(req.body, ctx.signal)
+        : req.type === 'clone'
+          ? await client.generateWithAudio(req.params, ctx.signal)
+          : await client.tts(req.body, ctx.signal)
+      duration = await wavDuration(blob)
+    }
+    const elapsed = (performance.now() - started) / 1000
+    ctx.report({ message: 'Saving' })
+    const item = await library.add({
+      kind: 'audio',
+      source: 'tts',
+      blob,
+      name: `${base.label} · ${new Date().toLocaleTimeString()}`,
+      prompt: base.text,
+      model: base.engine,
+      durationSeconds: duration ?? undefined,
+      meta,
+    })
+    ctx.addItem(item.id)
+    ctx.setData({ ...base, elapsed, firstAudioMs } satisfies SpeechJobData)
+    toast.success(`${base.streamed ? 'Streamed' : 'Generated'} in ${elapsed.toFixed(1)}s`)
+  } catch (e) {
+    // A newer stream stopping this one surfaces as an AbortError: not a failure.
+    if (!ctx.signal.aborted && !(e instanceof DOMException && e.name === 'AbortError')) toast.error('Speech generation failed', errorMessage(e))
+    throw e
+  }
+}
+
+/** Error card for the newest speech job when it failed. */
+function FailedSpeech({ job }: { job: Job }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-bad/30 bg-bad/10 px-3 py-2.5 text-[12.5px]">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-bad">{job.label} failed</div>
+        <div className="truncate text-ink-dim" title={job.error}>{job.error ?? 'Generation failed'}</div>
+      </div>
+      <Button size="sm" icon={<RotateCcw size={13} />} onClick={() => { if (jobs.retry(job.id)) jobs.remove(job.id) }}>Retry</Button>
+      <IconButton title="Dismiss" onClick={() => jobs.remove(job.id)}><X size={14} /></IconButton>
+    </div>
+  )
 }
 
 export function AudioPage() {
   const client = useClient()
   const confirmDeletes = useApp((s) => s.confirmDeletes)
-  const recent = useLibrary('audio').filter((i) => i.source === 'tts')
+  const audioItems = useLibrary('audio')
+  const recent = useMemo(() => audioItems.filter((i) => i.source === 'tts'), [audioItems])
+  const [recentLimit, setRecentLimit] = useState(RECENT_PAGE_SIZE)
   const health = useHealth()
 
   const [tab, setTab] = useState<Tab>('synth')
@@ -112,12 +221,31 @@ export function AudioPage() {
   const [mayaName, setMayaName] = useState('')
   const textRef = useRef<HTMLTextAreaElement>(null)
 
-  /* ----------------------------------------------------------- Output state */
-  const [output, setOutput] = useState<Output | null>(null)
-  const [live, setLive] = useState<StreamStats | null>(null)
-  const generationRef = useRef<AbortController | null>(null)
-  /** Keeps Web Audio playback of the last streamed result stoppable after the request finished. */
-  const playbackRef = useRef<AbortController | null>(null)
+  /* ------------------------------------------------------------ Job state */
+  const pageJobs = usePageJobs('audio')
+  const speechJobs = useMemo(() => pageJobs.filter((j) => j.group === GROUP), [pageJobs])
+  const activeSpeech = speechJobs.filter((j) => j.state === 'queued' || j.state === 'running').reverse()
+  const queuedSpeech = activeSpeech.filter((j) => j.state === 'queued').length
+  const failedSpeech = speechJobs[0]?.state === 'failed' ? speechJobs[0] : undefined
+  const ahead = useGpuAhead()
+  /** Latest finished generation whose audio is still in the library. */
+  const output = useMemo(() => {
+    for (const job of speechJobs) {
+      if (job.state !== 'done' || !isSpeechData(job.data)) continue
+      const item = recent.find((i) => job.itemIds.includes(i.id))
+      if (item) return { job, item, data: job.data }
+    }
+    return null
+  }, [speechJobs, recent])
+  const lastHistoryJob = speechJobs.find((j) => j.state === 'done' && isSpeechData(j.data) && j.data.recordsHistory)?.id
+  const outputJobId = output?.job.id
+  // Autoplay a fresh (non-streamed) result once; decided per job so re-renders keep it stable.
+  const autoPlayOutput = useMemo(
+    () => (output ? !output.data.streamed && !autoPlayed.has(output.job.id) : false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [outputJobId],
+  )
+  useEffect(() => { if (outputJobId) autoPlayed.add(outputJobId) }, [outputJobId])
 
   /* ----------------------------------------------------------- Actor state */
   const [actorQuery, setActorQuery] = useState('')
@@ -184,24 +312,20 @@ export function AudioPage() {
     void refreshLanguages()
     void refreshMayaActors()
     void refreshTags()
-    void refreshHistory()
-  }, [refreshActors, refreshLanguages, refreshMayaActors, refreshTags, refreshHistory])
+  }, [refreshActors, refreshLanguages, refreshMayaActors, refreshTags])
 
-  // Stop any in-flight request / streamed playback when leaving the page.
+  // Server history: load on mount and again whenever a recorded generation finishes.
+  useEffect(() => {
+    void refreshHistory()
+  }, [refreshHistory, lastHistoryJob])
+
+  // Release history playback URLs when leaving the page.
   useEffect(
     () => () => {
-      generationRef.current?.abort()
-      playbackRef.current?.abort()
       for (const url of Object.values(playingRef.current)) URL.revokeObjectURL(url)
     },
     [],
   )
-
-  // Release the previous output's object URL whenever it is replaced or the page unmounts.
-  useEffect(() => {
-    if (!output) return
-    return () => URL.revokeObjectURL(output.url)
-  }, [output])
 
   /* -------------------------------------------------------------- derived */
   const isMaya = engine === 'maya'
@@ -232,7 +356,7 @@ export function AudioPage() {
   const pageItems = filteredHistory.slice((page - 1) * HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE)
 
   /* ------------------------------------------------------------ generation */
-  async function generate() {
+  function generate() {
     const body = currentText.trim()
     if (!isMaya && voiceSource === 'actor' && !actorName) return void toast.error('Select an actor first')
     if (oneShot && !refFiles.length) return void toast.error('Add at least one reference audio clip')
@@ -240,73 +364,52 @@ export function AudioPage() {
     if (!body) return void toast.error('Enter some text to speak')
     if (body.length > MAX_CHARS) return void toast.error(`Text is too long (max ${MAX_CHARS.toLocaleString()} characters)`)
 
-    playbackRef.current?.abort()
-    playbackRef.current = null
-    const ctl = new AbortController()
-    generationRef.current = ctl
-    setPending('generate')
-    const started = performance.now()
-    try {
-      let blob: Blob
-      let firstAudioMs: number | null = null
-      const description = voiceDescription.trim()
-      if (willStream) {
-        setLive({ chunks: 0, firstAudioMs: null, seconds: 0 })
-        const r = await streamSpeech(
-          client,
-          isMaya
-            ? { engine: 'maya', body: { text: body, voice_description: description, temperature: mayaTemperature, speed: mayaSpeed } }
-            : { engine: 'xtts-v2', body: { text: body, actor: actorName, language, temperature, speed, split_sentences: false } },
-          { signal: ctl.signal, onProgress: setLive },
-        )
-        blob = r.blob
-        firstAudioMs = r.firstAudioMs
-        playbackRef.current = ctl
-      } else if (isMaya) {
-        blob = await client.mayaTts({ text: body, voice_description: description, temperature: mayaTemperature, speed: mayaSpeed }, ctl.signal)
-      } else if (oneShot) {
-        blob = await client.generateWithAudio({ text: body, language, files: refFiles, temperature, speed, splitSentences }, ctl.signal)
-      } else {
-        blob = await client.tts({ text: body, actor: actorName, language, temperature, speed, split_sentences: splitSentences }, ctl.signal)
+    const description = voiceDescription.trim()
+    const mayaBody: MayaTTSRequest = { text: body, voice_description: description, temperature: mayaTemperature, speed: mayaSpeed }
+    const req: SpeechRequest = willStream
+      ? {
+        type: 'stream',
+        request: isMaya
+          ? { engine: 'maya', body: mayaBody }
+          : { engine: 'xtts-v2', body: { text: body, actor: actorName, language, temperature, speed, split_sentences: false } },
       }
-      const elapsed = (performance.now() - started) / 1000
-      const label = isMaya
-        ? `Maya: ${selectedPreset ? selectedPreset.name : description.slice(0, 48)}`
+      : isMaya
+        ? { type: 'maya', body: mayaBody }
         : oneShot
-          ? `Uploaded voice (${refFiles.length} clip${refFiles.length === 1 ? '' : 's'})`
-          : actorName
-      await library.add({
-        kind: 'audio',
-        source: 'tts',
-        blob,
-        name: `${label} · ${new Date().toLocaleTimeString()}`,
-        prompt: body,
-        model: engine,
-        meta: isMaya
-          ? { text: body, voice_description: description, streamed: willStream }
-          : { text: body, language, actor: oneShot ? null : actorName, streamed: willStream },
-      })
-      setOutput({ url: URL.createObjectURL(blob), blob, label, text: body, engine, elapsed, streamed: willStream, firstAudioMs })
+          ? { type: 'clone', params: { text: body, language, files: [...refFiles], temperature, speed, splitSentences } }
+          : { type: 'actor', body: { text: body, actor: actorName, language, temperature, speed, split_sentences: splitSentences } }
+    const label = isMaya
+      ? `Maya: ${selectedPreset ? selectedPreset.name : description.slice(0, 48)}`
+      : oneShot
+        ? `Uploaded voice (${refFiles.length} clip${refFiles.length === 1 ? '' : 's'})`
+        : actorName
+    const base: SpeechJobData = {
+      kind: 'speech', label, text: body, engine, streamed: willStream,
       // Only the batch actor/Maya endpoints record server-side history.
-      if (!willStream && !oneShot) void refreshHistory()
-      toast.success(`${willStream ? 'Streamed' : 'Generated'} in ${elapsed.toFixed(1)}s`)
-    } catch (e) {
-      if (ctl.signal.aborted) toast.info('Generation stopped')
-      else toast.error(errorMessage(e))
-    } finally {
-      if (generationRef.current === ctl) generationRef.current = null
-      setPending(null)
-      setLive(null)
+      recordsHistory: !willStream && !oneShot,
     }
+    const meta = isMaya
+      ? { text: body, voice_description: description, streamed: willStream }
+      : { text: body, language, actor: oneShot ? null : actorName, streamed: willStream }
+    jobs.enqueue({
+      page: 'audio',
+      group: GROUP,
+      // Streaming must start now to play while generating; batch speech queues for the GPU.
+      lane: willStream ? 'free' : 'gpu',
+      label: willStream ? 'Speech (streaming)' : 'Speech',
+      detail: `${label}: ${body.slice(0, 60)}`,
+      data: base,
+      run: (ctx) => runSpeech(client, req, base, meta, ctx),
+    })
   }
 
   function copyOutputInfo() {
     if (!output) return
     const info = [
-      `Text: ${output.text}`,
-      `${output.engine === 'maya' ? 'Voice' : 'Actor'}: ${output.label}`,
-      `Engine: ${output.engine}`,
-      `Generated: ${new Date().toISOString()}`,
+      `Text: ${output.data.text}`,
+      `${output.data.engine === 'maya' ? 'Voice' : 'Actor'}: ${output.data.label}`,
+      `Engine: ${output.data.engine}`,
+      `Generated: ${new Date(output.item.createdAt).toISOString()}`,
     ].join('\n')
     navigator.clipboard.writeText(info).then(
       () => toast.success('Info copied'),
@@ -529,13 +632,37 @@ export function AudioPage() {
         ? `${availableEngines.join(' + ')} available`
         : 'Connected'
 
+  const canGenerate = currentText.trim().length > 0 && charCount <= MAX_CHARS
+  // Streaming starts immediately (free lane); batch speech waits for the GPU.
+  const generateLabel = willStream ? 'Stream speech' : queueLabel('Generate speech', ahead)
+
+  usePrimaryAction({ label: generateLabel, run: generate, disabled: !canGenerate })
+  useCommands([
+    { id: 'audio.generate', label: willStream ? 'Stream speech' : 'Generate speech', group: 'Speech', shortcut: `${MOD_KEY}+Enter`, keywords: 'tts voice say', disabled: !canGenerate, run: generate },
+    { id: 'audio.engine.xtts', label: 'Use XTTS v2 (voice cloning)', group: 'Speech', disabled: engine === 'xtts-v2', run: () => { setEngine('xtts-v2'); setTab('synth') } },
+    { id: 'audio.engine.maya', label: 'Use Maya (voice description)', group: 'Speech', disabled: engine === 'maya', run: () => { setEngine('maya'); setTab('synth') } },
+    { id: 'audio.stream', label: streaming ? 'Turn streaming off' : 'Turn streaming on (play while generating)', group: 'Speech', disabled: !canStream, run: () => setStreaming(!streaming) },
+    { id: 'audio.stop-playback', label: 'Stop streamed playback', group: 'Speech', run: stopLivePlayback },
+    { id: 'audio.tab.synth', label: 'Show speech generator', group: 'Speech', disabled: tab === 'synth', run: () => setTab('synth') },
+    { id: 'audio.tab.actors', label: 'Show voice actors', group: 'Speech', disabled: tab === 'actors', run: () => setTab('actors') },
+    { id: 'audio.tab.history', label: 'Show TTS history', group: 'Speech', disabled: tab === 'history', run: () => setTab('history') },
+    { id: 'audio.actor.new', label: 'Create voice actor…', group: 'Speech', keywords: 'clone youtube upload', run: () => { setTab('actors'); setCreateOpen(true) } },
+    { id: 'audio.download', label: 'Download the latest speech', group: 'Speech', disabled: !output, run: () => { if (output) downloadItem(output.item) } },
+    { id: 'audio.cancel-queued', label: 'Cancel queued speech', group: 'Speech', disabled: !queuedSpeech, run: () => jobs.cancelQueued({ page: 'audio', group: GROUP }) },
+  ])
+
   return (
     <div className="flex h-full">
       <div className="w-[360px] shrink-0 scroll-area border-r border-line p-5">
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between">
             <StatusDot ok={!!health.data && !health.isError} label={statusLabel} />
-            {pending === 'generate' && <span className="text-[11.5px] text-accent-2">Generating…</span>}
+            {activeSpeech.length > 0 && (
+              <span className="text-[11.5px] text-accent-2">
+                {activeSpeech.some((j) => j.state === 'running') ? 'Generating…' : 'Queued…'}
+                {activeSpeech.length > 1 ? ` (${activeSpeech.length})` : ''}
+              </span>
+            )}
           </div>
           <Segmented<Tab>
             value={tab}
@@ -667,13 +794,7 @@ export function AudioPage() {
                     className="field resize-y leading-relaxed"
                     value={currentText}
                     onChange={(e) => setCurrentText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && pending !== 'generate') {
-                        e.preventDefault()
-                        void generate()
-                      }
-                    }}
-                    placeholder="Enter the text you want to convert to speech…  (Ctrl+Enter to generate)"
+                    placeholder={`Enter the text you want to convert to speech…  (${MOD_KEY}+Enter to generate)`}
                   />
                 </div>
                 {isMaya && (
@@ -726,20 +847,14 @@ export function AudioPage() {
                 {willStream && <div className="-mt-1 text-[11.5px] text-ink-faint">Streamed speech is not recorded in server history.</div>}
               </Section>
 
-              {pending === 'generate' ? (
-                <Button variant="danger" icon={<Square size={13} />} onClick={() => generationRef.current?.abort()}>
-                  Stop {live ? `· ${live.seconds.toFixed(1)}s received` : '· generating…'}
-                </Button>
-              ) : (
-                <Button
-                  variant="primary"
-                  size="lg"
-                  disabled={!currentText.trim() || charCount > MAX_CHARS}
-                  onClick={() => void generate()}
-                >
-                  {willStream ? 'Stream speech' : 'Generate speech'}
-                </Button>
-              )}
+              <Button
+                variant="primary"
+                size="lg"
+                disabled={!canGenerate}
+                onClick={generate}
+              >
+                {generateLabel}
+              </Button>
             </>
           )}
 
@@ -776,43 +891,40 @@ export function AudioPage() {
       <div className="flex-1 scroll-area p-5">
         {tab === 'synth' && (
           <div className="flex flex-col gap-6">
-            <Section title={<span className="flex items-center gap-2"><Volume2 size={14} /> Generated audio</span>}>
-              {live && (
-                <Panel className="flex items-center gap-3 p-4">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-2 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-accent-2" />
-                  </span>
-                  <div className="text-[12.5px] text-ink-dim">
-                    {live.chunks
-                      ? `Playing live · ${live.chunks} chunk${live.chunks === 1 ? '' : 's'} · ${live.seconds.toFixed(1)}s of audio · first audio after ${((live.firstAudioMs ?? 0) / 1000).toFixed(1)}s`
-                      : 'Waiting for first audio…'}
-                  </div>
-                </Panel>
+            <Section
+              title={<span className="flex items-center gap-2"><Volume2 size={14} /> Generated audio</span>}
+              action={queuedSpeech > 1 && (
+                <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => jobs.cancelQueued({ page: 'audio', group: GROUP })}>
+                  Cancel {queuedSpeech} queued
+                </Button>
               )}
+            >
+              {activeSpeech.map((j) => <JobStrip key={j.id} job={j} label={`${j.label} · ${j.detail ?? ''}`} />)}
+              {failedSpeech && <FailedSpeech job={failedSpeech} />}
               {output ? (
                 <Panel className="p-4">
                   <audio
-                    key={output.url}
+                    key={output.item.url}
                     controls
-                    autoPlay={!output.streamed}
-                    src={output.url}
+                    autoPlay={autoPlayOutput}
+                    src={output.item.url}
                     className="w-full"
-                    onPlay={() => {
-                      playbackRef.current?.abort()
-                      playbackRef.current = null
+                    onPlay={(e) => {
+                      claimPlayback(e.currentTarget)
+                      stopLivePlayback()
                     }}
                   />
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-ink-dim">
-                    <span>{output.engine === 'maya' ? 'Voice' : 'Actor'}: {output.label}</span>
-                    <span>Size: {formatBytes(output.blob.size)}</span>
-                    <span>{output.streamed ? 'Streamed' : 'Generated'} in {output.elapsed.toFixed(1)}s</span>
-                    {output.firstAudioMs !== null && <span>First audio: {(output.firstAudioMs / 1000).toFixed(1)}s</span>}
+                    <span>{output.data.engine === 'maya' ? 'Voice' : 'Actor'}: {output.data.label}</span>
+                    <span>Size: {formatBytes(output.item.size)}</span>
+                    {output.item.durationSeconds != null && <span>Length: {formatDuration(output.item.durationSeconds)}</span>}
+                    {output.data.elapsed != null && <span>{output.data.streamed ? 'Streamed' : 'Generated'} in {output.data.elapsed.toFixed(1)}s</span>}
+                    {output.data.firstAudioMs != null && <span>First audio: {(output.data.firstAudioMs / 1000).toFixed(1)}s</span>}
                   </div>
-                  <div className="mt-1 line-clamp-2 text-[12px] text-ink-faint" title={output.text}>{output.text}</div>
+                  <div className="mt-1 line-clamp-2 text-[12px] text-ink-faint" title={output.data.text}>{output.data.text}</div>
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" icon={<Download size={13} />} onClick={() => downloadBlob(output.blob, `tts_${Date.now()}.wav`)}>
-                      Download WAV
+                    <Button size="sm" icon={<Download size={13} />} onClick={() => downloadItem(output.item)}>
+                      Download
                     </Button>
                     <Button size="sm" variant="ghost" icon={<ClipboardCopy size={13} />} onClick={copyOutputInfo}>
                       Copy info
@@ -820,7 +932,7 @@ export function AudioPage() {
                   </div>
                 </Panel>
               ) : (
-                !live && (
+                !activeSpeech.length && !failedSpeech && (
                   <EmptyState
                     icon={isMaya ? <Sparkles size={20} /> : <Mic size={20} />}
                     title="Generated audio will appear here"
@@ -860,14 +972,21 @@ export function AudioPage() {
               </Section>
             )}
 
-            <Section title="Recent speech">
+            <Section
+              title="Recent speech"
+              action={recent.length > 0 && <span className="text-[11px] text-ink-faint">{recent.length} clip{recent.length === 1 ? '' : 's'}</span>}
+            >
               <ArtifactGrid
-                items={recent}
-                columns={3}
+                items={recent.slice(0, recentLimit)}
                 onReuse={reuseLibraryItem}
                 onDelete={(item) => void removeLibraryItem(item)}
                 empty={{ title: 'Nothing generated yet', detail: 'Generated speech is stored in your library.' }}
               />
+              {recent.length > recentLimit && (
+                <Button size="sm" variant="ghost" className="self-center" onClick={() => setRecentLimit((n) => n + RECENT_PAGE_SIZE)}>
+                  Show more ({recent.length - recentLimit} older)
+                </Button>
+              )}
             </Section>
           </div>
         )}

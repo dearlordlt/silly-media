@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
+import { kv } from './kv'
 
 export interface AppSettings {
   apiBase: string
@@ -16,7 +17,7 @@ export const DEFAULT_API_BASE = 'http://localhost:4201'
 /**
  * A `?api=` query param lets ui.sh / users point the UI at a remote host
  * without rebuilding. It is session-scoped and MUST win over the persisted
- * setting, otherwise a stale localStorage value would silently override it.
+ * setting, otherwise a stale saved value would silently override it.
  */
 function baseFromQuery(): string | null {
   if (typeof window === 'undefined') return null
@@ -34,6 +35,7 @@ export const useApp = create<AppState>()(
     }),
     {
       name: 'silly-media-app',
+      storage: createJSONStorage(() => kv),
       partialize: ({ apiBase, confirmDeletes }) => ({ apiBase, confirmDeletes }),
       merge: (persisted, current) => {
         const saved = (persisted ?? {}) as Partial<AppSettings>

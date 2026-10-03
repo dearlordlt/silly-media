@@ -1,9 +1,10 @@
 /**
  * Pinned/saved text histories (prompts, negative prompts, batch JSON).
- * Uses the legacy ui.html localStorage keys and accepts their record shapes,
- * so history saved in the old UI shows up here unchanged.
+ * Uses the legacy ui.html storage keys and accepts their record shapes,
+ * so history saved (or imported) from the old UI shows up here unchanged.
  */
 import { useMemo, useState } from 'react'
+import { kv } from '../../lib/kv'
 
 export const HISTORY_KEYS = {
   prompt: 'sillyMediaHistory',
@@ -21,7 +22,7 @@ export interface HistoryEntry {
 
 function readEntries(key: string): HistoryEntry[] {
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(key) || '[]')
+    const raw: unknown = kv.getJson<unknown>(key, [])
     if (!Array.isArray(raw)) return []
     const out: HistoryEntry[] = []
     for (const item of raw) {
@@ -46,7 +47,7 @@ function readEntries(key: string): HistoryEntry[] {
 /** Persist in the legacy field name so both UIs can share the list. */
 function writeEntries(key: string, entries: HistoryEntry[]) {
   const field = key === HISTORY_KEYS.json ? 'json' : 'prompt'
-  localStorage.setItem(key, JSON.stringify(entries.map((e) => ({ [field]: e.text, favorite: e.favorite, timestamp: e.timestamp }))))
+  kv.setJson(key, entries.map((e) => ({ [field]: e.text, favorite: e.favorite, timestamp: e.timestamp })))
 }
 
 export interface TextHistory {
@@ -95,7 +96,7 @@ export function useTextHistory(key: string): TextHistory {
       commit(entries.filter((_, i) => i !== index))
     },
     clear() {
-      localStorage.removeItem(key)
+      kv.removeItem(key)
       setEntries([])
     },
   }

@@ -2,18 +2,28 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { clsx } from 'clsx'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ChevronLeft, ChevronRight, Clock, Copy, Dices, Download, Film, ImagePlus, Play, RefreshCw, RotateCcw, Sparkles, Trash2, Type,
+  ChevronLeft, ChevronRight, Copy, Dices, Download, Film, ImagePlus, Play, RefreshCw, RotateCcw, Sparkles, Trash2, Type, X,
 } from 'lucide-react'
-import { errorMessage, toast, useClient, useJobPoller } from '../../lib/hooks'
-import { library } from '../../lib/library'
+import type { SillyClient } from '../../lib/api'
+import { errorMessage, toast, useClient } from '../../lib/hooks'
+import { downloadItem, library, useLibrary } from '../../lib/library'
+import type { MediaItem } from '../../lib/library'
+import { kv } from '../../lib/kv'
 import { downloadUrl, stripDataUrl } from '../../lib/media'
 import { useApp } from '../../lib/store'
-import type { JobStatus, VideoGenerateRequest, VideoHistoryEntry } from '../../lib/types'
+import { jobs, throwIfCancelled, usePageJobs } from '../../lib/jobs'
+import type { Job, JobContext } from '../../lib/jobs'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
+import type { VideoGenerateRequest, VideoHistoryEntry } from '../../lib/types'
 import {
-  Button, EmptyState, IconButton, Input, Label, Panel, ProgressBar, Segmented, Section, Select, Slider, Switch, Textarea,
+  Button, EmptyState, IconButton, Input, Label, Panel, Segmented, Section, Select, Slider, Switch, Textarea,
 } from '../../components/ui/primitives'
 import { ImageDrop } from '../../components/ImageDrop'
+import { JobStrip } from '../../components/Progress'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import { useHandoffImage } from '../../lib/handoff'
+import { relativeTime } from '../../components/itemMeta'
+import { pollServerJob, queueLabel, statusProgress, useGpuAhead } from '../audio/jobQueue'
 
 type Mode = 't2v' | 'i2v'
 type Resolution = '480p' | '720p'
@@ -56,9 +66,14 @@ interface CurrentVideo {
   fps: number | null
   durationSeconds: number
   elapsed: number | null
+  /** The library copy, for results generated here. */
+  item?: MediaItem
 }
 
-interface GenMeta {
+/** Queue-job payload (`job.data`) of a video generation. */
+interface VideoJobData {
+  kind: 'video'
+  mode: Mode
   model: string
   prompt: string
   resolution: Resolution
@@ -66,7 +81,16 @@ interface GenMeta {
   frames: number
   fps: number
   seed: number
+  /** Backend job id, once submitted. */
+  serverJobId?: string
+  estimated?: number
+  elapsed?: number | null
 }
+
+/** `job.group` of video generations (Enhance jobs share the page). */
+const GROUP = 'video'
+
+const isVideoData = (d: unknown): d is VideoJobData => typeof d === 'object' && d !== null && 'kind' in d && d.kind === 'video'
 
 const RESOLUTIONS: { value: Resolution; label: string }[] = [
   { value: '480p', label: '480p · fast' },
@@ -95,26 +119,22 @@ const DEFAULTS: Settings = {
 }
 
 function loadSettings(): Settings {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null')
-    if (typeof raw !== 'object' || raw === null) return DEFAULTS
-    const v: Record<string, unknown> = { ...raw }
-    const out = { ...DEFAULTS }
-    if (v.mode === 't2v' || v.mode === 'i2v') out.mode = v.mode
-    if (typeof v.model === 'string') out.model = v.model
-    if (typeof v.prompt === 'string') out.prompt = v.prompt
-    if (v.resolution === '480p' || v.resolution === '720p') out.resolution = v.resolution
-    if (v.aspect === '16:9' || v.aspect === '9:16' || v.aspect === '1:1') out.aspect = v.aspect
-    if (typeof v.lengthSec === 'number') out.lengthSec = Math.max(1, Math.min(10, v.lengthSec))
-    if (typeof v.fps === 'number') out.fps = Math.max(12, Math.min(30, v.fps))
-    if (typeof v.guidance === 'string') out.guidance = v.guidance
-    if (typeof v.steps === 'string') out.steps = v.steps
-    if (typeof v.seed === 'string') out.seed = v.seed
-    if (typeof v.audio === 'boolean') out.audio = v.audio
-    return out
-  } catch {
-    return DEFAULTS
-  }
+  const raw = kv.getJson<unknown>(SETTINGS_KEY, null)
+  if (typeof raw !== 'object' || raw === null) return DEFAULTS
+  const v: Record<string, unknown> = { ...raw }
+  const out = { ...DEFAULTS }
+  if (v.mode === 't2v' || v.mode === 'i2v') out.mode = v.mode
+  if (typeof v.model === 'string') out.model = v.model
+  if (typeof v.prompt === 'string') out.prompt = v.prompt
+  if (v.resolution === '480p' || v.resolution === '720p') out.resolution = v.resolution
+  if (v.aspect === '16:9' || v.aspect === '9:16' || v.aspect === '1:1') out.aspect = v.aspect
+  if (typeof v.lengthSec === 'number') out.lengthSec = Math.max(1, Math.min(10, v.lengthSec))
+  if (typeof v.fps === 'number') out.fps = Math.max(12, Math.min(30, v.fps))
+  if (typeof v.guidance === 'string') out.guidance = v.guidance
+  if (typeof v.steps === 'string') out.steps = v.steps
+  if (typeof v.seed === 'string') out.seed = v.seed
+  if (typeof v.audio === 'boolean') out.audio = v.audio
+  return out
 }
 
 /** Same 8k+1 snapping the backend applies (ltx-2.5), so the shown frame count is exact. */
@@ -129,14 +149,59 @@ function clock(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
-function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
-  if (!Number.isFinite(seconds) || seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
+/** Best-effort poster frame for the library copy. */
+async function fetchThumb(url: string | null, signal: AbortSignal): Promise<Blob | undefined> {
+  if (!url) return undefined
+  try {
+    const r = await fetch(url, { signal })
+    return r.ok ? await r.blob() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Queue-job body: submit T2V/I2V, poll the server job, then save the MP4 (and
+ * its poster) to the library. Self-contained (outlives the page).
+ */
+async function runVideo(client: SillyClient, body: VideoGenerateRequest, base: VideoJobData, ctx: JobContext): Promise<void> {
+  try {
+    ctx.report({ message: 'Submitting' })
+    const res = await client.video(base.mode, base.model, body)
+    throwIfCancelled(ctx.signal)
+    const data: VideoJobData = { ...base, serverJobId: res.job_id, estimated: res.estimated_time_seconds }
+    ctx.setData(data)
+    const st = await pollServerJob(
+      ctx.signal,
+      (signal) => client.videoStatus(res.job_id, { signal }),
+      (s) => ctx.report(statusProgress(s, (s.progress ?? 0) >= 1 ? 'Encoding video' : 'Generating')),
+    )
+    if (!st.video_url) throw new Error('The job produced no video')
+    const elapsed = st.elapsed_seconds ?? null
+    ctx.report({ fraction: null, step: null, total: null, message: 'Saving to library' })
+    const r = await fetch(client.media(st.video_url) ?? st.video_url, { signal: ctx.signal })
+    if (!r.ok) throw new Error(`Could not download the video (${r.status})`)
+    const blob = await r.blob()
+    const thumb = await fetchThumb(client.media(st.thumbnail_url ?? null), ctx.signal)
+    const item = await library.add({
+      kind: 'video',
+      source: 'video',
+      blob,
+      thumb,
+      name: base.prompt.slice(0, 48) || 'video',
+      prompt: base.prompt,
+      model: base.model,
+      seed: base.seed >= 0 ? base.seed : undefined,
+      durationSeconds: base.frames / base.fps,
+      meta: { jobId: res.job_id, aspect_ratio: base.aspect, resolution: base.resolution, num_frames: base.frames, fps: base.fps, elapsed },
+    })
+    ctx.addItem(item.id)
+    ctx.setData({ ...data, elapsed })
+    toast.success('Video ready', elapsed != null ? `Generated in ${clock(elapsed)}` : undefined)
+  } catch (e) {
+    if (!ctx.signal.aborted) toast.error('Video generation failed', errorMessage(e))
+    throw e
+  }
 }
 
 export function VideoPage() {
@@ -145,20 +210,17 @@ export function VideoPage() {
 
   const [s, setS] = useState<Settings>(loadSettings)
   const [image, setImage] = useState<string | null>(null)
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [estimated, setEstimated] = useState<number | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [current, setCurrent] = useState<CurrentVideo | null>(null)
+  /** A history clip picked for the player; null = the latest result generated here. */
+  const [picked, setPicked] = useState<CurrentVideo | null>(null)
   const [page, setPage] = useState(1)
   const [hovered, setHovered] = useState<string | null>(null)
-
-  const metaRef = useRef<GenMeta | null>(null)
-  const persistedRef = useRef<string | null>(null)
+  /** Clip to autoplay: one just finished or picked from history, never on revisiting the page. */
+  const [autoPlayId, setAutoPlayId] = useState<string | null>(null)
 
   const set = (patch: Partial<Settings>) => setS((prev) => ({ ...prev, ...patch }))
 
   useEffect(() => {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s))
+    kv.setJson(SETTINGS_KEY, s)
   }, [s])
 
   // Hand-off from another page ("Animate" on an image) preloads the I2V source.
@@ -186,17 +248,6 @@ export function VideoPage() {
     if (!compatible.some((m) => m.id === s.model)) setS((prev) => ({ ...prev, model: compatible[0].id }))
   }, [compatible, s.model])
 
-  // `client.videoStatus` already returns the full status payload
-  // (video_url / thumbnail_url / progress), which the poller surfaces as `data`.
-  const job = useJobPoller<JobStatus>(jobId, async (id) => {
-    const st = await client.videoStatus(id)
-    return { ...st, data: st }
-  })
-
-  useEffect(() => {
-    if (job.status === 'failed') toast.error('Video generation failed', job.error ?? undefined)
-  }, [job.status, job.error])
-
   // Server-side pagination; `/video/history` accepts limit + offset.
   const historyQ = useQuery({
     queryKey: ['video-history', client.base, page],
@@ -212,73 +263,65 @@ export function VideoPage() {
     if (historyQ.data && page > totalPages) setPage(totalPages)
   }, [historyQ.data, page, totalPages])
 
-  // On completion: show the clip in the player and persist the MP4 to the library.
-  useEffect(() => {
-    if (job.status !== 'completed' || !job.data || !jobId) return
-    const data = job.data
-    // Only accept the result that belongs to the job we are watching.
-    if (data.job_id && data.job_id !== jobId) return
-    if (!data.video_url) return
-    if (persistedRef.current === jobId) return
-    persistedRef.current = jobId
+  const pageJobs = usePageJobs('video')
+  const videoJobs = useMemo(() => pageJobs.filter((j) => j.group === GROUP), [pageJobs])
+  const activeJobs = videoJobs.filter((j) => j.state === 'queued' || j.state === 'running').reverse()
+  const queuedCount = activeJobs.filter((j) => j.state === 'queued').length
+  const failedJob = videoJobs[0]?.state === 'failed' ? videoJobs[0] : undefined
+  const ahead = useGpuAhead()
+  const videoItems = useLibrary('video')
 
-    const url = client.media(data.video_url) ?? data.video_url
-    const meta = metaRef.current
-    const elapsed = data.elapsed_seconds ?? null
-    if (meta) {
-      setCurrent({
-        jobId,
-        url,
-        thumbnailUrl: client.media(data.thumbnail_url ?? null),
-        prompt: meta.prompt,
-        model: meta.model,
-        resolution: meta.resolution,
-        aspect: meta.aspect,
-        frames: meta.frames,
-        fps: meta.fps,
-        durationSeconds: meta.frames / meta.fps,
-        elapsed,
-      })
+  // The newest finished job whose clip is still in the library.
+  const latest = useMemo((): CurrentVideo | null => {
+    for (const j of videoJobs) {
+      if (j.state !== 'done' || !isVideoData(j.data)) continue
+      const item = videoItems.find((i) => j.itemIds.includes(i.id))
+      if (!item) continue
+      const d = j.data
+      return {
+        jobId: d.serverJobId ?? j.id,
+        url: item.url,
+        thumbnailUrl: item.thumbUrl ?? null,
+        prompt: d.prompt,
+        model: d.model,
+        resolution: d.resolution,
+        aspect: d.aspect,
+        frames: d.frames,
+        fps: d.fps,
+        durationSeconds: d.frames / d.fps,
+        elapsed: d.elapsed ?? null,
+        item,
+      }
     }
-    toast.success('Video ready', elapsed != null ? `Generated in ${clock(elapsed)}` : undefined)
+    return null
+  }, [videoJobs, videoItems])
+  const current = picked ?? latest
+
+  // A clip finishing while the page is open replaces the player and refreshes history.
+  const seenLatest = useRef(latest?.jobId)
+  useEffect(() => {
+    if (!latest || latest.jobId === seenLatest.current) return
+    seenLatest.current = latest.jobId
+    setPicked(null)
+    setAutoPlayId(latest.jobId)
     setPage(1)
     void historyQ.refetch()
-
-    if (!meta) return
-    void (async () => {
-      try {
-        const res = await fetch(url)
-        if (!res.ok) throw new Error(`Failed to download video (${res.status})`)
-        const blob = await res.blob()
-        await library.add({
-          kind: 'video',
-          source: 'video',
-          blob,
-          name: meta.prompt.slice(0, 48) || 'video',
-          prompt: meta.prompt,
-          model: meta.model,
-          seed: meta.seed >= 0 ? meta.seed : undefined,
-          durationSeconds: meta.frames / meta.fps,
-          meta: { jobId, aspect_ratio: meta.aspect, resolution: meta.resolution, num_frames: meta.frames, fps: meta.fps },
-        })
-      } catch (e) {
-        toast.error('Could not save video to library', errorMessage(e))
-      }
-    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [job.status, job.data, jobId])
+  }, [latest?.jobId])
 
-  const active = job.status === 'queued' || job.status === 'processing'
   const frames = framesFor(s.lengthSec, s.fps)
-  const canGenerate = Boolean(s.model) && s.prompt.trim().length > 0 && !submitting && !active && (s.mode === 't2v' || Boolean(image))
+  const canGenerate = Boolean(s.model) && s.prompt.trim().length > 0 && (s.mode === 't2v' || Boolean(image))
+  const generateLabel = queueLabel('Generate video', ahead)
 
-  async function generate() {
+  function generate() {
     if (!s.prompt.trim()) { toast.error('Please enter a prompt'); return }
     if (s.mode === 'i2v' && !image) { toast.error('Please add a reference image for Image-to-Video'); return }
     if (!canGenerate) return
     const seedNum = Number(s.seed)
     const seedValue = s.seed.trim() === '' || !Number.isFinite(seedNum) ? -1 : Math.trunc(seedNum)
-    const meta: GenMeta = {
+    const base: VideoJobData = {
+      kind: 'video',
+      mode: s.mode,
       model: s.model,
       prompt: s.prompt.trim(),
       resolution: s.resolution,
@@ -287,37 +330,38 @@ export function VideoPage() {
       fps: s.fps,
       seed: seedValue,
     }
-    metaRef.current = meta
-    persistedRef.current = null
-    setEstimated(null)
-    setSubmitting(true)
-    try {
-      const body: VideoGenerateRequest = {
-        prompt: meta.prompt,
-        resolution: s.resolution,
-        // I2V derives the aspect from the source image, but the field must still be a valid enum.
-        aspect_ratio: s.aspect,
-        num_frames: frames,
-        fps: s.fps,
-        guidance_scale: Number(s.guidance) || 1,
-        num_inference_steps: Number(s.steps) || 6,
-        seed: seedValue,
-        audio: s.audio,
-      }
-      // Backend decodes `image` with base64.b64decode — strip the data-URL prefix.
-      if (s.mode === 'i2v' && image) body.image = stripDataUrl(image)
-      const res = await client.video(s.mode, s.model, body)
-      setEstimated(res.estimated_time_seconds)
-      setJobId(res.job_id)
-    } catch (e) {
-      toast.error('Could not start video generation', errorMessage(e))
-    } finally {
-      setSubmitting(false)
+    const body: VideoGenerateRequest = {
+      prompt: base.prompt,
+      resolution: s.resolution,
+      // I2V derives the aspect from the source image, but the field must still be a valid enum.
+      aspect_ratio: s.aspect,
+      num_frames: frames,
+      fps: s.fps,
+      guidance_scale: Number(s.guidance) || 1,
+      num_inference_steps: Number(s.steps) || 6,
+      seed: seedValue,
+      audio: s.audio,
     }
+    // Backend decodes `image` with base64.b64decode — strip the data-URL prefix.
+    if (s.mode === 'i2v' && image) body.image = stripDataUrl(image)
+    jobs.enqueue({
+      page: 'video',
+      group: GROUP,
+      label: s.mode === 'i2v' ? 'Image-to-video' : 'Text-to-video',
+      detail: base.prompt.slice(0, 80),
+      data: base,
+      run: (ctx) => runVideo(client, body, base, ctx),
+    })
+    if (ahead > 0) toast.info('Video queued', `${ahead} job${ahead === 1 ? '' : 's'} ahead`)
+  }
+
+  function retry(job: Job) {
+    if (jobs.retry(job.id)) jobs.remove(job.id)
   }
 
   function playHistory(v: VideoHistoryEntry) {
-    setCurrent({
+    setAutoPlayId(v.id)
+    setPicked({
       jobId: v.id,
       url: client.url(`/video/download/${v.id}`),
       thumbnailUrl: client.media(v.thumbnail_url),
@@ -345,11 +389,17 @@ export function VideoPage() {
     toast.success('Prompt and settings reused')
   }
 
+  function download(v: CurrentVideo) {
+    const filename = `video_${v.jobId}.mp4`
+    if (v.item) downloadItem(v.item, filename)
+    else downloadUrl(v.url, filename)
+  }
+
   async function removeHistory(id: string, prompt: string) {
     if (confirmDeletes && !confirm(`Delete this video?\n\n${prompt.slice(0, 120)}`)) return
     try {
       await client.deleteVideo(id)
-      if (current?.jobId === id) setCurrent(null)
+      if (picked?.jobId === id) setPicked(null)
       toast.success('Video deleted')
       void historyQ.refetch()
     } catch (e) {
@@ -373,8 +423,17 @@ export function VideoPage() {
     )
   }
 
-  const percent = Math.round((job.progress ?? 0) * 100)
-  const phase = job.status === 'queued' ? 'Queued…' : (job.progress ?? 0) >= 1 ? 'Encoding video…' : 'Generating…'
+  usePrimaryAction({ label: generateLabel, run: generate, disabled: !canGenerate })
+  useCommands([
+    { id: 'video.generate', label: 'Generate video', group: 'Video', shortcut: `${MOD_KEY}+Enter`, disabled: !canGenerate, run: generate },
+    { id: 'video.mode.t2v', label: 'Switch to Text-to-Video', group: 'Video', disabled: s.mode === 't2v', run: () => set({ mode: 't2v' }) },
+    { id: 'video.mode.i2v', label: 'Switch to Image-to-Video', group: 'Video', disabled: s.mode === 'i2v', run: () => set({ mode: 'i2v' }) },
+    { id: 'video.random-seed', label: 'Roll a random seed', group: 'Video', run: () => set({ seed: String(Math.floor(Math.random() * 2147483647)) }) },
+    { id: 'video.audio', label: s.audio ? 'Turn the audio track off' : 'Turn the audio track on', group: 'Video', run: () => set({ audio: !s.audio }) },
+    { id: 'video.reuse', label: 'Reuse settings of the shown video', group: 'Video', disabled: !current, run: () => { if (current) reuse(current) } },
+    { id: 'video.download', label: 'Download the shown video', group: 'Video', disabled: !current, run: () => { if (current) download(current) } },
+    { id: 'video.cancel-queued', label: 'Cancel queued videos', group: 'Video', disabled: !queuedCount, run: () => jobs.cancelQueued({ page: 'video', group: GROUP }) },
+  ])
 
   return (
     <div className="flex h-full">
@@ -430,7 +489,7 @@ export function VideoPage() {
             </Section>
           )}
 
-          <Section title="Prompt">
+          <Section title="Prompt" action={<EnhancePrompt kind="video" value={s.prompt} onChange={(prompt) => set({ prompt })} />}>
             <Textarea
               rows={4}
               value={s.prompt}
@@ -516,11 +575,10 @@ export function VideoPage() {
           <Button
             variant="primary"
             icon={<Sparkles size={15} />}
-            loading={submitting}
             disabled={!canGenerate}
-            onClick={() => void generate()}
+            onClick={generate}
           >
-            {active ? 'Generating…' : 'Generate video'}
+            {generateLabel}
           </Button>
         </div>
       </div>
@@ -528,26 +586,34 @@ export function VideoPage() {
       {/* results */}
       <div className="flex-1 scroll-area p-5">
         <div className="flex flex-col gap-5">
-          {jobId && job.status !== 'idle' && job.status !== 'completed' && (
-            <Panel className="p-4">
-              <div className="mb-2 flex items-center justify-between text-[12.5px]">
-                <span className={clsx('flex items-center gap-2 font-medium', job.status === 'failed' ? 'text-bad' : 'text-ink')}>
-                  <Film size={15} className={job.status === 'failed' ? 'text-bad' : 'text-accent'} />
-                  {job.status === 'failed' ? `Failed${job.error ? ` — ${job.error}` : ''}` : phase}
-                </span>
-                {active && (
-                  <span className="flex items-center gap-3 text-ink-dim">
-                    <span>Step {job.currentStep ?? 0} / {job.totalSteps ?? '?'}</span>
-                    <span>{percent}%</span>
-                    <span className="flex items-center gap-1 text-ink-faint"><Clock size={11} /> {clock(job.elapsedSeconds ?? 0)}</span>
-                    {estimated != null && <span className="text-ink-faint">est. ~{Math.round(estimated)}s</span>}
-                  </span>
-                )}
-              </div>
-              {active && <ProgressBar value={Math.max(2, percent)} />}
-            </Panel>
+          {activeJobs.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {activeJobs.map((j) => {
+                const d = isVideoData(j.data) ? j.data : null
+                const est = j.state === 'running' && d?.estimated ? ` · est. ~${clock(d.estimated)}` : ''
+                return <JobStrip key={j.id} job={j} label={`${j.label} · ${d?.prompt ?? j.detail ?? ''}${est}`} />
+              })}
+              {queuedCount > 1 && (
+                <div className="flex justify-end">
+                  <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => jobs.cancelQueued({ page: 'video', group: GROUP })}>
+                    Cancel {queuedCount} queued
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
 
+          {failedJob && (
+            <Panel className="flex items-center gap-3 border-bad/30 bg-bad/10 p-3">
+              <Film size={15} className="shrink-0 text-bad" />
+              <div className="min-w-0 flex-1 text-[12.5px]">
+                <div className="font-medium text-bad">{failedJob.label} failed</div>
+                <div className="truncate text-ink-dim" title={failedJob.error}>{failedJob.error ?? 'Generation failed'}</div>
+              </div>
+              <Button size="sm" icon={<RotateCcw size={13} />} onClick={() => retry(failedJob)}>Retry</Button>
+              <IconButton title="Dismiss" onClick={() => jobs.remove(failedJob.id)}><X size={14} /></IconButton>
+            </Panel>
+          )}
           {current ? (
             <Panel className="overflow-hidden">
               <div className="flex justify-center bg-bg">
@@ -556,7 +622,7 @@ export function VideoPage() {
                   src={current.url}
                   poster={current.thumbnailUrl ?? undefined}
                   controls
-                  autoPlay
+                  autoPlay={current.jobId === autoPlayId}
                   loop
                   className="max-h-[65vh] max-w-full object-contain"
                 />
@@ -574,11 +640,11 @@ export function VideoPage() {
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Button size="sm" icon={<RotateCcw size={13} />} onClick={() => reuse(current)}>Reuse</Button>
                   <Button size="sm" icon={<Copy size={13} />} onClick={() => copyInfo(current)}>Copy info</Button>
-                  <Button size="sm" variant="primary" icon={<Download size={13} />} onClick={() => downloadUrl(current.url, `video_${current.jobId}.mp4`)}>Download MP4</Button>
+                  <Button size="sm" variant="primary" icon={<Download size={13} />} onClick={() => download(current)}>Download MP4</Button>
                 </div>
               </div>
             </Panel>
-          ) : !active ? (
+          ) : !activeJobs.length ? (
             <EmptyState
               icon={<Film size={26} />}
               title="No video yet"
@@ -646,7 +712,7 @@ export function VideoPage() {
                           <div className="min-w-0">
                             <div className="truncate text-[11.5px] text-ink-dim" title={v.prompt}>{v.prompt}</div>
                             <div className="truncate text-[10.5px] text-ink-faint" title={new Date(v.created_at).toLocaleString()}>
-                              {v.resolution} · {v.aspect_ratio} · {v.num_frames}f · {timeAgo(v.created_at)}
+                              {v.resolution} · {v.aspect_ratio} · {v.num_frames}f · {relativeTime(new Date(v.created_at).getTime())}
                             </div>
                           </div>
                           <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">

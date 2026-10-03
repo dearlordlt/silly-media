@@ -4,20 +4,23 @@ import { clsx } from 'clsx'
 import { useNavigate } from '@tanstack/react-router'
 import {
   ArrowLeftRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Dice5, Download, Eraser, Eye, FileArchive, HelpCircle, Layers,
-  ListChecks, Maximize2, RefreshCw, Save, Search, Sparkles, Trash2, Wand2, X, Zap,
+  ListChecks, Maximize2, RefreshCw, RotateCcw, Rows3, Save, Search, Sparkles, Trash2, Wand2, X, Zap,
 } from 'lucide-react'
 import type { AspectRatio, GenerateRequest, LoraSpec } from '../../lib/types'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useHealth, useLoras } from '../../lib/query'
 import type { MediaItem } from '../../lib/library'
-import { library, useLibrary } from '../../lib/library'
+import { downloadItem, itemBlob, library, useLibrary } from '../../lib/library'
+import { kv } from '../../lib/kv'
+import { jobs, useJobCounts, usePageJobs } from '../../lib/jobs'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
 import { downloadBlob } from '../../lib/media'
 import { useApp } from '../../lib/store'
-import { ArtifactGrid } from '../../components/Artifact'
-import { ProgressStrip, useProgressPoll } from '../../components/Progress'
+import { ArtifactGrid, JustifiedGrid } from '../../components/Artifact'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import { AspectPicker, dimensionsFor } from '../../components/AspectPicker'
 import {
-  Button, Chip, IconButton, Input, Label, Panel, ProgressBar, Section, Select, Slider, Switch, Textarea,
+  Button, Chip, IconButton, Input, Label, Panel, Section, Select, Slider, Switch, Textarea,
 } from '../../components/ui/primitives'
 import {
   DEBOUNCE_OPTIONS, DEFAULT_NEGATIVE, IMAGE_MODELS, PROMPT_PRESETS, QWEN21_PRESETS, QWEN21_SIZES,
@@ -27,13 +30,16 @@ import type { BatchRow } from './batch'
 import { hasJsonVariables, interpolatePrompt, nameReferences, shuffle, summarizeBatchJson, validateBatchJson } from './batch'
 import { HISTORY_KEYS, useTextHistory } from './history'
 import { readStudioMeta, studioFilename } from './meta'
-import type { StudioMeta } from './meta'
 import { requestSnippet } from './snippets'
 import type { SnippetKind } from './snippets'
 import { createZip } from '../../lib/zip'
-import { handOffImage } from '../../lib/handoff'
+import { handOffItem } from '../../lib/handoff'
 import { StudioViewer } from './StudioViewer'
 import { HighlightVarsDialog, HistoryList, PromptView, VariablesHelpDialog, VisionDialog } from './StudioDialogs'
+import { BATCH_TITLES, enqueueStudioJob, isActive, newGroup, studioJobData } from './queue'
+import type { StudioJobKind } from './queue'
+import { ActiveHero, BatchPanel, PendingTile, tileRatio } from './StudioJobs'
+import type { StudioJob } from './StudioJobs'
 
 interface StudioSettings {
   model: string
@@ -94,14 +100,6 @@ const SECTIONS_KEY = 'silly-studio-sections'
 const HIGHLIGHTS_KEY = 'sillyMediaVarHighlights'
 const PAGE_SIZE = 24
 
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) return { ...fallback, ...JSON.parse(raw) }
-  } catch { /* ignore corrupt storage */ }
-  return fallback
-}
-
 /** Expand `{a|b|c}` alternatives into the cartesian product of prompt variants. */
 function expandPrompt(prompt: string, limit = 32): string[] {
   const groups = [...prompt.matchAll(/\{([^{}]*\|[^{}]*)\}/g)]
@@ -122,16 +120,21 @@ function expandPrompt(prompt: string, limit = 32): string[] {
   return variants
 }
 
-interface BatchJob {
-  kind: 'list' | 'simple' | 'json'
-  index: number
-  total: number
-  prompt: string
-  /** JSON batch: `{name±N}` cast for the current image. */
+/** One image to enqueue: its final request plus the batch context shown while it runs. */
+interface ImageSpec {
+  request: GenerateRequest
+  label: string
+  variables?: BatchRow
   names?: { name: string; offset: number }[]
 }
 
-interface LatestPreview { id: string; variables?: BatchRow; rows?: BatchRow[] }
+/** Render size the backend will use for a request (mirrors its aspect math). */
+function requestDims(req: GenerateRequest): { width: number; height: number } {
+  if (req.width && req.height) return { width: req.width, height: req.height }
+  return dimensionsFor(req.aspect_ratio ?? '1:1', req.base_size ?? 1024)
+}
+
+const randomSeed = () => Math.floor(Math.random() * 2 ** 31)
 
 interface Status { kind: 'success' | 'error' | 'info'; text: string }
 
@@ -139,22 +142,15 @@ export function StudioPage() {
   const client = useClient()
   const navigate = useNavigate()
   const confirmDeletes = useApp((a) => a.confirmDeletes)
-  const [s, setS] = useState<StudioSettings>(() => loadJson(STORAGE_KEY, DEFAULTS))
+  const [s, setS] = useState<StudioSettings>(() => ({ ...DEFAULTS, ...kv.getJson<Partial<StudioSettings>>(STORAGE_KEY, {}) }))
   const settingsRef = useRef(s)
   settingsRef.current = s
-  const [open, setOpen] = useState<Record<string, boolean>>(() => loadJson<Record<string, boolean>>(SECTIONS_KEY, {}))
-  const [highlights, setHighlights] = useState<ReadonlySet<string>>(() => {
-    try { return new Set<string>(JSON.parse(localStorage.getItem(HIGHLIGHTS_KEY) || '[]')) } catch { return new Set<string>() }
-  })
+  const [open, setOpen] = useState<Record<string, boolean>>(() => kv.getJson<Record<string, boolean>>(SECTIONS_KEY, {}))
+  const [highlights, setHighlights] = useState<ReadonlySet<string>>(() => new Set<string>(kv.getJson<string[]>(HIGHLIGHTS_KEY, [])))
 
-  const [running, setRunning] = useState(false)
-  const [job, setJob] = useState<BatchJob | null>(null)
-  const [cancelling, setCancelling] = useState(false)
-  const [pause, setPause] = useState<{ start: number; ms: number } | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
-  const [latest, setLatest] = useState<LatestPreview | null>(null)
-  const cancelRef = useRef(false)
-  const abort = useRef<AbortController | null>(null)
+  /** Finished-image id the user dismissed from the "latest" hero. */
+  const [hiddenLatest, setHiddenLatest] = useState<string | null>(null)
 
   const [folder, setFolder] = useState('all')
   const [page, setPage] = useState(0)
@@ -177,11 +173,52 @@ export function StudioPage() {
   const info = modelInfo(s.model)
   const set = (patch: Partial<StudioSettings>) => setS((prev) => ({ ...prev, ...patch }))
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) }, [s])
-  useEffect(() => { localStorage.setItem(SECTIONS_KEY, JSON.stringify(open)) }, [open])
-  useEffect(() => { localStorage.setItem(HIGHLIGHTS_KEY, JSON.stringify([...highlights])) }, [highlights])
+  useEffect(() => { kv.setJson(STORAGE_KEY, s) }, [s])
+  useEffect(() => { kv.setJson(SECTIONS_KEY, open) }, [open])
+  useEffect(() => { kv.setJson(HIGHLIGHTS_KEY, [...highlights]) }, [highlights])
 
-  const progress = useProgressPoll(() => client.progress(), running)
+  /* ------------------------------------------------------------ jobs */
+
+  const pageJobs = usePageJobs('studio')
+  /** Studio generations (not e.g. Enhance prompt), newest first. */
+  const studioJobs = useMemo(() => pageJobs.flatMap((job): StudioJob[] => {
+    const data = studioJobData(job)
+    return data ? [{ id: job.id, job, data }] : []
+  }), [pageJobs])
+  const activeJobs = useMemo(() => studioJobs.filter((j) => isActive(j.job)), [studioJobs])
+  const counts = useJobCounts()
+  const gpuBusy = counts.running + counts.queued
+
+  // React to jobs finishing while the page is mounted: status line, failure toasts, batch completion.
+  const seenJobs = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const finished = studioJobs.filter((j) => !isActive(j.job))
+    if (!seenJobs.current) { seenJobs.current = new Set(finished.map((j) => j.id)); return }
+    const seen = seenJobs.current
+    const groups = new Set<string>()
+    for (const { job, data } of finished) {
+      if (seen.has(job.id)) continue
+      seen.add(job.id)
+      if (job.group) groups.add(job.group)
+      if (job.state === 'failed') {
+        setStatus({ kind: 'error', text: `${job.label}: ${job.error ?? 'failed'}` })
+        toast.error(`${job.label} failed`, job.error)
+      } else if (job.state === 'done' && data.total === 1 && job.startedAt && job.finishedAt) {
+        setStatus({ kind: 'success', text: `${job.label} generated in ${((job.finishedAt - job.startedAt) / 1000).toFixed(1)}s` })
+      }
+    }
+    for (const group of groups) {
+      const members = studioJobs.filter((j) => j.job.group === group)
+      if (!members.length || members.some((j) => isActive(j.job))) continue
+      const done = members.filter((j) => j.job.state === 'done').length
+      const cancelled = members.some((j) => j.job.state === 'cancelled')
+      const { kind, folder: batchFolder } = members[0].data
+      setStatus(cancelled
+        ? { kind: 'error', text: `${BATCH_TITLES[kind]} cancelled after ${done} images` }
+        : { kind: 'success', text: `${BATCH_TITLES[kind]} complete: ${done}/${members.length} images` })
+      if (done && batchFolder) { setFolder(batchFolder); setPage(0); setSelected(new Set()) }
+    }
+  }, [studioJobs])
 
   /* ------------------------------------------------------------ model / presets */
 
@@ -253,99 +290,38 @@ export function StudioPage() {
     return req
   }
 
-  const saveResult = async (blob: Blob, model: string, req: GenerateRequest, extra: Omit<StudioMeta, 'request'>) => {
-    const objectUrl = URL.createObjectURL(blob)
-    const dims = await new Promise<{ width: number; height: number }>((resolve) => {
-      const img = new Image()
-      img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
-      img.onerror = () => resolve({ width: 0, height: 0 })
-      img.src = objectUrl
+  /** Queue images as GPU jobs (one per image, one group per batch); settings are snapshotted now. */
+  const enqueueImages = (kind: StudioJobKind, specs: ImageSpec[], opts: { model?: string; folder?: string; rows?: BatchRow[] } = {}) => {
+    const cur = settingsRef.current
+    const model = opts.model ?? cur.model
+    const total = specs.length
+    const group = total > 1 ? newGroup(kind) : undefined
+    specs.forEach((spec, index) => {
+      enqueueStudioJob(client, {
+        studio: 'generate',
+        kind,
+        model,
+        request: spec.request,
+        ...requestDims(spec.request),
+        index,
+        total,
+        variables: spec.variables,
+        rows: opts.rows,
+        names: spec.names,
+        folder: opts.folder,
+      }, { label: spec.label, group, delayMs: index > 0 ? cur.debounce : 0 })
     })
-    URL.revokeObjectURL(objectUrl)
-    const label = extra.variables?.name
-    const meta: StudioMeta = { request: req, ...extra }
-    return library.add({
-      kind: 'image',
-      source: 'studio',
-      blob,
-      name: typeof label === 'string' && label ? label : `${model} · ${req.prompt.slice(0, 40)}`,
-      prompt: req.prompt,
-      negativePrompt: req.negative_prompt,
-      model,
-      seed: req.seed,
-      width: dims.width,
-      height: dims.height,
-      meta: { ...meta },
-    })
+    setHiddenLatest(null)
+    setStatus({ kind: 'info', text: total > 1 ? `Queued ${total} images` : `Queued ${specs[0]?.label.toLowerCase() ?? 'image'}` })
   }
 
-  /** One request; returns the saved item or null on error (already reported). */
-  const generateOne = async (req: GenerateRequest, extra: Omit<StudioMeta, 'request'>, label: string): Promise<MediaItem | null> => {
-    const model = settingsRef.current.model
-    const ctrl = new AbortController()
-    abort.current = ctrl
-    const started = performance.now()
-    try {
-      const blob = await client.generate(model, req, ctrl.signal)
-      const item = await saveResult(blob, model, req, extra)
-      setStatus({ kind: 'success', text: `${label} generated in ${((performance.now() - started) / 1000).toFixed(1)}s` })
-      return item
-    } catch (e) {
-      if (ctrl.signal.aborted) return null
-      setStatus({ kind: 'error', text: `${label}: ${errorMessage(e)}` })
-      toast.error(`${label} failed`, errorMessage(e))
-      return null
-    } finally {
-      abort.current = null
-    }
-  }
+  const batchLabel = (kind: StudioJobKind, i: number, total: number) => `${BATCH_TITLES[kind]} ${i + 1}/${total}`
 
-  const runSingle = async () => {
+  const generate = () => {
     const template = s.prompt.trim()
     if (!template) { setStatus({ kind: 'error', text: 'Please enter a prompt' }); return }
-    if (running) return
     // Random [built-ins] resolve for single images too (legacy generate()).
-    const prompt = interpolatePrompt(template, {})
-    const req = buildRequest(prompt, interpolatePrompt(s.negative, {}))
-    setRunning(true)
-    setStatus({ kind: 'info', text: 'Generating image…' })
-    const item = await generateOne(req, {}, 'Image')
-    setRunning(false)
-    if (item) setLatest({ id: item.id })
-  }
-
-  /** Shared batch loop: per-image errors are reported and the batch continues (legacy). */
-  const runBatch = async (
-    kind: BatchJob['kind'],
-    count: number,
-    folderName: string,
-    makeItem: (i: number) => { prompt: string; negative: string; variables?: BatchRow; names?: BatchJob['names'] },
-    rows?: BatchRow[],
-  ) => {
-    cancelRef.current = false
-    setCancelling(false)
-    setRunning(true)
-    let done = 0
-    for (let i = 0; i < count; i++) {
-      if (cancelRef.current) break
-      const { prompt, negative, variables, names } = makeItem(i)
-      setJob({ kind, index: i, total: count, prompt, names })
-      const item = await generateOne(buildRequest(prompt, negative), { variables, folder: folderName }, `Image ${i + 1}/${count}`)
-      if (item) { done++; setLatest({ id: item.id, variables, rows }) }
-      const delay = settingsRef.current.debounce
-      if (i < count - 1 && delay > 0 && !cancelRef.current) {
-        setPause({ start: Date.now(), ms: delay })
-        await new Promise((r) => setTimeout(r, delay))
-        setPause(null)
-      }
-    }
-    setPause(null)
-    setJob(null)
-    setRunning(false)
-    setStatus(cancelRef.current
-      ? { kind: 'error', text: `Batch cancelled after ${done} images` }
-      : { kind: 'success', text: `Batch complete: ${done}/${count} images` })
-    if (done) { setFolder(folderName); setPage(0); setSelected(new Set()) }
+    enqueueImages('single', [{ request: buildRequest(interpolatePrompt(template, {}), interpolatePrompt(s.negative, {})), label: 'Image' }])
   }
 
   const runSimpleBatch = () => {
@@ -354,10 +330,10 @@ export function StudioPage() {
     if (hasJsonVariables(template)) { setStatus({ kind: 'error', text: '{variables} require JSON batch mode. Use [] for random values.' }); return }
     const count = Math.floor(s.simpleCount)
     if (!(count >= 1 && count <= 100)) { setStatus({ kind: 'error', text: 'Count must be between 1 and 100' }); return }
-    void runBatch('simple', count, `Simple ${new Date().toLocaleString()}`, () => ({
-      prompt: interpolatePrompt(template, {}),
-      negative: interpolatePrompt(settingsRef.current.negative, {}),
-    }))
+    enqueueImages('simple', Array.from({ length: count }, (_, i) => ({
+      request: buildRequest(interpolatePrompt(template, {}), interpolatePrompt(s.negative, {})),
+      label: batchLabel('simple', i, count),
+    })), { folder: `Simple ${new Date().toLocaleString()}` })
   }
 
   const jsonState = useMemo(() => validateBatchJson(s.batchJson), [s.batchJson])
@@ -369,14 +345,14 @@ export function StudioPage() {
     const rows = s.batchShuffle ? shuffle(jsonState.rows) : jsonState.rows
     const refs = nameReferences(template)
     const total = rows.length
-    void runBatch('json', total, `Batch ${new Date().toLocaleString()}`, (i) => ({
-      prompt: interpolatePrompt(template, rows[i], rows, i),
-      negative: interpolatePrompt(settingsRef.current.negative, rows[i], rows, i),
-      variables: rows[i],
+    enqueueImages('json', rows.map((row, i) => ({
+      request: buildRequest(interpolatePrompt(template, row, rows, i), interpolatePrompt(s.negative, row, rows, i)),
+      label: typeof row.name === 'string' && row.name ? `${row.name} (${i + 1}/${total})` : batchLabel('json', i, total),
+      variables: row,
       names: refs.length && rows[0]?.name != null
         ? refs.map((offset) => ({ offset, name: String(rows[(((i + offset) % total) + total) % total]?.name ?? '?') }))
         : undefined,
-    }), rows)
+    })), { folder: `Batch ${new Date().toLocaleString()}`, rows })
   }
 
   const listPrompts = useMemo(
@@ -386,28 +362,41 @@ export function StudioPage() {
 
   const runListBatch = () => {
     if (!listPrompts.length) { setStatus({ kind: 'error', text: 'Add at least one prompt line' }); return }
-    void runBatch('list', listPrompts.length, `List ${new Date().toLocaleString()}`, (i) => ({
-      prompt: interpolatePrompt(listPrompts[i], {}),
-      negative: interpolatePrompt(settingsRef.current.negative, {}),
-    }))
+    enqueueImages('list', listPrompts.map((p, i) => ({
+      request: buildRequest(interpolatePrompt(p, {}), interpolatePrompt(s.negative, {})),
+      label: batchLabel('list', i, listPrompts.length),
+    })), { folder: `List ${new Date().toLocaleString()}` })
   }
 
-  const cancel = () => {
-    cancelRef.current = true
-    setCancelling(true)
-    abort.current?.abort()
+  /** The request that produced `item` (older items without one: current settings + its prompt). */
+  const itemRequest = (item: MediaItem): { model: string; request: GenerateRequest } => {
+    const known = item.model ? modelInfo(item.model) : undefined
+    return { model: known ? known.id : s.model, request: readStudioMeta(item).request ?? buildRequest(item.prompt) }
   }
 
-  // Ctrl+Enter generates (legacy shortcut).
-  const runSingleRef = useRef(runSingle)
-  runSingleRef.current = runSingle
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && viewerIndex == null) { e.preventDefault(); void runSingleRef.current() }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [viewerIndex])
+  /** Same settings as `item`, new random seed. */
+  const vary = (item: MediaItem) => {
+    const { model, request } = itemRequest(item)
+    enqueueImages('vary', [{ request: { ...request, seed: randomSeed() }, label: 'Variation', variables: readStudioMeta(item).variables }], { model })
+    setViewerIndex(null)
+  }
+
+  /** `count` images with seeds base+1…base+count, filed in their own folder for comparison. */
+  const sweep = (item: MediaItem, count: number) => {
+    const { model, request } = itemRequest(item)
+    const base = item.seed ?? request.seed ?? randomSeed()
+    const variables = readStudioMeta(item).variables
+    enqueueImages('sweep', Array.from({ length: count }, (_, i) => ({
+      request: { ...request, seed: base + i + 1 },
+      label: `Seed ${base + i + 1}`,
+      variables,
+    })), { model, folder: `Sweep ${base} · ${new Date().toLocaleString()}` })
+    setViewerIndex(null)
+  }
+
+  const cancelAll = () => {
+    for (const { job } of activeJobs) jobs.cancel(job.id)
+  }
 
   /* ------------------------------------------------------------ gallery */
 
@@ -448,8 +437,9 @@ export function StudioPage() {
   )
 
   const removeItems = async (ids: string[]) => {
-    for (const id of ids) await library.remove(id)
-    setSelected((prev) => new Set([...prev].filter((id) => !ids.includes(id))))
+    await library.removeMany(ids)
+    const gone = new Set(ids)
+    setSelected((prev) => new Set([...prev].filter((id) => !gone.has(id))))
   }
 
   const deleteSelected = async () => {
@@ -462,9 +452,12 @@ export function StudioPage() {
     if (!filtered.length) return
     const scope = activeFolder === 'all' ? 'all' : `"${activeFolder}"`
     if (!confirm(`Delete ${scope === 'all' ? 'all' : `the ${scope}`} ${filtered.length} image(s)?`)) return
-    await removeItems(filtered.map((it) => it.id))
-    setLatest(null)
-    toast.success('Gallery cleared')
+    try {
+      await removeItems(filtered.map((it) => it.id))
+      toast.success('Gallery cleared')
+    } catch (e) {
+      toast.error('Could not clear the gallery', errorMessage(e))
+    }
   }
 
   const deleteOne = async (item: MediaItem) => {
@@ -481,13 +474,15 @@ export function StudioPage() {
     if (!filtered.length) { toast.info('No images to download'); return }
     try {
       const used = new Map<string, number>()
-      const entries = filtered.map((it) => {
+      const entries: { name: string; blob: Blob; date: Date }[] = []
+      for (const it of filtered) {
+        setZipLabel(`Loading ${entries.length + 1}/${filtered.length}…`)
         const file = studioFilename(it)
         const n = used.get(file) ?? 0
         used.set(file, n + 1)
         const dot = file.lastIndexOf('.')
-        return { name: n ? `${file.slice(0, dot)}_${n}${file.slice(dot)}` : file, blob: it.blob, date: new Date(it.createdAt) }
-      })
+        entries.push({ name: n ? `${file.slice(0, dot)}_${n}${file.slice(dot)}` : file, blob: await itemBlob(it), date: new Date(it.createdAt) })
+      }
       const zip = await createZip(entries, (done, total) => setZipLabel(`Zipping ${done}/${total}…`))
       const base = activeFolder === 'all' ? 'all-images' : activeFolder.replace(/[<>:"/\\|?*]/g, '_')
       downloadBlob(zip, `${base}.zip`)
@@ -537,7 +532,7 @@ export function StudioPage() {
   }
 
   const handoff = (item: MediaItem, to: '/edit' | '/vision') => {
-    handOffImage(to === '/edit' ? 'edit' : 'vision', item.blob)
+    handOffItem(to === '/edit' ? 'edit' : 'vision', item)
     void navigate({ to })
   }
 
@@ -564,7 +559,42 @@ export function StudioPage() {
     return IMAGE_MODELS.filter((m) => ids.includes(m.id))
   }, [health])
 
-  const latestItem = latest ? allImages.find((it) => it.id === latest.id) : undefined
+  // Latest finished studio image, derived from the job feed so it survives navigating away and back.
+  const latestJob = useMemo(() => studioJobs.reduce<StudioJob | undefined>(
+    (best, j) => (j.job.state === 'done' && j.job.itemIds.length && (!best || (j.job.finishedAt ?? 0) > (best.job.finishedAt ?? 0)) ? j : best),
+    undefined,
+  ), [studioJobs])
+  const latestItem = latestJob ? allImages.find((it) => it.id === latestJob.job.itemIds[0]) : undefined
+  const heroItem = latestItem && latestItem.id !== hiddenLatest ? latestItem : undefined
+  /** Running studio image, else the next queued one. */
+  const heroJob = activeJobs.find((j) => j.job.state === 'running') ?? activeJobs[activeJobs.length - 1]
+  const viewerItem = viewerIndex != null ? filtered[viewerIndex] : undefined
+  /** Target of Vary / Seed sweep commands. */
+  const lastImage = viewerItem ?? latestItem ?? sortedImages.find((it) => it.source === 'studio')
+  /** Batches (job groups) with work left, oldest first. */
+  const batches = useMemo(() => {
+    const groups = new Map<string, StudioJob[]>()
+    for (const j of studioJobs) {
+      if (!j.job.group) continue
+      const list = groups.get(j.job.group)
+      if (list) list.push(j)
+      else groups.set(j.job.group, [j])
+    }
+    return [...groups].filter(([, items]) => items.some((j) => isActive(j.job))).reverse()
+  }, [studioJobs])
+  const pendingTiles = currentPage === 0 ? activeJobs.filter((j) => activeFolder === 'all' || j.data.folder === activeFolder) : []
+
+  usePrimaryAction({ label: 'Generate', run: generate })
+  useCommands([
+    { id: 'studio.vary', label: 'Vary last image (new seed)', group: 'Studio', keywords: 'variation random seed again', disabled: !lastImage, run: () => { if (lastImage) vary(lastImage) } },
+    { id: 'studio.sweep', label: 'Seed sweep ×4 from last image', group: 'Studio', keywords: 'seeds compare variations', disabled: !lastImage, run: () => { if (lastImage) sweep(lastImage, 4) } },
+    { id: 'studio.sweep8', label: 'Seed sweep ×8 from last image', group: 'Studio', keywords: 'seeds compare variations', disabled: !lastImage, run: () => { if (lastImage) sweep(lastImage, 8) } },
+    { id: 'studio.clearGallery', label: activeFolder === 'all' ? 'Clear Studio gallery' : `Clear gallery folder "${activeFolder}"`, group: 'Studio', keywords: 'delete images', disabled: !filtered.length, run: () => void clearShown() },
+    { id: 'studio.downloadZip', label: 'Download gallery as ZIP', group: 'Studio', keywords: 'export archive', disabled: !filtered.length || zipLabel != null, run: () => void downloadZip() },
+    { id: 'studio.toggleNegative', label: s.negativeEnabled ? 'Disable negative prompt' : 'Enable negative prompt', group: 'Studio', run: () => set({ negativeEnabled: !settingsRef.current.negativeEnabled }) },
+    { id: 'studio.cancelAll', label: 'Cancel queued and running Studio images', group: 'Studio', keywords: 'stop abort', disabled: !activeJobs.length, run: cancelAll },
+  ])
+
   const activeQwenPreset = QWEN21_PRESETS.find((p) => p.useLora === s.useLora && p.steps === s.steps && p.cfg === s.cfg)
   const isQwen21 = s.model === 'qwen-image-2.1'
   const renderDims = dimensionsFor(s.aspect, s.baseSize)
@@ -595,7 +625,7 @@ export function StudioPage() {
       </Select>
     </div>
   )
-  const busy = running
+  const generateLabel = gpuBusy ? `Queue (${gpuBusy} ahead)` : 'Generate'
 
   return (
     <div className="flex h-full">
@@ -613,7 +643,8 @@ export function StudioPage() {
         <Section
           title="Prompt"
           action={
-            <div className="flex gap-0.5">
+            <div className="flex items-center gap-0.5">
+              <EnhancePrompt kind="image" value={s.prompt} onChange={(prompt) => set({ prompt })} />
               <IconButton onClick={() => setHelpOpen(true)} title="Variables help"><HelpCircle size={14} /></IconButton>
               <IconButton onClick={() => setVarsOpen(true)} title="Highlight variables"><Search size={14} /></IconButton>
               <IconButton onClick={() => savePrompt(promptHistory, s.prompt, 'prompt')} title="Save to history"><Save size={14} /></IconButton>
@@ -625,7 +656,7 @@ export function StudioPage() {
             value={s.prompt}
             onChange={(e) => set({ prompt: e.target.value })}
             rows={5}
-            placeholder="Describe the image… ([location], [20-35], {name} variables supported · Ctrl+Enter to generate)"
+            placeholder={`Describe the image… ([location], [20-35], {name} variables supported · ${MOD_KEY}+Enter to generate)`}
           />
           <div className="flex flex-wrap gap-1.5">
             {PROMPT_PRESETS.map((p) => (
@@ -754,9 +785,15 @@ export function StudioPage() {
           <>
             {divider}
             <Section
-              title="LoRAs"
+              title={
+                <span className="flex items-center gap-2">
+                  LoRAs
+                  {s.loras.length > 0 && <span className="rounded-full bg-accent/20 px-1.5 py-px text-[10.5px] font-semibold text-accent">{s.loras.length} active</span>}
+                </span>
+              }
               action={
                 <div className="flex items-center gap-1">
+                  {s.loras.length > 0 && <Button variant="ghost" size="sm" onClick={() => set({ loras: [] })} title="Turn all LoRAs off">Clear</Button>}
                   <span className="text-[11px] text-ink-faint">{loraData?.loras.length ?? 0} installed</span>
                   <IconButton onClick={() => void refetchLoras()} title="Reload LoRA list from server">
                     <RefreshCw size={13} className={clsx(lorasFetching && 'animate-spin')} />
@@ -765,24 +802,33 @@ export function StudioPage() {
               }
             >
               {lorasError ? <p className="text-[11.5px] text-bad">Could not load LoRA list.</p>
-                : loraData?.loras.length ? (
+                : loraData?.loras.length || s.loras.length ? (
                   <div className="flex flex-col gap-1.5">
-                    {loraData.loras.map((l) => {
+                    {[
+                      ...(loraData?.loras ?? []).map((l) => ({ name: l.name, note: `${l.size_mb} MB`, missing: false })),
+                      // Active (e.g. from reused settings) but not installed: still sent, so keep it switchable.
+                      ...(loraData ? s.loras.filter((x) => !loraData.loras.some((l) => l.name === x.name)).map((x) => ({ name: x.name, note: 'not installed', missing: true })) : []),
+                    ].map((l) => {
                       const active = s.loras.find((x) => x.name === l.name)
                       return (
-                        <div key={l.name} className={clsx('rounded-lg border px-2.5 py-2', active ? 'border-accent/50 bg-accent/10' : 'border-line')}>
-                          <button
-                            className="flex w-full items-center justify-between gap-2 text-left"
-                            onClick={() => set({ loras: active ? s.loras.filter((x) => x.name !== l.name) : [...s.loras, { name: l.name, scale: 1 }] })}
-                          >
-                            <span className="truncate text-[12.5px]">{l.name}</span>
-                            <span className="shrink-0 text-[10.5px] text-ink-faint">{active ? `× ${active.scale.toFixed(2)}` : `${l.size_mb} MB`}</span>
-                          </button>
+                        <div key={l.name} className={clsx('flex flex-col gap-2 rounded-lg border px-2.5 py-2', active ? 'border-accent/50 bg-accent/10' : 'border-line')}>
+                          <div className="flex items-center justify-between gap-2">
+                            <Switch
+                              checked={!!active}
+                              onChange={(on) => set({ loras: on ? [...s.loras, { name: l.name, scale: 1 }] : s.loras.filter((x) => x.name !== l.name) })}
+                              label={<span className={clsx('break-all text-[12.5px]', active ? 'text-ink' : 'text-ink-dim')}>{l.name}</span>}
+                            />
+                            <span className={clsx('shrink-0 text-[10.5px]', l.missing ? 'text-warn' : 'text-ink-faint')}>{l.note}</span>
+                          </div>
                           {active && (
-                            <input
-                              type="range" min={0} max={2} step={0.05} value={active.scale}
-                              onChange={(e) => set({ loras: s.loras.map((x) => x.name === l.name ? { ...x, scale: Number(e.target.value) } : x) })}
-                              className="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-line-strong"
+                            <Slider
+                              label="Scale"
+                              value={active.scale}
+                              min={0}
+                              max={2}
+                              step={0.05}
+                              onValueChange={(v) => set({ loras: s.loras.map((x) => (x.name === l.name ? { ...x, scale: v } : x)) })}
+                              format={(v) => `× ${v.toFixed(2)}`}
                             />
                           )}
                         </div>
@@ -824,7 +870,7 @@ export function StudioPage() {
             <p className="text-[11.5px] text-ink-faint">Generate N images with fresh random <code>[variables]</code> each time.</p>
             <div className="flex items-center gap-2">
               <Input className="w-20" type="number" min={1} max={100} value={s.simpleCount} onChange={(e) => set({ simpleCount: Number(e.target.value) })} />
-              <Button variant="primary" className="flex-1" icon={<Zap size={15} />} disabled={busy} onClick={runSimpleBatch}>Generate {s.simpleCount || ''}</Button>
+              <Button variant="primary" className="flex-1" icon={<Zap size={15} />} onClick={runSimpleBatch}>{gpuBusy ? 'Queue' : 'Generate'} {s.simpleCount || ''}</Button>
             </div>
             {debounceSelect}
           </>
@@ -860,8 +906,8 @@ export function StudioPage() {
               </p>
             )}
             <div className="flex items-center gap-3">
-              <Button variant="primary" className="flex-1" icon={<Zap size={15} />} disabled={busy || !jsonState?.ok} onClick={runJsonBatch}>
-                Generate batch{jsonState?.ok ? ` (${jsonState.rows.length})` : ''}
+              <Button variant="primary" className="flex-1" icon={<Zap size={15} />} disabled={!jsonState?.ok} onClick={runJsonBatch}>
+                {gpuBusy ? 'Queue' : 'Generate'} batch{jsonState?.ok ? ` (${jsonState.rows.length})` : ''}
               </Button>
               <Switch checked={s.batchShuffle} onChange={(v) => set({ batchShuffle: v })} label="Shuffle" />
             </div>
@@ -885,20 +931,28 @@ export function StudioPage() {
               One prompt per line. <code className="rounded bg-bg px-1">{'{red|blue}'}</code> expands alternatives (max 32 images).
             </p>
             <Textarea rows={4} value={s.listText} onChange={(e) => set({ listText: e.target.value })} placeholder={'a red fox\n{orange|grey} cat on a {couch|windowsill}'} />
-            <Button variant="primary" icon={<Zap size={15} />} disabled={busy || !listPrompts.length} onClick={runListBatch}>
-              Run {listPrompts.length || ''} job{listPrompts.length === 1 ? '' : 's'}
+            <Button variant="primary" icon={<Zap size={15} />} disabled={!listPrompts.length} onClick={runListBatch}>
+              {gpuBusy ? 'Queue' : 'Run'} {listPrompts.length || ''} job{listPrompts.length === 1 ? '' : 's'}
             </Button>
           </>
         ))}
 
         <div className="sticky bottom-0 -mx-5 mt-5 border-t border-line bg-panel/95 px-5 py-4 backdrop-blur">
           <div className="flex items-center gap-2">
-            {running ? (
-              <Button variant="danger" size="lg" className="flex-1" icon={<X size={16} />} disabled={cancelling} onClick={cancel}>
-                {cancelling ? 'Cancelling…' : 'Cancel'}
+            <Button
+              variant="primary"
+              size="lg"
+              className="flex-1"
+              icon={<Sparkles size={16} />}
+              onClick={generate}
+              title={`${MOD_KEY}+Enter · ${gpuBusy ? 'adds to the GPU queue' : 'generate now'}`}
+            >
+              {generateLabel}
+            </Button>
+            {activeJobs.length > 0 && (
+              <Button variant="danger" size="lg" icon={<X size={16} />} onClick={cancelAll} title="Cancel every queued and running Studio image">
+                Stop {activeJobs.length}
               </Button>
-            ) : (
-              <Button variant="primary" size="lg" className="flex-1" icon={<Sparkles size={16} />} onClick={() => void runSingle()}>Generate</Button>
             )}
           </div>
           <div className="mt-2 flex items-center gap-1.5">
@@ -922,64 +976,48 @@ export function StudioPage() {
       {/* Results */}
       <div className="scroll-area flex-1 p-5">
         <div className="mx-auto flex max-w-6xl flex-col gap-4">
-          <ProgressStrip state={progress} label={`Generating with ${info?.label ?? s.model}`} />
-          {running && !progress.active && !pause && (
-            <div className="text-[11.5px] text-ink-faint">Waiting for the backend — model loading can take a while on the first run; the VRAM manager swaps models automatically.</div>
-          )}
+          {batches.map(([group, items]) => <BatchPanel key={group} group={group} items={items} />)}
 
-          {job && (
-            <Panel className="flex flex-col gap-2 p-4">
-              <div className="flex items-center justify-between text-[12.5px]">
-                <span className="font-semibold">{job.kind === 'json' ? 'JSON batch' : job.kind === 'simple' ? 'Simple batch' : 'Prompt list'}</span>
-                <span className="text-ink-dim">{job.index + 1} / {job.total}</span>
-              </div>
-              <ProgressBar value={(job.index / job.total) * 100} />
-              {job.names && (
-                <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                  {job.names.map((n, i) => (
-                    <span key={n.offset} className="flex items-center gap-1.5">
-                      {i > 0 && <span className="text-ink-faint">+</span>}
-                      {n.offset === 0
-                        ? <span className="font-semibold text-accent">{n.name}</span>
-                        : <span className="text-ink-dim">{n.name}<sup className="text-ink-faint">{n.offset > 0 ? `+${n.offset}` : n.offset}</sup></span>}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="line-clamp-3 text-[11.5px] text-ink-faint">{job.prompt}</div>
-              {pause && <PauseBar start={pause.start} ms={pause.ms} />}
-            </Panel>
-          )}
-
-          {latestItem && (
+          {heroJob ? (
+            <ActiveHero {...heroJob} queued={activeJobs.length - 1} />
+          ) : heroItem && (
             <Panel className="overflow-hidden">
-              <div className="relative grid place-items-center bg-bg p-3">
-                <img src={latestItem.url} alt="" className="max-h-[60vh] max-w-full object-contain" />
-                <div className="absolute right-3 top-3 flex gap-1.5">
-                  <Button size="sm" icon={<Maximize2 size={13} />} onClick={() => openViewer(latestItem)}>View</Button>
-                  <Button size="sm" icon={<Download size={13} />} onClick={() => downloadBlob(latestItem.blob, studioFilename(latestItem))}>Download</Button>
-                  <Button size="sm" icon={<Eye size={13} />} onClick={() => setVisionItem(latestItem)}>Vision</Button>
-                  <Button size="sm" icon={<Wand2 size={13} />} onClick={() => void handoff(latestItem, '/edit')}>Edit</Button>
-                  <IconButton onClick={() => setLatest(null)} title="Hide preview"><X size={15} /></IconButton>
-                </div>
+              <div className="grid place-items-center bg-bg p-3">
+                <button onClick={() => openViewer(heroItem)} title="Open viewer" className="cursor-zoom-in">
+                  <img src={heroItem.url} alt="" className="max-h-[60vh] max-w-full object-contain" />
+                </button>
               </div>
-              {latestItem.prompt && (
+              <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2">
+                <span className="mr-auto truncate text-[11px] text-ink-faint">
+                  {[heroItem.model, heroItem.width && heroItem.height ? `${heroItem.width}×${heroItem.height}` : null, heroItem.seed != null ? `seed ${heroItem.seed}` : null].filter(Boolean).join(' · ')}
+                </span>
+                <Button size="sm" variant="ghost" icon={<Maximize2 size={13} />} onClick={() => openViewer(heroItem)}>View</Button>
+                <Button size="sm" variant="ghost" icon={<Download size={13} />} onClick={() => downloadItem(heroItem, studioFilename(heroItem))}>Download</Button>
+                <Button size="sm" variant="ghost" icon={<Eye size={13} />} onClick={() => setVisionItem(heroItem)}>Vision</Button>
+                <Button size="sm" variant="ghost" icon={<Wand2 size={13} />} onClick={() => handoff(heroItem, '/edit')}>Edit</Button>
+                <Button size="sm" variant="ghost" icon={<RotateCcw size={13} />} onClick={() => reuse(heroItem)}>Use settings</Button>
+                <Button size="sm" icon={<Dice5 size={13} />} onClick={() => vary(heroItem)} title="Same settings, new random seed">Vary</Button>
+                <Button size="sm" icon={<Rows3 size={13} />} onClick={() => sweep(heroItem, 4)} title="4 images with seeds base+1…base+4">Sweep ×4</Button>
+                <Button size="sm" onClick={() => sweep(heroItem, 8)} title="8 images with seeds base+1…base+8">×8</Button>
+                <IconButton onClick={() => setHiddenLatest(heroItem.id)} title="Hide preview"><X size={15} /></IconButton>
+              </div>
+              {heroItem.prompt && (
                 <div className="border-t border-line px-4 py-2.5 text-[12.5px] leading-relaxed">
                   <span className="mr-1.5 text-[11px] font-semibold uppercase text-accent">Prompt:</span>
-                  <PromptView prompt={latestItem.prompt} variables={latest?.variables} rows={latest?.rows} highlights={highlights} />
+                  <PromptView prompt={heroItem.prompt} variables={readStudioMeta(heroItem).variables} rows={latestJob?.data.rows} highlights={highlights} />
                 </div>
               )}
-              {latestItem.negativePrompt?.trim() && (
+              {heroItem.negativePrompt?.trim() && (
                 <div className="border-t border-line px-4 py-2.5 text-[12.5px] leading-relaxed">
                   <span className="mr-1.5 text-[11px] font-semibold uppercase text-bad">Negative:</span>
-                  {latestItem.negativePrompt}
+                  {heroItem.negativePrompt}
                 </div>
               )}
             </Panel>
           )}
 
           <div ref={galleryRef}>
-            {collapsible('gallery', <>Gallery <span className="font-normal text-ink-faint">({filtered.length})</span></>, (
+            {collapsible('gallery', <>Gallery <span className="font-normal text-ink-faint">({filtered.length}{activeJobs.length ? ` · ${activeJobs.length} in progress` : ''})</span></>, (
               <>
                 {folders.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
@@ -989,23 +1027,29 @@ export function StudioPage() {
                     ))}
                   </div>
                 )}
-                <ArtifactGrid
-                  items={pageItems}
-                  columns={4}
-                  onOpen={openViewer}
-                  onReuse={reuse}
-                  onDelete={(item) => void deleteOne(item)}
-                  selected={selected}
-                  onToggleSelect={toggleSelect}
-                  extraActions={(item) => (
-                    <>
-                      <IconButton onClick={() => downloadBlob(item.blob, studioFilename(item))} title="Download"><Download size={14} /></IconButton>
-                      <IconButton onClick={() => setVisionItem(item)} title="Vision"><Eye size={14} /></IconButton>
-                      <IconButton onClick={() => void handoff(item, '/edit')} title="Edit"><Wand2 size={14} /></IconButton>
-                    </>
-                  )}
-                  empty={{ title: 'No images yet', detail: 'Describe something and hit Generate. Results are saved to your local library.' }}
-                />
+                {pendingTiles.length > 0 && (
+                  <JustifiedGrid items={pendingTiles} columns={4} ratioOf={(j) => tileRatio(j.data)}>
+                    {(j) => <PendingTile {...j} />}
+                  </JustifiedGrid>
+                )}
+                {(pageItems.length > 0 || pendingTiles.length === 0) && (
+                  <ArtifactGrid
+                    items={pageItems}
+                    columns={4}
+                    onOpen={openViewer}
+                    onReuse={reuse}
+                    onDelete={(item) => void deleteOne(item)}
+                    selected={selected}
+                    onToggleSelect={toggleSelect}
+                    extraActions={(item) => (
+                      <>
+                        <IconButton onClick={() => vary(item)} title="Vary (same settings, new seed)"><Dice5 size={14} /></IconButton>
+                        <IconButton onClick={() => setVisionItem(item)} title="Vision analysis"><Eye size={14} /></IconButton>
+                      </>
+                    )}
+                    empty={{ title: 'No images yet', detail: 'Describe something and hit Generate. Results are saved to your local library.' }}
+                  />
+                )}
                 {totalPages > 1 && <Pagination page={currentPage} total={totalPages} onPage={goToPage} />}
               </>
             ), true, (
@@ -1036,12 +1080,14 @@ export function StudioPage() {
         onIndex={setViewerIndex}
         onClose={() => setViewerIndex(null)}
         onReuse={reuse}
+        onVary={vary}
+        onSweep={sweep}
         onVision={setVisionItem}
-        onEdit={(item) => void handoff(item, '/edit')}
+        onEdit={(item) => handoff(item, '/edit')}
         onDelete={(item) => void deleteOne(item)}
         highlights={highlights}
       />
-      <VisionDialog item={visionItem} onClose={() => setVisionItem(null)} onOpenInVision={(item) => void handoff(item, '/vision')} />
+      <VisionDialog item={visionItem} onClose={() => setVisionItem(null)} onOpenInVision={(item) => handoff(item, '/vision')} />
       <VariablesHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <HighlightVarsDialog
         open={varsOpen}
@@ -1051,22 +1097,6 @@ export function StudioPage() {
         onToggle={toggleHighlight}
         onClear={() => setHighlights(new Set())}
       />
-    </div>
-  )
-}
-
-/** Countdown bar for the pause between batch images (legacy debounce bar). */
-function PauseBar({ start, ms }: { start: number; ms: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 100)
-    return () => clearInterval(t)
-  }, [])
-  const left = Math.max(0, ms - (now - start))
-  return (
-    <div className="flex items-center gap-2 text-[11px] text-ink-faint">
-      <ProgressBar value={((ms - left) / ms) * 100} className="flex-1" />
-      next in {(left / 1000).toFixed(1)}s
     </div>
   )
 }

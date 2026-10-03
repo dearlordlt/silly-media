@@ -222,7 +222,7 @@ async function renderOnce(url: string): Promise<Blob | null> {
   }
 }
 
-/** Render a GLB (object/blob URL) to a PNG poster; calls are serialized. */
+/** Render a GLB (by URL, e.g. a library item's file) to a PNG poster; calls are serialized. */
 export function renderGlbPoster(url: string): Promise<Blob | null> {
   const job = queue.then(() => renderOnce(url))
   queue = job.catch(() => null)

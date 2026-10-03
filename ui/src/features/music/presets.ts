@@ -1,7 +1,9 @@
 /**
  * Music page presets: genre templates (caption + lyrics) and settings profiles,
- * ported from the legacy ui-music.html. User profiles persist in localStorage.
+ * ported from the legacy ui-music.html. User profiles persist per profile via `kv`.
  */
+import { kv } from '../../lib/kv'
+
 export type SongModel = 'ace-step' | 'ace-step-quality'
 export type AudioFormat = 'wav' | 'flac' | 'mp3'
 
@@ -117,7 +119,7 @@ export const SECTION_TAGS = ['[Intro]', '[Verse]', '[Pre-Chorus]', '[Chorus]', '
 const PROFILES_KEY = 'silly-music-profiles'
 
 /**
- * Narrow an untyped object (localStorage JSON, library meta) to the settings it
+ * Narrow an untyped object (stored JSON, library meta) to the settings it
  * actually carries; unknown or mistyped keys are dropped.
  */
 export function readSettings(value: unknown): Partial<MusicSettings> {
@@ -141,15 +143,11 @@ export function readSettings(value: unknown): Partial<MusicSettings> {
 }
 
 export function loadUserProfiles(): Record<string, Partial<MusicSettings>> {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? '{}')
-    if (typeof raw !== 'object' || raw === null) return {}
-    return Object.fromEntries(Object.entries(raw).map(([name, s]) => [name, readSettings(s)]))
-  } catch {
-    return {}
-  }
+  const raw = kv.getJson<unknown>(PROFILES_KEY, {})
+  if (typeof raw !== 'object' || raw === null) return {}
+  return Object.fromEntries(Object.entries(raw).map(([name, s]) => [name, readSettings(s)]))
 }
 
 export function saveUserProfiles(profiles: Record<string, Partial<MusicSettings>>) {
-  localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles))
+  kv.setJson(PROFILES_KEY, profiles)
 }

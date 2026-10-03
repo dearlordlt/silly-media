@@ -3,27 +3,33 @@
  * (plus the edit modal of ui.html): a sidebar of saved originals with their
  * edits, the preset-chip composer (compose mode = one prompt, otherwise one
  * edit per chip), qwen-image-2.1 references / presets / output size, per-model
- * sampling defaults, batch progress with timing, and a result viewer with
- * compare, regenerate, reuse and "edit again".
+ * sampling defaults, and a result viewer with A/B compare, regenerate, reuse
+ * and "edit again". Every edit runs on the app-wide GPU queue (editJobs.ts);
+ * the page renders its jobs as batch progress + placeholder tiles.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { clsx } from 'clsx'
 import { CheckSquare, Download, FolderOpen, ImagePlus, Images, Plus, RotateCcw, Search, Trash2, Wand2, X } from 'lucide-react'
-import type { Img2ImgRequest } from '../../lib/types'
 import type { MediaItem } from '../../lib/library'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useModels } from '../../lib/query'
-import { library, useLibrary } from '../../lib/library'
+import { itemBlob, itemExtension, library, useLibrary } from '../../lib/library'
+import { kv } from '../../lib/kv'
+import { jobs, useJobCounts, usePageJobs } from '../../lib/jobs'
+import type { Job } from '../../lib/jobs'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
 import { useApp } from '../../lib/store'
-import { blobToDataUrl, downloadBlob, stripDataUrl } from '../../lib/media'
-import { useProgressPoll } from '../../components/Progress'
+import { blobToDataUrl, downloadBlob } from '../../lib/media'
 import { ImageDrop, useClipboardImage } from '../../components/ImageDrop'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import { Button, Chip, EmptyState, IconButton, Input, Label, Panel, Section, Select, Slider, Switch, Textarea } from '../../components/ui/primitives'
 import { createZip } from '../../lib/zip'
 import { useHandoffImage } from '../../lib/handoff'
 import { BatchProgress } from './BatchProgress'
-import type { BatchState } from './BatchProgress'
-import { CHECKERBOARD, EditViewer, editLabel, imageHasAlpha, metaFlag, metaNumber, metaString, safeFilename } from './EditResults'
+import { CHECKERBOARD, EditViewer, PendingEditTile, editLabel, metaFlag, metaNumber, metaString, safeFilename } from './EditResults'
+import type { CompareMode } from './EditResults'
+import { editJobData, enqueueEdit, isActive } from './editJobs'
+import type { EditPrompt, RunSettings, UpscaleModel } from './editJobs'
 import { ArtifactGrid } from '../../components/Artifact'
 import {
   CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
@@ -37,39 +43,20 @@ const QWEN21_GROUP = 'qwen21'
 const CUSTOM_LOCATION_ID = 'custom-location'
 
 type SeedMode = 'random' | 'fixed' | 'custom'
-type UpscaleModel = 'clean' | 'sharp'
 
 /** One edit request of a batch. */
-interface EditEntry {
-  label: string
-  prompt: string
-  negative: string
+interface EditEntry extends EditPrompt {
   transparent: boolean
   needsRef: boolean
   /** Eligible for the clothed-variants pair (qwen-image-2.1 preset edits are not). */
   variants: boolean
-  basePrompt?: string
-  clothedPrompt?: string
 }
 
-/** Sampling settings snapshotted for a batch / stored on every edit. */
-interface RunSettings {
-  model: string
-  steps: number
-  cfg: number
-  useLora: boolean
-  upscale: boolean
-  upscaleFactor: number
-  upscaleModel: UpscaleModel
-  transparent: boolean
-  sizeMode: SizeMode
-  outWidth?: number
-  outHeight?: number
-  references: string[]
-}
+/** Finished batches the user dismissed (kept across page visits, like the jobs themselves). */
+const dismissedBatches = new Set<string>()
 
 function loadSavedModel(): string {
-  try { return localStorage.getItem(MODEL_KEY) ?? QWEN21_MODEL } catch { return QWEN21_MODEL }
+  return kv.getItem(MODEL_KEY) ?? QWEN21_MODEL
 }
 
 function dataUrlSize(url: string): Promise<{ width: number; height: number }> {
@@ -98,7 +85,7 @@ export function EditPage() {
   /** Model switch: LoRA off and that model's base steps/cfg (legacy applyModelSettings). */
   const changeModel = useCallback((next: string) => {
     setModel(next)
-    try { localStorage.setItem(MODEL_KEY, next) } catch { /* storage unavailable */ }
+    kv.setItem(MODEL_KEY, next)
     const d = modelDefaults(next).off
     setUseLora(false)
     setSteps(d.steps)
@@ -183,7 +170,11 @@ export function EditPage() {
     setSelection(new Set())
     setCurrentOriginalId(orig.id)
     setOriginalName(orig.name === 'Untitled' ? '' : orig.name)
-    setSource(await blobToDataUrl(orig.blob))
+    try {
+      setSource(await blobToDataUrl(await itemBlob(orig)))
+    } catch (e) {
+      toast.error('Could not load the original', errorMessage(e))
+    }
   }
 
   const renameOriginal = () => {
@@ -196,15 +187,14 @@ export function EditPage() {
   const deleteOriginal = async (orig: MediaItem) => {
     const count = editCounts.get(orig.id) ?? 0
     if (!confirm(`Delete "${orig.name}" and its ${count} edit(s)?`)) return
-    await Promise.all(edits.filter((e) => metaString(e, 'originalId') === orig.id).map((e) => library.remove(e.id)))
-    await library.remove(orig.id)
+    await library.removeMany([...edits.filter((e) => metaString(e, 'originalId') === orig.id).map((e) => e.id), orig.id])
     if (view === orig.id) setView(null)
     if (currentOriginalId === orig.id) setCurrentOriginalId(null)
   }
 
   const clearAll = async () => {
     if (!confirm('Delete ALL originals and their edits? This cannot be undone.')) return
-    await Promise.all([...edits, ...originals].map((i) => library.remove(i.id)))
+    await library.removeMany([...edits, ...originals].map((i) => i.id))
     setView(null)
     setSelection(new Set())
     loadNewSource(null)
@@ -387,59 +377,16 @@ export function EditPage() {
   }, [activeQwen21, categories, selected, custom, composeMode, negativeOn, negative, clothesOn, clothesPrompt])
 
   /* ---------------------------------------------------------- generation */
-  const [running, setRunning] = useState(false)
-  const [stopping, setStopping] = useState(false)
-  const [batch, setBatch] = useState<BatchState | null>(null)
-  const stopRef = useRef(false)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const buildRequest = (image: string, prompt: string, negativePrompt: string, seed: number | undefined, s: RunSettings): Img2ImgRequest => {
-    const req: Img2ImgRequest = {
-      image: stripDataUrl(image),
-      prompt,
-      negative_prompt: negativePrompt || ' ',
-      num_inference_steps: s.steps,
-      true_cfg_scale: s.cfg,
-      use_lora: s.useLora,
-    }
-    if (seed != null) req.seed = seed
-    if (s.upscale) { req.upscale = true; req.upscale_factor = s.upscaleFactor; req.upscale_model = s.upscaleModel }
-    if (s.model === QWEN21_MODEL) {
-      req.transparent = s.transparent
-      if (s.outWidth && s.outHeight) { req.width = s.outWidth; req.height = s.outHeight }
-      if (s.references.length) req.reference_images = s.references.map(stripDataUrl)
-    }
-    return req
-  }
-
-  /** Persist an edit result, linked to its original. */
-  const saveEdit = async (blob: Blob, originalId: string, entry: { label: string; prompt: string; negative: string; basePrompt?: string; clothedPrompt?: string }, seed: number | undefined, s: RunSettings, keep?: { id: string; createdAt: number }) => {
-    const [hasAlpha, dims] = await Promise.all([imageHasAlpha(blob), blobToDataUrl(blob).then(dataUrlSize)])
-    await library.add({
-      ...keep,
-      kind: 'image', source: 'edit', blob,
-      name: entry.label,
-      prompt: entry.prompt,
-      negativePrompt: entry.negative,
-      model: s.model, seed, width: dims.width, height: dims.height,
-      meta: {
-        originalId,
-        label: entry.label,
-        steps: s.steps, cfg: s.cfg, useLora: s.useLora,
-        upscale: s.upscale, upscaleFactor: s.upscaleFactor, upscaleModel: s.upscaleModel,
-        hasAlpha,
-        ...(entry.basePrompt ? { basePrompt: entry.basePrompt } : {}),
-        ...(entry.clothedPrompt ? { clothedPrompt: entry.clothedPrompt } : {}),
-        ...(s.model === QWEN21_MODEL ? {
-          transparent: s.transparent, sizeMode: s.sizeMode,
-          ...(s.outWidth && s.outHeight ? { outWidth: s.outWidth, outHeight: s.outHeight } : {}),
-          referenceCount: s.references.length,
-        } : {}),
-      },
-    })
-  }
+  const pageJobs = usePageJobs('edit')
+  // Enhance-prompt jobs share the page; edit jobs are the ones carrying EditJobData.
+  const editJobs = useMemo(() => pageJobs.filter((j) => editJobData(j) != null), [pageJobs])
+  const counts = useJobCounts()
+  const ahead = counts.running + counts.queued
+  /** Uploading a new original before its batch is queued (guards double-submits). */
+  const [preparing, setPreparing] = useState(false)
 
   const runEdit = async () => {
+    if (preparing) return
     if (!entries.length) { toast.error('Select at least one prompt or enter a custom prompt'); return }
     if (!source) { toast.error('No source image loaded'); return }
     if (isQ21 && !references.length && entries.some((e) => e.needsRef)) {
@@ -460,11 +407,19 @@ export function EditPage() {
     // Save the original on the first run.
     let originalId = currentOriginalId
     if (!originalId) {
-      const blob = await (await fetch(image)).blob()
-      const name = originalName.trim() || 'Untitled'
-      const orig = await library.add({ kind: 'image', source: 'edit-original', blob, name, width: srcDims?.width, height: srcDims?.height })
-      originalId = orig.id
-      setCurrentOriginalId(orig.id)
+      setPreparing(true)
+      try {
+        const blob = await (await fetch(image)).blob()
+        const name = originalName.trim() || 'Untitled'
+        const orig = await library.add({ kind: 'image', source: 'edit-original', blob, name, width: srcDims?.width, height: srcDims?.height })
+        originalId = orig.id
+        setCurrentOriginalId(orig.id)
+      } catch (e) {
+        toast.error('Could not save the original', errorMessage(e))
+        return
+      } finally {
+        setPreparing(false)
+      }
     }
     setView(originalId)
     setSelection(new Set())
@@ -472,48 +427,44 @@ export function EditPage() {
     const batchSeed = Math.floor(Math.random() * 2147483647)
     const customSeed = Number.parseInt(seedValue, 10)
     const seed = seedMode === 'fixed' ? batchSeed : seedMode === 'custom' && !Number.isNaN(customSeed) ? customSeed : undefined
-
-    stopRef.current = false
-    setStopping(false)
-    setRunning(true)
-    let done = 0
-    const total = batchEntries.length
-    setBatch({ done: 0, total, current: 1, label: batchEntries[0].label, finished: false })
-    try {
-      for (let i = 0; i < total; i++) {
-        if (stopRef.current) { toast.info(`Cancelled after ${done} edit(s)`); break }
-        const entry = batchEntries[i]
-        setBatch({ done, total, current: i + 1, label: entry.label, finished: false })
-        const run = { ...settings, transparent: settings.transparent || entry.transparent }
-        abortRef.current = new AbortController()
-        try {
-          const blob = await client.img2img(model, buildRequest(image, entry.prompt, entry.negative, seed, run), abortRef.current.signal)
-          await saveEdit(blob, originalId, entry, seed, run)
-          done += 1
-          setBatch({ done, total, current: i + 1, label: entry.label, finished: false })
-        } catch (e) {
-          if (e instanceof DOMException && e.name === 'AbortError') { toast.info(`Cancelled after ${done} edit(s)`); break }
-          toast.error(`Edit "${entry.label}" failed`, errorMessage(e))
-        }
-        // Pause between edits (legacy debounce, counted as idle time).
-        if (i < total - 1 && !stopRef.current) await new Promise<void>((resolve) => { setTimeout(resolve, 2000) })
-      }
-    } finally {
-      abortRef.current = null
-      setRunning(false)
-      setStopping(false)
-      if (done > 0) {
-        setBatch({ done, total, current: total, label: '', finished: true })
-        toast.success(`Created ${done} edited image(s)`)
-      } else setBatch(null)
+    const orig = library.get(originalId)
+    const preview = orig?.thumbUrl ?? orig?.url ?? image
+    const group = `edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    for (const entry of batchEntries) {
+      enqueueEdit({
+        client, image, entry, seed, group,
+        settings: { ...settings, transparent: settings.transparent || entry.transparent },
+        data: { originalId, label: entry.label, preview },
+      })
     }
+    if (ahead > 0) toast.info(`Queued ${batchEntries.length} edit(s)`, `${ahead} job(s) ahead`)
   }
 
-  /** First click: stop after the current edit (legacy). Second click: abort the request. */
-  const cancel = () => {
-    if (!stopping) { stopRef.current = true; setStopping(true); return }
-    abortRef.current?.abort()
+  /** Batch panels: every batch with queued/running edits, plus the newest batch until dismissed. */
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set(dismissedBatches))
+  const batches = useMemo(() => {
+    const byGroup = new Map<string, Job[]>()
+    for (const j of editJobs) {
+      if (!j.group) continue
+      const list = byGroup.get(j.group)
+      if (list) list.push(j); else byGroup.set(j.group, [j])
+    }
+    // editJobs is newest first, so the first group is the newest batch.
+    return [...byGroup].filter(([g, list], i) => !dismissed.has(g) && (i === 0 || list.some(isActive)))
+  }, [editJobs, dismissed])
+  const dismissBatch = (group: string) => {
+    dismissedBatches.add(group)
+    setDismissed(new Set(dismissedBatches))
   }
+
+  /** Placeholder tiles (queue order) for the current view: queued, running and failed edits. */
+  const pendingJobs = useMemo(
+    () => editJobs
+      .filter((j) => (isActive(j) || j.state === 'failed') && (!view || editJobData(j)?.originalId === view))
+      .reverse(),
+    [editJobs, view],
+  )
+  const queuedCount = editJobs.filter((j) => j.state === 'queued').length
 
   /* ---------------------------------------------------------- selection */
   const [selection, setSelection] = useState<Set<string>>(new Set())
@@ -534,20 +485,21 @@ export function EditPage() {
   const deleteSelected = async () => {
     if (!selection.size) return
     if (!confirm(`Delete ${selection.size} selected image(s)?`)) return
-    await Promise.all([...selection].map((id) => library.remove(id)))
+    await library.removeMany([...selection])
     setSelection(new Set())
   }
 
   const [zipping, setZipping] = useState(false)
   const downloadZip = async (items: MediaItem[], prefix: string, original: MediaItem | null) => {
     const files = [
-      ...(original ? [{ label: 'Original', blob: original.blob }] : []),
-      ...items.map((i) => ({ label: editLabel(i), blob: i.blob })),
+      ...(original ? [{ label: 'Original', item: original }] : []),
+      ...items.map((i) => ({ label: editLabel(i), item: i })),
     ]
     if (!files.length) { toast.info('No images to download'); return }
     setZipping(true)
     try {
-      const zip = await createZip(files.map((f, i) => ({ name: safeFilename(f.label, f.blob, i), blob: f.blob })))
+      const entries = await Promise.all(files.map(async (f, i) => ({ name: safeFilename(f.label, itemExtension(f.item), i), blob: await itemBlob(f.item) })))
+      const zip = await createZip(entries)
       downloadBlob(zip, `${prefix}-${Date.now()}.zip`)
       toast.success(`Downloaded ${files.length} images as ZIP`)
     } catch (e) {
@@ -559,8 +511,13 @@ export function EditPage() {
 
   /* -------------------------------------------------------------- viewer */
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
-  const [regenerating, setRegenerating] = useState(false)
-  const regenProgress = useProgressPoll(() => client.img2imgProgress(), regenerating)
+  const [compareMode, setCompareMode] = useState<CompareMode>('edit')
+
+  /** The queued / running regenerate job of an edit, if any. */
+  const regenJob = useCallback(
+    (item: MediaItem) => editJobs.find((j) => isActive(j) && editJobData(j)?.replaces === item.id),
+    [editJobs],
+  )
 
   // Original an edit was made from, for the viewer's compare toggle (pre-originals edits stored a data URL).
   const originalUrl = useCallback((item: MediaItem): string | null => {
@@ -571,6 +528,7 @@ export function EditPage() {
 
   const regenerate = async (item: MediaItem) => {
     if (!item.prompt) { toast.error('Cannot regenerate: missing prompt'); return }
+    if (regenJob(item)) { toast.info('This edit is already queued for regeneration'); return }
     const origId = metaString(item, 'originalId')
     const orig = origId ? originalsById.get(origId) : undefined
     const legacySource = metaString(item, 'sourceImage')
@@ -598,23 +556,24 @@ export function EditPage() {
       outHeight: metaNumber(item, 'outHeight'),
       references: refCount > 0 ? references.slice() : [],
     }
-    setRegenerating(true)
+    let image: string
     try {
-      const image = orig ? await blobToDataUrl(orig.blob) : legacySource ?? ''
-      const negativePrompt = item.negativePrompt ?? ''
-      const blob = await client.img2img(itemModel, buildRequest(image, item.prompt, negativePrompt, item.seed, s))
-      // Replace in place: same id + timestamp keeps its grid / viewer position.
-      await library.remove(item.id)
-      await saveEdit(blob, origId ?? '', {
-        label: editLabel(item), prompt: item.prompt, negative: negativePrompt,
-        basePrompt: metaString(item, 'basePrompt'), clothedPrompt: metaString(item, 'clothedPrompt'),
-      }, item.seed, s, { id: item.id, createdAt: item.createdAt })
-      toast.success('Regenerated successfully')
+      image = orig ? await blobToDataUrl(await itemBlob(orig)) : legacySource ?? ''
     } catch (e) {
-      toast.error('Regeneration failed', errorMessage(e))
-    } finally {
-      setRegenerating(false)
+      toast.error('Could not load the original', errorMessage(e))
+      return
     }
+    const label = editLabel(item)
+    // Replace in place on success: same id + timestamp keeps its grid / viewer position.
+    enqueueEdit({
+      client, image, seed: item.seed, settings: s,
+      entry: {
+        label, prompt: item.prompt, negative: item.negativePrompt ?? '',
+        basePrompt: metaString(item, 'basePrompt'), clothedPrompt: metaString(item, 'clothedPrompt'),
+      },
+      data: { originalId: origId ?? '', label, preview: orig ? orig.thumbUrl ?? orig.url : image, replaces: item.id },
+      keep: { id: item.id, createdAt: item.createdAt },
+    })
   }
 
   /** Load an edit's prompt and its sampling settings back into the editor. */
@@ -646,7 +605,12 @@ export function EditPage() {
   }
 
   const editAgain = async (item: MediaItem) => {
-    loadNewSource(await blobToDataUrl(item.blob), `${editLabel(item)} (edit)`)
+    try {
+      loadNewSource(await blobToDataUrl(await itemBlob(item)), `${editLabel(item)} (edit)`)
+    } catch (e) {
+      toast.error('Could not load the image', errorMessage(e))
+      return
+    }
     setViewerIndex(null)
     toast.info('Result loaded as a new source image')
   }
@@ -657,6 +621,65 @@ export function EditPage() {
     setViewerIndex((idx) => (idx == null || viewItems.length <= 1 ? null : Math.min(idx, viewItems.length - 2)))
     toast.info('Image deleted')
   }
+
+  /** Clear the results area: delete the edits shown and drop failed placeholders. */
+  const clearResults = async () => {
+    const failed = pendingJobs.filter((j) => j.state === 'failed')
+    if (!viewItems.length && !failed.length) return
+    if (viewItems.length && !confirm(`Delete the ${viewItems.length} edit(s) shown in the results?`)) return
+    for (const j of failed) jobs.remove(j.id)
+    await library.removeMany(viewItems.map((i) => i.id))
+    setSelection(new Set())
+    setViewerIndex(null)
+  }
+
+  /** Pick a file as a new (unsaved) source image. */
+  const pickNewSource = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      void blobToDataUrl(file).then((url) => loadNewSource(url, file.name.replace(/\.[^.]+$/, '')))
+    }
+    input.click()
+  }
+
+  /* ----------------------------------------------------- shortcuts / palette */
+  const busy = ahead > 0
+  const canRun = !!source && entries.length > 0 && !preparing
+  usePrimaryAction({ label: busy ? 'Queue edit' : 'Edit', run: () => void runEdit(), disabled: !canRun })
+  useCommands([
+    {
+      id: 'edit.compare',
+      label: viewerIndex != null && compareMode !== 'edit' ? 'Exit compare' : 'Compare edit with original',
+      group: 'Edit',
+      shortcut: 'C',
+      keywords: 'a/b split slider side by side before after original',
+      disabled: !viewItems.length,
+      run: () => {
+        if (viewerIndex == null) { setViewerIndex(0); setCompareMode('split'); return }
+        setCompareMode((m) => (m === 'edit' ? 'split' : 'edit'))
+      },
+    },
+    {
+      id: 'edit.clearResults',
+      label: 'Clear results (delete shown edits)',
+      group: 'Edit',
+      keywords: 'delete remove results edits',
+      disabled: !viewItems.length && !pendingJobs.some((j) => j.state === 'failed'),
+      run: () => void clearResults(),
+    },
+    { id: 'edit.newSource', label: 'New source image…', group: 'Edit', keywords: 'open upload load image source', run: pickNewSource },
+    {
+      id: 'edit.cancelQueued',
+      label: `Cancel queued edits${queuedCount ? ` (${queuedCount})` : ''}`,
+      group: 'Edit',
+      disabled: !queuedCount,
+      run: () => jobs.cancelQueued({ page: 'edit' }),
+    },
+  ])
 
   /* ---------------------------------------------------------------- render */
   const selectedCount = Object.values(selected).reduce((n, s) => n + s.size, 0)
@@ -689,7 +712,15 @@ export function EditPage() {
 
         <div className="my-4 h-px bg-line" />
 
-        <Section title="Instruction" action={<IconButton onClick={resetSelections} title="Clear prompt and selections"><RotateCcw size={14} /></IconButton>}>
+        <Section
+          title="Instruction"
+          action={
+            <div className="flex items-center gap-1">
+              <EnhancePrompt kind="edit" value={custom} onChange={setCustom} />
+              <IconButton onClick={resetSelections} title="Clear prompt and selections"><RotateCcw size={14} /></IconButton>
+            </div>
+          }
+        >
           <div className="flex items-center gap-3">
             <Switch checked={composeMode} onChange={setComposeMode} label="Compose mode" />
             <span className="text-[11px] text-ink-faint">{composeMode ? 'Combine selections into one prompt' : 'Each selection = separate image'}</span>
@@ -904,13 +935,18 @@ export function EditPage() {
         </Section>
 
         <div className="sticky bottom-0 -mx-5 mt-5 border-t border-line bg-panel/95 px-5 py-4 backdrop-blur">
-          {running ? (
-            <Button variant="danger" size="lg" className="w-full" icon={<X size={16} />} onClick={cancel}>
-              {stopping ? 'Stopping after this edit… (click to abort now)' : 'Cancel'}
-            </Button>
-          ) : (
-            <Button variant="primary" size="lg" className="w-full" icon={<Wand2 size={16} />} onClick={runEdit} disabled={!source || !entries.length}>
-              Proceed{entries.length > 1 ? ` (${entries.length} images)` : ''}
+          <Button
+            variant="primary" size="lg" className="w-full" icon={<Wand2 size={16} />}
+            onClick={() => void runEdit()} disabled={!canRun} loading={preparing}
+            title={`${MOD_KEY}+Enter`}
+          >
+            {busy
+              ? `Queue${entries.length > 1 ? ` ${entries.length} edits` : ''} (${ahead} ahead)`
+              : `Proceed${entries.length > 1 ? ` (${entries.length} images)` : ''}`}
+          </Button>
+          {queuedCount > 0 && (
+            <Button variant="ghost" size="sm" className="mt-2 w-full" icon={<X size={13} />} onClick={() => jobs.cancelQueued({ page: 'edit' })}>
+              Cancel {queuedCount} queued edit(s)
             </Button>
           )}
         </div>
@@ -955,7 +991,9 @@ export function EditPage() {
       {/* ------------------------------------------------------- results */}
       <div className="scroll-area flex-1 p-5">
         <div className="mx-auto flex max-w-6xl flex-col gap-4">
-          <BatchProgress running={running} batch={batch} poll={() => client.img2imgProgress()} />
+          {batches.map(([group, list]) => (
+            <BatchProgress key={group} group={group} batch={list} onDismiss={() => dismissBatch(group)} />
+          ))}
 
           <div className="flex items-center gap-3">
             <h3 className="text-sm font-semibold text-ink">
@@ -1001,6 +1039,12 @@ export function EditPage() {
             </Panel>
           )}
 
+          {pendingJobs.length > 0 && (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+              {pendingJobs.map((j) => <PendingEditTile key={j.id} job={j} />)}
+            </div>
+          )}
+
           {viewItems.length ? (
             <ArtifactGrid
               items={viewItems}
@@ -1010,7 +1054,7 @@ export function EditPage() {
               onOpen={(item) => setViewerIndex(viewItems.findIndex((i) => i.id === item.id))}
               onDelete={(item) => void deleteEdit(item)}
             />
-          ) : (
+          ) : !pendingJobs.length && (
             <EmptyState
               icon={<Images size={22} />}
               title={query ? 'No edits match your search' : originals.length || source ? 'No edits yet' : 'No images yet'}
@@ -1026,9 +1070,9 @@ export function EditPage() {
         onIndex={setViewerIndex}
         onClose={() => setViewerIndex(null)}
         originalUrl={originalUrl}
-        regenerating={regenerating}
-        regenPercent={regenProgress.percent}
-        busy={running}
+        mode={compareMode}
+        onMode={setCompareMode}
+        regenJob={regenJob}
         onRegenerate={(item) => void regenerate(item)}
         onReuse={reusePrompt}
         onEditAgain={(item) => void editAgain(item)}

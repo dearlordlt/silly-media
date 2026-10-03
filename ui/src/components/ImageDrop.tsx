@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { DragEvent } from 'react'
 import { clsx } from 'clsx'
-import { ClipboardPaste, UploadCloud, X } from 'lucide-react'
-import { fileToDataUrl } from '../lib/media'
+import { ClipboardPaste, ImagePlus, UploadCloud, X } from 'lucide-react'
+import { blobToDataUrl, fileToDataUrl } from '../lib/media'
+import { ITEM_DRAG_MIME, droppedItem, isItemDrag } from '../lib/drag'
+import { itemBlob } from '../lib/library'
+import { errorMessage, toast } from '../lib/hooks'
 
 /** First image among a clipboard event's items, if any. */
 function imageFromClipboard(dt: DataTransfer | null): File | null {
@@ -70,7 +74,33 @@ function unregisterActive(handler: PasteHandler) {
   if (i >= 0) active.splice(i, 1)
 }
 
-/** Drop zone + click-to-pick for a single image, value is a data URL. */
+/**
+ * Whether a library item is being dragged anywhere in the app, so every drop
+ * zone can hint that it accepts it before the pointer reaches it.
+ */
+let itemDragActive = false
+const dragListeners = new Set<() => void>()
+let dragListening = false
+
+function setItemDragActive(v: boolean) {
+  if (itemDragActive === v) return
+  itemDragActive = v
+  for (const l of dragListeners) l()
+}
+
+function subscribeItemDrag(l: () => void): () => void {
+  if (!dragListening) {
+    dragListening = true
+    window.addEventListener('dragstart', (e) => setItemDragActive(!!e.dataTransfer?.types.includes(ITEM_DRAG_MIME)))
+    window.addEventListener('dragend', () => setItemDragActive(false))
+    window.addEventListener('drop', () => setItemDragActive(false))
+  }
+  dragListeners.add(l)
+  return () => { dragListeners.delete(l) }
+}
+
+/** Drop zone + click-to-pick for a single image, value is a data URL.
+ *  Accepts files, pasted images, and library items dragged from a gallery. */
 export function ImageDrop({ value, onChange, className, label = 'Drop an image or click to choose', compact }: {
   value: string | null
   onChange: (dataUrl: string | null) => void
@@ -78,14 +108,27 @@ export function ImageDrop({ value, onChange, className, label = 'Drop an image o
   label?: string
   compact?: boolean
 }) {
-  const [over, setOver] = useState(false)
+  const [over, setOver] = useState<'file' | 'item' | null>(null)
   const [hover, setHover] = useState(false)
   const [focused, setFocused] = useState(false)
+  const dragging = useSyncExternalStore(subscribeItemDrag, () => itemDragActive)
 
   const pick = useCallback((file: File | undefined | null) => {
     if (!file || !file.type.startsWith('image/')) return
     void fileToDataUrl(file).then(onChange)
   }, [onChange])
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault()
+    setOver(null)
+    const item = droppedItem(e)
+    if (item) {
+      if (item.kind !== 'image') { toast.info('Only images can be dropped here'); return }
+      void itemBlob(item).then(blobToDataUrl).then(onChange, (err: unknown) => toast.error('Could not load the image', errorMessage(err)))
+      return
+    }
+    pick(e.dataTransfer.files[0])
+  }
 
   // Stable handler that always calls the latest `pick`.
   const pickRef = useRef(pick)
@@ -100,7 +143,7 @@ export function ImageDrop({ value, onChange, className, label = 'Drop an image o
     return registerActive(handler)
   }, [hover, focused, handler])
 
-  const highlighted = over || hover || focused
+  const highlighted = over != null || hover || focused
 
   const openPicker = useCallback(() => {
     const input = document.createElement('input')
@@ -116,13 +159,21 @@ export function ImageDrop({ value, onChange, className, label = 'Drop an image o
       role="button"
       className={clsx(
         'group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed transition-colors focus:outline-none',
-        highlighted ? 'border-accent bg-accent/10' : 'border-line hover:border-line-strong',
+        highlighted ? 'border-accent bg-accent/10' : dragging ? 'border-accent/60 bg-accent/5' : 'border-line hover:border-line-strong',
         compact ? 'min-h-24' : 'min-h-40',
         className,
       )}
-      onDragOver={(e) => { e.preventDefault(); setOver(true) }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files[0]) }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setOver(isItemDrag(e) ? 'item' : 'file')
+      }}
+      onDragLeave={(e) => {
+        // Moving between child elements fires dragleave on the zone too.
+        if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return
+        setOver(null)
+      }}
+      onDrop={onDrop}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onFocus={() => setFocused(true)}
@@ -132,9 +183,16 @@ export function ImageDrop({ value, onChange, className, label = 'Drop an image o
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker() }
       }}
     >
+      {over === 'item' && (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-accent/20 backdrop-blur-[1px]">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-black/70 px-2.5 py-1 text-[11.5px] text-white">
+            <ImagePlus size={13} /> {value ? 'Replace with this image' : 'Use this image'}
+          </span>
+        </div>
+      )}
       {value ? (
         <>
-          <img src={value} alt="" className="max-h-72 w-full object-contain" />
+          <img src={value} alt="" draggable={false} className="max-h-72 w-full object-contain" />
           <button
             className="absolute right-2 top-2 rounded-lg bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
             onClick={(e) => { e.stopPropagation(); onChange(null) }}
@@ -145,7 +203,7 @@ export function ImageDrop({ value, onChange, className, label = 'Drop an image o
       ) : (
         <div className="flex flex-col items-center gap-2 p-6 text-center text-ink-faint">
           <UploadCloud size={compact ? 18 : 26} />
-          <span className="text-xs">{label}</span>
+          <span className="text-xs">{dragging ? 'Drop the image here' : label}</span>
           <span className="inline-flex items-center gap-1 text-[10.5px] text-ink-faint/80">
             <ClipboardPaste size={11} /> or paste with Ctrl/⌘+V
           </span>

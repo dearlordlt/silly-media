@@ -3,6 +3,9 @@
  * follow-up questions about the same image. Each thread is saved to the local
  * library (source "vision") so it can be re-opened later.
  *
+ * Questions run on the app-wide GPU queue; the page renders the job it is
+ * viewing (pending question, answer) so leaving and returning keeps it.
+ *
  * Other pages hand an image over via `handOffImage('vision', blob)` (lib/handoff);
  * it is consumed on mount and analyzed straight away with the full-description
  * preset (the legacy gallery "Vision" button behaviour).
@@ -10,11 +13,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Copy, Eye, MessageSquarePlus, RotateCcw, Send, Sparkles, Trash2 } from 'lucide-react'
+import type { SillyClient } from '../../lib/api'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
-import { useLibrary, library } from '../../lib/library'
+import { itemBlob, useLibrary, library } from '../../lib/library'
 import type { MediaItem } from '../../lib/library'
 import { blobToDataUrl, stripDataUrl } from '../../lib/media'
 import { useApp } from '../../lib/store'
+import { jobs, useJob, usePageJobs } from '../../lib/jobs'
+import type { JobContext } from '../../lib/jobs'
+import { useCommands, usePrimaryAction } from '../../lib/commands'
+import { JobStrip } from '../../components/Progress'
 import {
   Button,
   Chip,
@@ -25,7 +33,6 @@ import {
   Panel,
   Section,
   Slider,
-  Spinner,
   StatusDot,
   Textarea,
 } from '../../components/ui/primitives'
@@ -114,21 +121,102 @@ function threadMarkdown(turns: Turn[]): string {
   return turns.map((t) => `**Q:** ${t.query}\n\n${t.response}`).join('\n\n---\n\n')
 }
 
+/** Job payload: the question being asked, and (once answered) the resulting thread. */
+interface VisionJobData {
+  image: string
+  question: string
+  prevItemId: string | null
+  prevTurns: Turn[]
+  turns?: Turn[]
+  itemId?: string | null
+}
+
+function isVisionData(v: unknown): v is VisionJobData {
+  return typeof v === 'object' && v !== null
+    && 'image' in v && typeof v.image === 'string'
+    && 'question' in v && typeof v.question === 'string'
+    && 'prevTurns' in v && Array.isArray(v.prevTurns)
+}
+
+type VisionBody = Parameters<SillyClient['vision']>[0]
+
+/** Self-contained queue job: ask, then save/extend the thread's library item. */
+async function runVision(ctx: JobContext, client: SillyClient, body: VisionBody, data: VisionJobData): Promise<void> {
+  ctx.report({ message: 'Analyzing image…' })
+  let res
+  try {
+    res = await client.vision(body, ctx.signal)
+  } catch (e) {
+    if (!ctx.signal.aborted) toast.error(errorMessage(e))
+    throw e
+  }
+  const turns = [...data.prevTurns, { query: data.question, response: res.response, model: res.model }]
+  let itemId = data.prevItemId
+  try {
+    if (itemId) {
+      await library.update(itemId, { meta: threadMeta(turns) })
+    } else {
+      const blob = await fetch(data.image).then((r) => r.blob())
+      const item = await library.add({
+        kind: 'image',
+        source: 'vision',
+        blob,
+        name: `vision-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`,
+        prompt: data.question,
+        model: res.model,
+        meta: threadMeta(turns),
+      })
+      itemId = item.id
+    }
+    ctx.addItem(itemId)
+  } catch {
+    toast.info('Analysis not saved to library')
+  }
+  ctx.setData({ ...data, turns, itemId } satisfies VisionJobData)
+}
+
+/** What the results pane shows: a queued/answered job, or a re-opened saved thread. */
+type View = { kind: 'job'; jobId: string } | { kind: 'thread'; thread: Thread }
+
 export function VisionPage() {
   const client = useClient()
   const confirmDeletes = useApp((s) => s.confirmDeletes)
 
-  const [image, setImage] = useState<string | null>(null)
+  // Returning to the page: show the newest vision job again.
+  const [view, setView] = useState<View | null>(() => {
+    const last = jobs.all().find((j) => j.page === 'vision')
+    return last ? { kind: 'job', jobId: last.id } : null
+  })
+  const [image, setImage] = useState<string | null>(() => {
+    const last = jobs.all().find((j) => j.page === 'vision')
+    return last && isVisionData(last.data) ? last.data.image : null
+  })
   const [query, setQuery] = useState(FULL_DESCRIPTION)
   const [maxTokens, setMaxTokens] = useState('')
   const [temperature, setTemperature] = useState(0.7)
-  const [busy, setBusy] = useState(false)
-  /** The question currently being answered (rendered as a pending turn). */
-  const [pending, setPending] = useState<string | null>(null)
-  const [thread, setThread] = useState<Thread | null>(null)
   const [followUp, setFollowUp] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
+
+  const viewJob = useJob(view?.kind === 'job' ? view.jobId : null)
+  const viewData = viewJob && isVisionData(viewJob.data) ? viewJob.data : null
+  const viewActive = viewJob?.state === 'queued' || viewJob?.state === 'running'
+  /** The question currently being answered (rendered as a pending turn). */
+  const pending = viewActive && viewData ? viewData.question : null
+  const thread: Thread | null = useMemo(() => {
+    if (view?.kind === 'thread') return view.thread
+    if (!viewData) return null
+    const turns = viewData.turns ?? viewData.prevTurns
+    const itemId = viewData.itemId !== undefined ? viewData.itemId : viewData.prevItemId
+    return turns.length || viewActive ? { itemId, image: viewData.image, turns } : null
+  }, [view, viewData, viewActive])
+  const busy = pending != null
+
+  const pageJobs = usePageJobs('vision')
+  const otherActive = useMemo(
+    () => pageJobs.filter((j) => (j.state === 'queued' || j.state === 'running') && j.id !== viewJob?.id).reverse(),
+    [pageJobs, viewJob?.id],
+  )
 
   const images = useLibrary('image')
 
@@ -151,59 +239,35 @@ export function VisionPage() {
     threadEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [turnCount, pending])
 
-  const ask = async (img: string, question: string, previous: Thread | null) => {
-    setBusy(true)
-    setPending(question)
-    setCopied(null)
-    try {
-      const parsedTokens = maxTokens.trim() ? Number(maxTokens) : undefined
-      const res = await client.vision({
-        image: stripDataUrl(img),
-        query: previous?.turns.length ? followUpQuery(previous.turns, question) : question,
-        max_tokens: parsedTokens !== undefined && Number.isFinite(parsedTokens) ? parsedTokens : undefined,
-        temperature,
-      })
-      const turns = [...(previous?.turns ?? []), { query: question, response: res.response, model: res.model }]
-      let itemId = previous?.itemId ?? null
-      try {
-        if (itemId) {
-          await library.update(itemId, { meta: threadMeta(turns) })
-        } else {
-          const blob = await fetch(img).then((r) => r.blob())
-          const item = await library.add({
-            kind: 'image',
-            source: 'vision',
-            blob,
-            name: `vision-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`,
-            prompt: question,
-            model: res.model,
-            meta: threadMeta(turns),
-          })
-          itemId = item.id
-        }
-      } catch {
-        toast.info('Analysis not saved to library')
-      }
-      setThread({ itemId, image: img, turns })
-    } catch (e) {
-      toast.error(errorMessage(e))
-    } finally {
-      setPending(null)
-      setBusy(false)
+  const ask = (img: string, question: string, previous: Thread | null) => {
+    const parsedTokens = maxTokens.trim() ? Number(maxTokens) : undefined
+    const body: VisionBody = {
+      image: stripDataUrl(img),
+      query: previous?.turns.length ? followUpQuery(previous.turns, question) : question,
+      max_tokens: parsedTokens !== undefined && Number.isFinite(parsedTokens) ? parsedTokens : undefined,
+      temperature,
     }
+    const data: VisionJobData = { image: img, question, prevItemId: previous?.itemId ?? null, prevTurns: previous?.turns ?? [] }
+    const jobId = jobs.enqueue({
+      page: 'vision',
+      label: `${previous?.turns.length ? 'Follow-up' : 'Vision'}: ${question.slice(0, 40)}`,
+      data,
+      run: (ctx) => runVision(ctx, client, body, data),
+    })
+    setView({ kind: 'job', jobId })
+    setCopied(null)
   }
 
   /* hand-off from other pages: consume once, analyze immediately */
   useHandoffImage('vision', (handoff) => {
     setImage(handoff)
-    setThread(null)
     setQuery(FULL_DESCRIPTION)
-    void ask(handoff, FULL_DESCRIPTION, null)
+    ask(handoff, FULL_DESCRIPTION, null)
   })
 
   const onImageChange = (next: string | null) => {
     setImage(next)
-    if (next !== thread?.image) setThread(null)
+    if (next !== thread?.image) setView(null)
   }
 
   const analyze = () => {
@@ -215,22 +279,22 @@ export function VisionPage() {
       toast.error('Enter a query')
       return
     }
-    void ask(image, query.trim(), null)
+    ask(image, query.trim(), null)
   }
 
   const sendFollowUp = () => {
     const q = followUp.trim()
     if (!thread || !q || busy) return
     setFollowUp('')
-    void ask(thread.image, q, thread)
+    ask(thread.image, q, thread)
   }
 
   const reopen = async (item: MediaItem, turns: Turn[]) => {
     try {
-      const dataUrl = await blobToDataUrl(item.blob)
+      const dataUrl = await blobToDataUrl(await itemBlob(item))
       setImage(dataUrl)
       setQuery(turns[0]?.query ?? '')
-      setThread({ itemId: item.id, image: dataUrl, turns })
+      setView({ kind: 'thread', thread: { itemId: item.id, image: dataUrl, turns } })
       setCopied(null)
     } catch (e) {
       toast.error(errorMessage(e))
@@ -251,15 +315,29 @@ export function VisionPage() {
     if (confirmDeletes && !window.confirm('Delete this analysis?')) return
     try {
       await library.remove(item.id)
-      if (thread?.itemId === item.id) setThread(null)
+      if (thread?.itemId === item.id) setView(null)
       toast.success('Deleted')
     } catch (e) {
       toast.error(errorMessage(e))
     }
   }
 
-  const canAnalyze = Boolean(image) && query.trim().length > 0 && !busy
-  const shownImage = thread?.image ?? (pending ? image : null)
+  const canAnalyze = Boolean(image) && query.trim().length > 0
+  const canFollowUp = Boolean(thread) && !busy && followUp.trim().length > 0
+  const shownImage = thread?.image ?? null
+  const lastAnswer = thread?.turns[thread.turns.length - 1]?.response
+
+  usePrimaryAction(canFollowUp
+    ? { label: 'Ask follow-up', run: sendFollowUp }
+    : { label: thread ? 'New analysis' : 'Analyze', run: analyze, disabled: !canAnalyze })
+
+  useCommands([
+    { id: 'vision.new', label: 'Start over on this image', group: 'Vision', keywords: 'clear reset thread', disabled: !thread || busy, run: () => { if (thread) { setView(null); setImage(thread.image) } } },
+    { id: 'vision.copy-answer', label: 'Copy last answer', group: 'Vision', disabled: !lastAnswer, run: () => { if (lastAnswer) void copyText(lastAnswer) } },
+    { id: 'vision.copy-thread', label: 'Copy whole thread', group: 'Vision', disabled: !thread || thread.turns.length < 2, run: () => { if (thread) void copyText(threadMarkdown(thread.turns)) } },
+    { id: 'vision.query.full', label: 'Use full-description query', group: 'Vision', run: () => setQuery(FULL_DESCRIPTION) },
+    { id: 'vision.cancel', label: 'Cancel current vision question', group: 'Vision', disabled: !viewActive, run: () => { if (viewJob) jobs.cancel(viewJob.id) } },
+  ])
 
   return (
     <div className="flex h-full">
@@ -274,9 +352,6 @@ export function VisionPage() {
             <Textarea
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (canAnalyze) analyze() }
-              }}
               rows={query === FULL_DESCRIPTION ? 8 : 4}
               placeholder="What should the model look for?"
               className="text-[12.5px]"
@@ -341,7 +416,7 @@ export function VisionPage() {
             )}
           </Section>
 
-          <Button variant="primary" icon={<Sparkles size={15} />} loading={busy} disabled={!canAnalyze} onClick={analyze}>
+          <Button variant="primary" icon={<Sparkles size={15} />} disabled={!canAnalyze} onClick={analyze}>
             {thread ? 'New analysis' : 'Analyze'}
           </Button>
         </div>
@@ -350,6 +425,11 @@ export function VisionPage() {
       {/* results */}
       <div className="flex-1 scroll-area p-5">
         <div className="flex flex-col gap-5">
+          {otherActive.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {otherActive.map((j) => <JobStrip key={j.id} job={j} />)}
+            </div>
+          )}
           {shownImage ? (
             <div className="flex items-start gap-4">
               <Panel className="sticky top-0 w-[320px] shrink-0 overflow-hidden">
@@ -377,7 +457,7 @@ export function VisionPage() {
                       <IconButton
                         title="Start over on this image"
                         disabled={busy}
-                        onClick={() => { setThread(null); setImage(thread.image) }}
+                        onClick={() => { setView(null); setImage(thread.image) }}
                       >
                         <RotateCcw size={14} />
                       </IconButton>
@@ -404,13 +484,11 @@ export function VisionPage() {
                     </div>
                   ))}
                   {pending && (
-                    <div className="px-4 py-3">
-                      <div className="mb-1.5 line-clamp-2 text-[12px] text-ink-dim" title={pending}>
+                    <div className="flex flex-col gap-2 px-4 py-3">
+                      <div className="line-clamp-2 text-[12px] text-ink-dim" title={pending}>
                         <span className="font-semibold text-accent">{turnCount ? 'Follow-up' : 'Q'}:</span> {pending}
                       </div>
-                      <div className="flex items-center gap-2 text-[12.5px] text-ink-faint">
-                        <Spinner className="h-3.5 w-3.5" /> Analyzing image…
-                      </div>
+                      <JobStrip job={viewJob} label="Analyzing image" />
                     </div>
                   )}
                   <div ref={threadEndRef} />

@@ -1,57 +1,55 @@
-import { useEffect, useRef, useState } from 'react'
-import { Clock, Cpu, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Clock, Cpu, Hourglass, Loader2, X } from 'lucide-react'
 import { ProgressBar } from './ui/primitives'
-import { errorMessage } from '../lib/hooks'
+import { jobs, useJobs } from '../lib/jobs'
+import type { Job } from '../lib/jobs'
 
-export interface GenProgressState {
-  active: boolean
-  step: number
-  totalSteps: number
-  percent: number
-  elapsed: number
-}
-
-/** Polls a synchronous generation progress endpoint (image / pixelart / sprite / img2img). */
-export function useProgressPoll(poll: () => Promise<{ active: boolean; step?: number; total_steps?: number; percent?: number; elapsed?: number }>, enabled: boolean): GenProgressState {
-  const [state, setState] = useState<GenProgressState>({ active: false, step: 0, totalSteps: 0, percent: 0, elapsed: 0 })
-  const pollRef = useRef(poll)
-  pollRef.current = poll
-
+/** Seconds since `since`, ticking every 500ms while `active`. */
+export function useElapsed(since: number | undefined, active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (!enabled) { setState({ active: false, step: 0, totalSteps: 0, percent: 0, elapsed: 0 }); return }
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout>
-    // Chain polls (never overlap) so slow responses can't arrive out of order.
-    const tick = async () => {
-      try {
-        const p = await pollRef.current()
-        if (!cancelled) setState({ active: !!p.active, step: p.step ?? 0, totalSteps: p.total_steps ?? 0, percent: p.percent ?? 0, elapsed: p.elapsed ?? 0 })
-      } catch { /* ignore transient poll errors */ }
-      if (!cancelled) timer = setTimeout(tick, 250)
-    }
-    void tick()
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [enabled])
-
-  return state
+    if (!active) return
+    const t = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(t)
+  }, [active])
+  return since ? Math.max(0, (active ? now : Date.now()) - since) / 1000 : 0
 }
 
-/** Inline progress strip for a running synchronous generation. */
-export function ProgressStrip({ state, label = 'Generating' }: { state: GenProgressState; label?: string }) {
-  if (!state.active) return null
+/** 1-based position of a queued GPU job, or null when not queued. */
+export function useQueuePosition(job: Job | undefined): number | null {
+  const all = useJobs()
+  if (!job || job.state !== 'queued' || job.lane !== 'gpu') return null
+  const queued = all.filter((j) => j.lane === 'gpu' && j.state === 'queued').reverse()
+  return queued.findIndex((j) => j.id === job.id) + 1
+}
+
+/** Status strip for a queued or running job (renders nothing once finished). */
+export function JobStrip({ job, label, onCancel }: { job: Job | undefined; label?: string; onCancel?: () => void }) {
+  const running = job?.state === 'running'
+  const elapsed = useElapsed(job?.startedAt, running)
+  const position = useQueuePosition(job)
+  if (!job || (job.state !== 'queued' && job.state !== 'running')) return null
+  const p = job.progress
+  const pct = p.fraction != null ? Math.round(p.fraction * 100) : null
+  const cancel = onCancel ?? (() => jobs.cancel(job.id))
   return (
     <div className="flex items-center gap-3 rounded-xl border border-accent/30 bg-accent/5 px-3 py-2">
-      <Loader2 size={15} className="animate-spin text-accent" />
+      {running ? <Loader2 size={15} className="shrink-0 animate-spin text-accent" /> : <Hourglass size={15} className="shrink-0 text-ink-faint" />}
       <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center justify-between text-[11.5px]">
-          <span className="font-medium text-ink">{label}</span>
-          <span className="text-ink-dim">
-            {state.step}/{state.totalSteps} · {Math.round(state.percent)}%
+        <div className="mb-1 flex items-center justify-between gap-2 text-[11.5px]">
+          <span className="truncate font-medium text-ink">{label ?? job.label}</span>
+          <span className="shrink-0 text-ink-dim">
+            {running
+              ? [p.message, p.step != null && p.total ? `${p.step}/${p.total}` : null, pct != null ? `${pct}%` : null].filter(Boolean).join(' · ') || 'Working…'
+              : position ? `Queued · #${position}` : 'Queued'}
           </span>
         </div>
-        <ProgressBar value={state.percent} />
+        <ProgressBar value={running ? pct ?? 0 : 0} />
       </div>
-      <span className="flex items-center gap-1 text-[11px] text-ink-faint"><Clock size={11} /> {state.elapsed.toFixed(1)}s</span>
+      {running && <span className="flex shrink-0 items-center gap-1 text-[11px] text-ink-faint"><Clock size={11} /> {elapsed.toFixed(0)}s</span>}
+      <button onClick={cancel} title={running ? 'Cancel (stops waiting; the GPU may finish the current step)' : 'Remove from queue'} className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-ink-faint hover:bg-panel-2 hover:text-ink">
+        <X size={13} />
+      </button>
     </div>
   )
 }
@@ -64,13 +62,4 @@ export function ModelBadge({ model, loaded }: { model: string; loaded?: boolean 
       {model}
     </span>
   )
-}
-
-/** Run an async generation with a friendly error toast. */
-export async function runGeneration<T>(fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
-  try {
-    return { ok: true, value: await fn() }
-  } catch (e) {
-    return { ok: false, error: errorMessage(e) }
-  }
 }

@@ -1,5 +1,6 @@
-import { createRootRoute, createRoute, createRouter, redirect } from '@tanstack/react-router'
+import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { AppShell } from './components/layout/AppShell'
+import { HomePage } from './features/home/HomePage'
 import { StudioPage } from './features/studio/StudioPage'
 import { EditPage } from './features/edit/EditPage'
 import { AssetsPage } from './features/assets/AssetsPage'
@@ -14,11 +15,20 @@ import { SystemPage } from './features/system/SystemPage'
 
 const rootRoute = createRootRoute({ component: () => <AppShell />, notFoundComponent: () => <NotFound /> })
 
-const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/',
-  beforeLoad: () => { throw redirect({ to: '/studio' }) },
-})
+const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: HomePage })
+
+/** Deep-link params of the library: prefilled search and/or an item to open in the viewer. */
+export interface LibrarySearch {
+  q?: string
+  item?: string
+}
+
+function validateLibrarySearch(search: Record<string, unknown>): LibrarySearch {
+  const out: LibrarySearch = {}
+  if (typeof search.q === 'string' && search.q) out.q = search.q
+  if (typeof search.item === 'string' && search.item) out.item = search.item
+  return out
+}
 
 const studioRoute = createRoute({ getParentRoute: () => rootRoute, path: '/studio', component: StudioPage })
 const editRoute = createRoute({ getParentRoute: () => rootRoute, path: '/edit', component: EditPage })
@@ -29,7 +39,7 @@ const videoRoute = createRoute({ getParentRoute: () => rootRoute, path: '/video'
 const threeDRoute = createRoute({ getParentRoute: () => rootRoute, path: '/3d', component: ThreeDPage })
 const visionRoute = createRoute({ getParentRoute: () => rootRoute, path: '/vision', component: VisionPage })
 const chatRoute = createRoute({ getParentRoute: () => rootRoute, path: '/chat', component: ChatPage })
-const libraryRoute = createRoute({ getParentRoute: () => rootRoute, path: '/library', component: LibraryPage })
+const libraryRoute = createRoute({ getParentRoute: () => rootRoute, path: '/library', component: LibraryPage, validateSearch: validateLibrarySearch })
 const systemRoute = createRoute({ getParentRoute: () => rootRoute, path: '/system', component: SystemPage })
 
 const routeTree = rootRoute.addChildren([

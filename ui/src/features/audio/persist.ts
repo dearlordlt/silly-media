@@ -1,26 +1,17 @@
-/** localStorage-backed state for TTS form settings (legacy `tts_settings` parity). */
+/** Per-profile persisted TTS form settings (legacy `tts_settings` parity), stored via `kv`. */
 import { useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
+import { kv } from '../../lib/kv'
 
 const PREFIX = 'silly.audio.'
 
 export function usePersisted<T>(key: string, initial: T, isValid: (v: unknown) => v is T): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(PREFIX + key)
-      if (raw === null) return initial
-      const parsed: unknown = JSON.parse(raw)
-      return isValid(parsed) ? parsed : initial
-    } catch {
-      return initial
-    }
+    const parsed = kv.getJson<unknown>(PREFIX + key, initial)
+    return isValid(parsed) ? parsed : initial
   })
   useEffect(() => {
-    try {
-      localStorage.setItem(PREFIX + key, JSON.stringify(value))
-    } catch {
-      /* quota / private mode: persistence is best-effort */
-    }
+    kv.setJson(PREFIX + key, value)
   }, [key, value])
   return [value, setValue]
 }

@@ -1,9 +1,9 @@
 /** Legacy gallery modal: carousel with prev/next, thumbnail strip, highlighted prompt, info and actions. */
 import { useEffect } from 'react'
 import { clsx } from 'clsx'
-import { ChevronLeft, ChevronRight, Download, Eye, RotateCcw, Trash2, Wand2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Dice5, Download, Eye, Rows3, RotateCcw, Trash2, Wand2 } from 'lucide-react'
 import type { MediaItem } from '../../lib/library'
-import { downloadBlob } from '../../lib/media'
+import { downloadItem } from '../../lib/library'
 import { Modal } from '../../components/ui/Modal'
 import { Button, IconButton } from '../../components/ui/primitives'
 import { PromptView } from './StudioDialogs'
@@ -11,13 +11,17 @@ import { readStudioMeta, studioFilename } from './meta'
 
 const THUMB_WINDOW = 21
 
-export function StudioViewer({ items, index, onIndex, onClose, onReuse, onVision, onEdit, onDelete, highlights }: {
+export function StudioViewer({ items, index, onIndex, onClose, onReuse, onVary, onSweep, onVision, onEdit, onDelete, highlights }: {
   items: MediaItem[]
   /** null = closed. */
   index: number | null
   onIndex: (i: number) => void
   onClose: () => void
   onReuse: (item: MediaItem) => void
+  /** Same settings, new random seed. */
+  onVary: (item: MediaItem) => void
+  /** Seeds base+1…base+count. */
+  onSweep: (item: MediaItem, count: number) => void
   onVision: (item: MediaItem) => void
   onEdit: (item: MediaItem) => void
   onDelete: (item: MediaItem) => void
@@ -64,8 +68,11 @@ export function StudioViewer({ items, index, onIndex, onClose, onReuse, onVision
           <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => onDelete(item)}>Delete</Button>
           <Button variant="secondary" size="sm" icon={<Eye size={14} />} onClick={() => onVision(item)}>Vision</Button>
           <Button variant="secondary" size="sm" icon={<Wand2 size={14} />} onClick={() => onEdit(item)}>Edit</Button>
-          <Button variant="secondary" size="sm" icon={<RotateCcw size={14} />} onClick={() => onReuse(item)}>Reuse settings</Button>
-          <Button variant="primary" size="sm" icon={<Download size={14} />} onClick={() => downloadBlob(item.blob, studioFilename(item))}>Download</Button>
+          <Button variant="secondary" size="sm" icon={<RotateCcw size={14} />} onClick={() => onReuse(item)}>Use settings</Button>
+          <Button variant="secondary" size="sm" icon={<Dice5 size={14} />} onClick={() => onVary(item)} title="Same settings, new random seed">Vary</Button>
+          <Button variant="secondary" size="sm" icon={<Rows3 size={14} />} onClick={() => onSweep(item, 4)} title="4 images with seeds base+1…base+4">Sweep ×4</Button>
+          <Button variant="secondary" size="sm" onClick={() => onSweep(item, 8)} title="8 images with seeds base+1…base+8">×8</Button>
+          <Button variant="primary" size="sm" icon={<Download size={14} />} onClick={() => downloadItem(item, studioFilename(item))}>Download</Button>
         </>
       }
     >

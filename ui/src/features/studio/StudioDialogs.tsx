@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { clsx } from 'clsx'
 import { Star, X } from 'lucide-react'
 import type { MediaItem } from '../../lib/library'
+import { itemBlob } from '../../lib/library'
 import { useClient, errorMessage } from '../../lib/hooks'
 import { blobToDataUrl, stripDataUrl } from '../../lib/media'
 import { Modal } from '../../components/ui/Modal'
@@ -236,7 +237,7 @@ export function VisionDialog({ item, onClose, onOpenInVision }: {
     setResult(null)
     void (async () => {
       try {
-        const image = stripDataUrl(await blobToDataUrl(item.blob))
+        const image = stripDataUrl(await blobToDataUrl(await itemBlob(item)))
         const res = await client.vision({ image, query: VISION_PROMPT, temperature: 0.7 }, ctrl.signal)
         setResult({ text: res.response })
       } catch (e) {

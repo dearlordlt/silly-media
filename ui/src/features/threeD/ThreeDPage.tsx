@@ -3,24 +3,31 @@
  * generated reference image) or directly from an uploaded image, then inspect
  * it in an in-page <model-viewer> and browse/load recent server-side models.
  *
- * Goal presets set the mesh knobs, a live phase label (polled from /models)
- * shows which stage the synchronous request is in, and an activity log keeps
- * the request history visible.
+ * Generation runs on the app-wide GPU queue: the page only enqueues jobs and
+ * renders them (live phase label polled from /models, activity log, newest
+ * result in the viewer), so leaving and returning keeps the work visible.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { loadModelViewer } from '../../components/ModelViewer'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { loadModelViewer, renderGlbPoster } from '../../components/ModelViewer'
 import { PresetPicker } from './PresetPicker'
 import { DEFAULT_TIER, DEFAULT_USE_CASE, QUALITY_TIERS, USE_CASES, resolvePreset, styledPrompt } from './presets'
 import type { Subject } from './presets'
 import { Boxes, Download, Eraser, ImagePlus, Loader2, RefreshCw, Sparkles, Upload } from 'lucide-react'
 import type { Model3DRequest, Model3DResult } from '../../lib/types'
+import type { SillyClient } from '../../lib/api'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useModels } from '../../lib/query'
-import { library } from '../../lib/library'
+import { downloadItem, library, useLibrary } from '../../lib/library'
+import type { MediaItem } from '../../lib/library'
 import { downloadUrl, formatBytes, stripDataUrl } from '../../lib/media'
+import { kv } from '../../lib/kv'
+import { jobs, throwIfCancelled, useJobCounts, usePageJobs } from '../../lib/jobs'
+import type { Job, JobContext } from '../../lib/jobs'
+import { useCommands, usePrimaryAction } from '../../lib/commands'
 import { ImageDrop } from '../../components/ImageDrop'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import { useHandoffImage } from '../../lib/handoff'
-import { ModelBadge } from '../../components/Progress'
+import { JobStrip, ModelBadge } from '../../components/Progress'
 import {
   Button, EmptyState, IconButton, Input, Label, Panel, Section, Segmented, Select, Slider, Switch, Textarea,
 } from '../../components/ui/primitives'
@@ -30,14 +37,12 @@ type Mode = 'text' | 'image'
 const PRESET_KEY = 'silly-3d-preset'
 
 function loadPresetChoice(): { useCase: string; tier: number } {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(PRESET_KEY) ?? 'null')
-    if (raw && typeof raw === 'object' && 'useCase' in raw && 'tier' in raw
-      && typeof raw.useCase === 'string' && USE_CASES.some((u) => u.id === raw.useCase)
-      && typeof raw.tier === 'number' && raw.tier >= 0 && raw.tier < QUALITY_TIERS.length) {
-      return { useCase: raw.useCase, tier: raw.tier }
-    }
-  } catch { /* ignore corrupt storage */ }
+  const raw = kv.getJson<unknown>(PRESET_KEY, null)
+  if (raw && typeof raw === 'object' && 'useCase' in raw && 'tier' in raw
+    && typeof raw.useCase === 'string' && USE_CASES.some((u) => u.id === raw.useCase)
+    && typeof raw.tier === 'number' && raw.tier >= 0 && raw.tier < QUALITY_TIERS.length) {
+    return { useCase: raw.useCase, tier: raw.tier }
+  }
   return { useCase: DEFAULT_USE_CASE, tier: DEFAULT_TIER }
 }
 
@@ -47,20 +52,97 @@ const RECENT_LIMIT = 24
 const VIEWER_BG: Record<ViewerBg, string> = { dark: '#0d1117', grey: '#3a3f4b', light: '#e9e9ee' }
 
 // model-viewer loading + JSX typing live in components/ModelViewer.
+/* ------------------------------------------------------------------- jobs */
+
+/** Library fields fixed at enqueue time (the job adds modelId / refUrl). */
+interface SaveSpec {
+  name?: string
+  prompt?: string
+  model?: string
+  seed: number
+  meta: Record<string, unknown>
+}
+
+/** Self-contained 3D job: generate, resolve the server id, render a poster, store in the library. */
+async function runModel3d(ctx: JobContext, client: SillyClient, req: Model3DRequest, save: SaveSpec): Promise<void> {
+  try {
+    ctx.report({ message: 'Starting…' })
+    // Which model is resident tells us the phase of the synchronous request.
+    ctx.poll(async () => {
+      const m = await client.models({ signal: ctx.signal })
+      if (m.model3d.loaded.length) return { message: 'Building 3D mesh + texture…' }
+      return { message: m.image.loaded.length ? 'Generating reference image…' : 'Working…' }
+    }, 2000)
+    const res = await client.model3d(req, ctx.signal)
+    // X-Model-Id / X-Ref-Url are not CORS-exposed, so the newest server entry is authoritative.
+    let modelId = res.id
+    let refPath = res.refUrl
+    try {
+      const latest = (await client.model3dList(1, { signal: ctx.signal })).models[0]
+      if (latest) {
+        modelId = latest.id
+        refPath = latest.ref_url ?? refPath
+      }
+    } catch {
+      /* keep header values */
+    }
+    throwIfCancelled(ctx.signal)
+    ctx.report({ message: 'Rendering preview…' })
+    const objectUrl = URL.createObjectURL(res.blob)
+    const poster = await renderGlbPoster(objectUrl).finally(() => URL.revokeObjectURL(objectUrl))
+    throwIfCancelled(ctx.signal)
+    const item = await library.add({
+      kind: 'model3d',
+      source: '3d',
+      blob: res.blob,
+      name: save.name ?? `Model ${modelId}`,
+      prompt: save.prompt,
+      model: save.model,
+      seed: save.seed,
+      meta: { ...save.meta, modelId, refUrl: refPath },
+      thumb: poster ?? undefined,
+    })
+    ctx.addItem(item.id)
+    toast.success('Model generated', formatBytes(res.blob.size))
+  } catch (e) {
+    if (!ctx.signal.aborted) toast.error('3D generation failed', errorMessage(e))
+    throw e
+  }
+}
+
 /* ------------------------------------------------------------------- page */
 
 interface ShownModel {
+  /** Backend model id. */
   id: string
-  blob: Blob
+  /** URL the viewer loads (library file or backend download). */
+  src: string
   refUrl: string | null
-  objectUrl: string
-  /** Params used for this mesh; absent when loaded from the server list. */
+  size: number
   texture?: boolean
   faces?: number
+  /** Library copy, when the model came from a job. */
+  item?: MediaItem
+  /** When it was put in the viewer (a newer finished job replaces it). */
+  at: number
+}
+
+function shownFromItem(item: MediaItem, client: SillyClient, at: number): ShownModel {
+  const meta = item.meta ?? {}
+  return {
+    id: typeof meta.modelId === 'string' ? meta.modelId : item.id,
+    src: item.url,
+    refUrl: client.media(typeof meta.refUrl === 'string' ? meta.refUrl : null),
+    size: item.size,
+    texture: typeof meta.texture === 'boolean' ? meta.texture : undefined,
+    faces: typeof meta.target_faces === 'number' ? meta.target_faces : undefined,
+    item,
+    at,
+  }
 }
 
 interface LogEntry {
-  id: number
+  key: string
   at: number
   msg: string
   kind?: 'ok' | 'err' | 'warn'
@@ -70,6 +152,27 @@ const LOG_TONE: Record<NonNullable<LogEntry['kind']>, string> = {
   ok: 'text-good',
   err: 'text-bad',
   warn: 'text-warn',
+}
+
+/** Activity lines for a job's lifecycle (derived, so they survive navigation). */
+function jobLog(job: Job, items: MediaItem[]): LogEntry[] {
+  const out: LogEntry[] = [{ key: `${job.id}:q`, at: job.createdAt, msg: `Queued ${job.label}${job.detail ? ` (${job.detail})` : ''}.` }]
+  if (job.startedAt) out.push({ key: `${job.id}:s`, at: job.startedAt, msg: 'Submitting request… (shape + texture usually 1–3 min)' })
+  if (!job.finishedAt) return out
+  const secs = job.startedAt ? Math.round((job.finishedAt - job.startedAt) / 1000) : 0
+  if (job.state === 'done') {
+    const item = items.find((i) => i.id === job.itemIds[0])
+    const modelId = typeof item?.meta?.modelId === 'string' ? item.meta.modelId : null
+    out.push({
+      key: `${job.id}:f`, at: job.finishedAt, kind: 'ok',
+      msg: `✓ Done in ${secs}s${item ? ` — received ${formatBytes(item.size)} GLB${modelId ? ` (${modelId})` : ''}` : ''}.`,
+    })
+  } else if (job.state === 'failed') {
+    out.push({ key: `${job.id}:f`, at: job.finishedAt, kind: 'err', msg: `Request failed: ${job.error ?? 'unknown error'}` })
+  } else if (job.state === 'cancelled') {
+    out.push({ key: `${job.id}:f`, at: job.finishedAt, kind: 'warn', msg: `Cancelled ${job.label}.` })
+  }
+  return out
 }
 
 export function ThreeDPage() {
@@ -100,10 +203,13 @@ export function ThreeDPage() {
   const [targetFaces, setTargetFaces] = useState(initial.faces)
   const [custom, setCustom] = useState(false)
 
-  const [busy, setBusy] = useState(false)
-  const [phase, setPhase] = useState<string | null>(null)
-  const [elapsed, setElapsed] = useState(0)
-  const [shown, setShown] = useState<ShownModel | null>(null)
+  const pageJobs = usePageJobs('3d')
+  const counts = useJobCounts()
+  const modelItems = useLibrary('model3d')
+  const active = useMemo(() => pageJobs.filter((j) => j.state === 'queued' || j.state === 'running').reverse(), [pageJobs])
+  const doneCount = pageJobs.filter((j) => j.state === 'done').length
+
+  const [picked, setPicked] = useState<ShownModel | null>(null)
   const [recent, setRecent] = useState<Model3DResult[]>([])
   const [recentLoading, setRecentLoading] = useState(false)
 
@@ -115,18 +221,21 @@ export function ThreeDPage() {
   const [backend, setBackend] = useState<{ id: string; name: string; loaded: boolean }[]>([])
 
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const logId = useRef(0)
-  const logRef = useRef<HTMLDivElement | null>(null)
+  const [clearedAt, setClearedAt] = useState(0)
+  const [logEl, setLogEl] = useState<HTMLDivElement | null>(null)
   const log = useCallback((msg: string, kind?: LogEntry['kind']) => {
-    logId.current += 1
-    const entry: LogEntry = { id: logId.current, at: Date.now(), msg, kind }
-    setLogs((prev) => [...prev.slice(-199), entry])
+    const at = Date.now()
+    setLogs((prev) => [...prev.slice(-199), { key: `l${at}:${prev.length}`, at, msg, kind }])
   }, [])
 
+  const activity = useMemo(() => [...logs, ...pageJobs.flatMap((j) => jobLog(j, modelItems))]
+    .filter((l) => l.at > clearedAt)
+    .sort((a, b) => a.at - b.at)
+    .slice(-200), [logs, pageJobs, modelItems, clearedAt])
+
   useEffect(() => {
-    const el = logRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [logs])
+    if (logEl) logEl.scrollTop = logEl.scrollHeight
+  }, [activity, logEl])
 
   /* startup: model-viewer element, backend list, health check */
   useEffect(() => {
@@ -150,37 +259,6 @@ export function ThreeDPage() {
     return () => { cancelled = true }
   }, [client, log])
 
-  /* live phase while the synchronous request runs: which model is resident? */
-  useEffect(() => {
-    if (!busy) return
-    const t0 = Date.now()
-    let cancelled = false
-    const tick = async () => {
-      setElapsed(Math.round((Date.now() - t0) / 1000))
-      try {
-        const m = await client.models()
-        if (cancelled) return
-        if (m.model3d.loaded.length) setPhase('Building 3D mesh + texture…')
-        else if (m.image.loaded.length) setPhase('Generating reference image…')
-        else setPhase('Working…')
-      } catch {
-        /* advisory only */
-      }
-    }
-    setPhase('Starting…')
-    void tick()
-    const id = window.setInterval(() => void tick(), 2000)
-    const sec = window.setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000)
-    return () => { cancelled = true; window.clearInterval(id); window.clearInterval(sec); setPhase(null) }
-  }, [busy, client])
-
-  const showModel = useCallback((id: string, blob: Blob, refUrl: string | null, meta?: { texture?: boolean; faces?: number }) => {
-    setShown((prev) => {
-      if (prev) URL.revokeObjectURL(prev.objectUrl)
-      return { id, blob, refUrl, objectUrl: URL.createObjectURL(blob), ...meta }
-    })
-  }, [])
-
   const loadRecent = useCallback(async () => {
     setRecentLoading(true)
     try {
@@ -194,7 +272,20 @@ export function ThreeDPage() {
     }
   }, [client, log])
 
-  useEffect(() => { void loadRecent() }, [loadRecent])
+  // Initial load, and again whenever a job of this page finishes.
+  useEffect(() => { void loadRecent() }, [loadRecent, doneCount])
+
+  /* Viewer: the newest finished job's model, unless something newer was picked by hand. */
+  const latestDone = pageJobs.find((j) => j.state === 'done' && j.itemIds.length > 0)
+  const latestItem = latestDone ? modelItems.find((i) => i.id === latestDone.itemIds[0]) : undefined
+  const latestAt = latestDone?.finishedAt ?? 0
+  const auto = useMemo(() => (latestItem ? shownFromItem(latestItem, client, latestAt) : null), [latestItem, client, latestAt])
+  const shown = picked && (!auto || picked.at >= auto.at) ? picked : auto
+
+  const downloadShown = (m: ShownModel) => {
+    if (m.item) downloadItem(m.item, `model3d-${m.id}.glb`)
+    else downloadUrl(m.src, `model3d-${m.id}.glb`)
+  }
 
   const imageModelOptions = useMemo(() => {
     return imageModels.includes(imageModel) ? imageModels : [imageModel, ...imageModels]
@@ -213,100 +304,74 @@ export function ThreeDPage() {
     setImageModel(p.imageModel)
     setChoice(next)
     setCustom(false)
-    localStorage.setItem(PRESET_KEY, JSON.stringify(next))
+    kv.setJson(PRESET_KEY, next)
     const uc = USE_CASES.find((u) => u.id === next.useCase)?.label ?? next.useCase
     log(`Preset ${uc} · ${QUALITY_TIERS[next.tier].label}: ${p.faces.toLocaleString()} faces, octree ${p.octree}, ${p.steps} steps, texture ${p.texture ? 'on' : 'off'}.`)
   }
 
   const canGenerate = mode === 'text' ? prompt.trim().length > 0 : !!image
+  const ahead = counts.running + counts.queued
+  const generateLabel = ahead ? `Queue 3D model (${ahead} ahead)` : 'Generate 3D model'
 
-  const generate = async () => {
-    if (!canGenerate || busy) return
-    setBusy(true)
-    const t0 = Date.now()
-    log(`Submitting ${mode}→3D request… (shape + texture usually 1–3 min)`)
-    try {
-      const body: Model3DRequest = {
+  const generate = () => {
+    if (!canGenerate) return
+    const body: Model3DRequest = {
+      octree_resolution: octreeResolution,
+      num_inference_steps: steps,
+      guidance_scale: guidance,
+      texture,
+      target_faces: targetFaces,
+      seed,
+    }
+    const text = prompt.trim()
+    if (mode === 'text') {
+      body.text = matchStyle ? styledPrompt(prompt, resolved.style) : text
+      body.subject = subject
+      body.image_model = imageModel
+    } else if (image) {
+      body.image = stripDataUrl(image)
+    }
+    const save: SaveSpec = {
+      name: mode === 'text' ? text.slice(0, 60) : undefined,
+      prompt: mode === 'text' ? text : undefined,
+      model: mode === 'text' ? imageModel : undefined,
+      seed,
+      meta: {
+        subject: mode === 'text' ? subject : undefined,
         octree_resolution: octreeResolution,
         num_inference_steps: steps,
         guidance_scale: guidance,
         texture,
         target_faces: targetFaces,
-        seed,
-      }
-      if (mode === 'text') {
-        body.text = matchStyle ? styledPrompt(prompt, resolved.style) : prompt.trim()
-        body.subject = subject
-        body.image_model = imageModel
-      } else if (image) {
-        body.image = stripDataUrl(image)
-      }
-
-      const res = await client.model3d(body)
-      // X-Model-Id / X-Ref-Url are not CORS-exposed, so the newest server entry is authoritative.
-      let modelId = res.id
-      let refPath = res.refUrl
-      try {
-        const latest = (await client.model3dList(1)).models[0]
-        if (latest) {
-          modelId = latest.id
-          refPath = latest.ref_url ?? refPath
-        }
-      } catch {
-        /* keep header values */
-      }
-      showModel(modelId, res.blob, client.media(refPath), { texture, faces: targetFaces })
-      log(`✓ Done in ${Math.round((Date.now() - t0) / 1000)}s — received ${formatBytes(res.blob.size)} GLB (${modelId}).`, 'ok')
-
-      const name = mode === 'text' ? prompt.trim().slice(0, 60) : `Model ${modelId}`
-      await library.add({
-        kind: 'model3d',
-        source: '3d',
-        blob: res.blob,
-        name,
-        prompt: mode === 'text' ? prompt.trim() : undefined,
-        model: mode === 'text' ? imageModel : undefined,
-        seed,
-        meta: {
-          subject: mode === 'text' ? subject : undefined,
-          modelId,
-          refUrl: refPath,
-          octree_resolution: octreeResolution,
-          num_inference_steps: steps,
-          guidance_scale: guidance,
-          texture,
-          target_faces: targetFaces,
-          mode,
-          preset: custom ? 'custom' : `${choice.useCase}:${QUALITY_TIERS[choice.tier].id}`,
-        },
-      })
-      toast.success('Model generated', formatBytes(res.blob.size))
-      void loadRecent()
-    } catch (e) {
-      const msg = errorMessage(e)
-      log(`Request failed: ${msg}`, 'err')
-      toast.error(msg)
-    } finally {
-      setBusy(false)
+        mode,
+        preset: custom ? 'custom' : `${choice.useCase}:${QUALITY_TIERS[choice.tier].id}`,
+      },
     }
+    jobs.enqueue({
+      page: '3d',
+      label: mode === 'text' ? `3D: ${text.slice(0, 40)}` : 'Image → 3D',
+      detail: `${targetFaces.toLocaleString()} faces · ${texture ? 'textured' : 'no texture'}`,
+      run: (ctx) => runModel3d(ctx, client, body, save),
+    })
   }
 
-  const openRecent = async (m: Model3DResult) => {
-    const url = client.media(m.url)
-    if (!url) return
-    log(`Loading recent ${m.id}…`)
-    try {
-      const r = await fetch(url)
-      if (!r.ok) throw new Error(`Download failed (${r.status} ${r.statusText})`)
-      const blob = await r.blob()
-      showModel(m.id, blob, client.media(m.ref_url ?? null))
-      log(`Loaded ${m.id} into the viewer. Drag to orbit.`, 'ok')
-    } catch (e) {
-      const msg = errorMessage(e)
-      log(`Could not load ${m.id}: ${msg}`, 'err')
-      toast.error(msg)
-    }
+  usePrimaryAction({ label: generateLabel, run: generate, disabled: !canGenerate })
+
+  const openRecent = (m: Model3DResult) => {
+    const src = client.media(m.url)
+    if (!src) return
+    setPicked({ id: m.id, src, refUrl: client.media(m.ref_url ?? null), size: m.size_bytes, at: Date.now() })
+    log(`Loaded ${m.id} into the viewer. Drag to orbit.`, 'ok')
   }
+
+  useCommands([
+    { id: '3d.mode.text', label: 'Text → 3D', group: '3D', keywords: 'mode prompt', disabled: mode === 'text', run: () => setMode('text') },
+    { id: '3d.mode.image', label: 'Image → 3D', group: '3D', keywords: 'mode upload', disabled: mode === 'image', run: () => setMode('image') },
+    { id: '3d.seed.random', label: 'Randomize seed', group: '3D', run: () => setSeed(Math.floor(Math.random() * 2 ** 31)) },
+    { id: '3d.download', label: 'Download shown GLB', group: '3D', disabled: !shown, run: () => { if (shown) downloadShown(shown) } },
+    { id: '3d.refresh', label: 'Refresh recent 3D models', group: '3D', run: () => void loadRecent() },
+    { id: '3d.cancel-queued', label: 'Cancel queued 3D jobs', group: '3D', disabled: !active.some((j) => j.state === 'queued'), run: () => jobs.cancelQueued({ page: '3d' }) },
+  ])
 
   /** Mark the preset as "custom" once a knob is changed by hand. */
   const tweak = <T,>(set: (v: T) => void) => (v: T) => { set(v); setCustom(true) }
@@ -348,13 +413,15 @@ export function ThreeDPage() {
           {mode === 'text' ? (
             <Section title="Prompt">
               <div>
-                <Label hint={`${prompt.length}/600`}>Description</Label>
+                <Label hint={
+                  <span className="flex items-center gap-2">
+                    <EnhancePrompt value={prompt} onChange={(v) => setPrompt(v.slice(0, 600))} kind="3d" />
+                    {prompt.length}/600
+                  </span>
+                }>Description</Label>
                 <Textarea
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value.slice(0, 600))}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void generate() }
-                  }}
                   rows={4}
                   placeholder="low-poly RuneScape-style female, blonde ponytail, blue eyes"
                 />
@@ -458,31 +525,24 @@ export function ThreeDPage() {
             variant="primary"
             size="lg"
             icon={<Sparkles size={15} />}
-            loading={busy}
             disabled={!canGenerate}
-            onClick={() => void generate()}
+            onClick={generate}
             className="w-full"
           >
-            {busy ? 'Generating…' : 'Generate 3D model'}
+            {generateLabel}
           </Button>
-
-          {busy && (
-            <div className="flex flex-col gap-2">
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-gradient-to-r from-accent to-accent-2" />
-              </div>
-              <div className="flex items-center justify-between text-[12px]">
-                <span className="text-ink">{phase ?? 'Working…'}</span>
-                <span className="font-mono tabular-nums text-ink-faint">{elapsed}s</span>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
       {/* -------------------------------------------------------- results */}
       <div className="flex-1 scroll-area p-5">
         <div className="flex flex-col gap-5">
+          {active.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {active.map((j) => <JobStrip key={j.id} job={j} />)}
+            </div>
+          )}
+
           <Section
             title="Viewport"
             action={
@@ -502,7 +562,7 @@ export function ThreeDPage() {
                     size="sm"
                     variant="outline"
                     icon={<Download size={13} />}
-                    onClick={() => downloadUrl(shown.objectUrl, `model3d-${shown.id}.glb`)}
+                    onClick={() => downloadShown(shown)}
                   >
                     Download GLB
                   </Button>
@@ -519,7 +579,7 @@ export function ThreeDPage() {
                     </div>
                   ) : (
                     <model-viewer
-                      src={shown.objectUrl}
+                      src={shown.src}
                       alt="Generated 3D model"
                       camera-controls
                       {...(autoRotate ? { 'auto-rotate': true } : {})}
@@ -544,9 +604,11 @@ export function ThreeDPage() {
               </Panel>
             ) : (
               <EmptyState
-                icon={<Boxes size={26} />}
-                title="No model yet"
-                detail="Pick a preset, describe a subject or drop an image, then generate a mesh to inspect it here."
+                icon={active.length ? <Loader2 size={26} className="animate-spin" /> : <Boxes size={26} />}
+                title={active.length ? 'Generating…' : 'No model yet'}
+                detail={active.length
+                  ? 'The mesh appears here when the job finishes — you can leave this page meanwhile.'
+                  : 'Pick a preset, describe a subject or drop an image, then generate a mesh to inspect it here.'}
               />
             )}
           </Section>
@@ -569,20 +631,16 @@ export function ThreeDPage() {
                     <dt className="text-ink-faint">ID</dt>
                     <dd className="truncate font-mono text-ink-dim">{shown.id}</dd>
                     <dt className="text-ink-faint">Size</dt>
-                    <dd className="truncate font-mono text-ink-dim">{formatBytes(shown.blob.size)}</dd>
+                    <dd className="truncate font-mono text-ink-dim">{formatBytes(shown.size)}</dd>
                     <dt className="text-ink-faint">Texture</dt>
                     <dd className="truncate font-mono text-ink-dim">{shown.texture == null ? '—' : shown.texture ? 'yes' : 'no'}</dd>
                     <dt className="text-ink-faint">Faces</dt>
                     <dd className="truncate font-mono text-ink-dim">{shown.faces ? shown.faces.toLocaleString() : '—'}</dd>
                   </dl>
                   <div className="mt-3 flex items-center gap-2">
-                    <a
-                      href={shown.objectUrl}
-                      download={`model3d-${shown.id}.glb`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim hover:border-line-strong hover:text-ink"
-                    >
-                      <Download size={13} /> model3d-{shown.id}.glb
-                    </a>
+                    <Button size="sm" variant="outline" icon={<Download size={13} />} onClick={() => downloadShown(shown)}>
+                      model3d-{shown.id}.glb
+                    </Button>
                   </div>
                 </Panel>
               </Section>
@@ -592,20 +650,20 @@ export function ThreeDPage() {
           <Section
             title="Activity"
             action={
-              <IconButton title="Clear log" onClick={() => setLogs([])} disabled={logs.length === 0}>
+              <IconButton title="Clear log" onClick={() => { setLogs([]); setClearedAt(Date.now()) }} disabled={activity.length === 0}>
                 <Eraser size={14} />
               </IconButton>
             }
           >
             <div
-              ref={logRef}
+              ref={setLogEl}
               className="scroll-area h-40 rounded-[10px] border border-line bg-bg px-3 py-2 font-mono text-[11.5px] leading-relaxed text-ink-faint"
             >
-              {logs.length === 0 ? (
+              {activity.length === 0 ? (
                 <div>Ready. Pick a mode, enter a prompt, hit Generate.</div>
               ) : (
-                logs.map((l) => (
-                  <div key={l.id} className={`whitespace-pre-wrap ${l.kind ? LOG_TONE[l.kind] : ''}`}>
+                activity.map((l) => (
+                  <div key={l.key} className={`whitespace-pre-wrap ${l.kind ? LOG_TONE[l.kind] : ''}`}>
                     [{new Date(l.at).toLocaleTimeString()}] {l.msg}
                   </div>
                 ))
@@ -631,7 +689,7 @@ export function ThreeDPage() {
                       <button
                         type="button"
                         title="Load into viewer"
-                        onClick={() => void openRecent(m)}
+                        onClick={() => openRecent(m)}
                         className="relative block aspect-square w-full bg-bg"
                       >
                         {thumb ? (
@@ -646,7 +704,7 @@ export function ThreeDPage() {
                         </span>
                         <span className="shrink-0">{formatBytes(m.size_bytes)}</span>
                         <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
-                          <IconButton className="h-6 w-6" title="Load into viewer" onClick={() => void openRecent(m)}>
+                          <IconButton className="h-6 w-6" title="Load into viewer" onClick={() => openRecent(m)}>
                             <Upload size={12} />
                           </IconButton>
                           <IconButton

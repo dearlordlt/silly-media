@@ -2,20 +2,25 @@
  * Game-asset generation: pixel art (`/pixelart/generate`) and sprite/cutout
  * (`/sprite/generate`). Both pipelines render at high resolution and then
  * downscale, so small outputs stay crisp (pixel art uses nearest-neighbour,
- * sprites use LANCZOS).
+ * sprites use LANCZOS). Generations run on the app-wide GPU queue.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Dice5, Download, Layers, Sparkles, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Dice5, Download, Layers, Sparkles } from 'lucide-react'
 import type { AspectRatio, PixelArtRequest, SpriteRequest } from '../../lib/types'
+import type { SillyClient } from '../../lib/api'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useModels } from '../../lib/query'
-import { itemFilename, library, useLibrary } from '../../lib/library'
+import { downloadItem, library, useLibrary } from '../../lib/library'
 import type { MediaItem } from '../../lib/library'
 import { useApp } from '../../lib/store'
-import { downloadBlob, imageSize } from '../../lib/media'
-import { ProgressStrip, useProgressPoll } from '../../components/Progress'
+import { imageSize } from '../../lib/media'
+import { fromBackendProgress, jobs, useJobCounts, usePageJobs } from '../../lib/jobs'
+import type { JobContext } from '../../lib/jobs'
+import { useCommands, usePrimaryAction } from '../../lib/commands'
+import { JobStrip } from '../../components/Progress'
 import { ArtifactGrid } from '../../components/Artifact'
 import { AspectPicker } from '../../components/AspectPicker'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import {
   Button, Chip, IconButton, Input, Label, Panel, Segmented, Section, Select, Slider, Switch, Textarea,
 } from '../../components/ui/primitives'
@@ -63,13 +68,42 @@ const SPRITE_DEFAULTS: SpriteState = {
   seed: -1,
 }
 
-/** Matches the `meta` payload written by this page, for the Reuse action. */
-type AssetMeta = { request: PixelArtRequest | SpriteRequest; mode: Mode }
+/** The `meta` payload written by this page (also the job input), for the Reuse action. */
+type AssetMeta = { mode: 'pixel'; request: PixelArtRequest } | { mode: 'sprite'; request: SpriteRequest }
 
 function isAssetMeta(meta: unknown): meta is AssetMeta {
   if (typeof meta !== 'object' || meta === null) return false
   if (!('mode' in meta) || !('request' in meta)) return false
-  return typeof meta.request === 'object' && meta.request !== null
+  return (meta.mode === 'pixel' || meta.mode === 'sprite') && typeof meta.request === 'object' && meta.request !== null
+}
+
+/** Self-contained queue job: render, measure, store in the library. */
+async function runAsset(ctx: JobContext, client: SillyClient, req: AssetMeta, model: string, label: string): Promise<void> {
+  try {
+    ctx.poll(() => client.progress({ signal: ctx.signal }).then(fromBackendProgress))
+    const blob = req.mode === 'pixel'
+      ? await client.pixelart({ ...req.request }, ctx.signal)
+      : await client.sprite(req.request, ctx.signal)
+    const dims = await imageSize(blob)
+    const item = await library.add({
+      kind: 'image',
+      source: 'assets',
+      blob,
+      name: `${label} · ${req.request.prompt.slice(0, 40)}`,
+      prompt: req.request.prompt,
+      negativePrompt: req.request.negative_prompt,
+      model,
+      seed: req.request.seed,
+      width: dims.width,
+      height: dims.height,
+      meta: req,
+    })
+    ctx.addItem(item.id)
+    toast.success(req.mode === 'pixel' ? 'Pixel art saved' : 'Sprite saved', `${label} added to the library.`)
+  } catch (e) {
+    if (!ctx.signal.aborted) toast.error(errorMessage(e))
+    throw e
+  }
 }
 
 export function AssetsPage() {
@@ -81,8 +115,11 @@ export function AssetsPage() {
   const [mode, setMode] = useState<Mode>('pixel')
   const [pixel, setPixel] = useState<PixelState>(PIXEL_DEFAULTS)
   const [sprite, setSprite] = useState<SpriteState>(SPRITE_DEFAULTS)
-  const [running, setRunning] = useState(false)
-  const abort = useRef<AbortController | null>(null)
+
+  const pageJobs = usePageJobs('assets')
+  const active = useMemo(() => pageJobs.filter((j) => j.state === 'queued' || j.state === 'running').reverse(), [pageJobs])
+  const counts = useJobCounts()
+  const ahead = counts.running + counts.queued
 
   const imageModels = useMemo(() => models?.image.available ?? [], [models])
 
@@ -92,8 +129,6 @@ export function AssetsPage() {
     setSprite((prev) => (imageModels.includes(prev.model) ? prev : { ...prev, model: imageModels[0] }))
   }, [imageModels])
 
-  const progress = useProgressPoll(() => client.progress(), running)
-
   const setP = (patch: Partial<PixelState>) => setPixel((prev) => ({ ...prev, ...patch }))
   const setS = (patch: Partial<SpriteState>) => setSprite((prev) => ({ ...prev, ...patch }))
 
@@ -102,24 +137,7 @@ export function AssetsPage() {
     else setS(seamless ? { prompt, removeBackground: false } : { prompt })
   }
 
-  const saveResult = async (blob: Blob, request: PixelArtRequest | SpriteRequest, label: string, model: string) => {
-    const dims = await imageSize(blob)
-    await library.add({
-      kind: 'image',
-      source: 'assets',
-      blob,
-      name: `${label} · ${request.prompt.slice(0, 40)}`,
-      prompt: request.prompt,
-      negativePrompt: 'negative_prompt' in request ? request.negative_prompt : undefined,
-      model,
-      seed: request.seed,
-      width: dims.width,
-      height: dims.height,
-      meta: { request, mode } satisfies AssetMeta,
-    })
-  }
-
-  const generatePixel = async () => {
+  const generatePixel = () => {
     const prompt = pixel.prompt.trim()
     if (!prompt) { toast.error('Prompt required', 'Describe the asset you want to generate.'); return }
     const body: PixelArtRequest = {
@@ -127,25 +145,20 @@ export function AssetsPage() {
       num_inference_steps: pixel.steps,
       size: pixel.size,
       remove_background: pixel.removeBackground,
+      // Always send it: omitting the key makes the backend apply its default negative.
+      negative_prompt: pixel.negative.trim(),
     }
-    // Always send it: omitting the key makes the backend apply its default negative.
-    body.negative_prompt = pixel.negative.trim()
     if (pixel.seed >= 0) body.seed = pixel.seed
-
-    setRunning(true)
-    abort.current = new AbortController()
-    try {
-      const blob = await client.pixelart(body as unknown as Record<string, unknown>, abort.current.signal)
-      await saveResult(blob, body, `pixel ${pixel.size}×${pixel.size}`, 'z-image-turbo')
-      toast.success('Pixel art saved', `${pixel.size}×${pixel.size} added to the library.`)
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') toast.error(errorMessage(e))
-    } finally {
-      setRunning(false)
-    }
+    const label = `pixel ${pixel.size}×${pixel.size}`
+    jobs.enqueue({
+      page: 'assets',
+      label: `Pixel art ${pixel.size}×${pixel.size}`,
+      detail: prompt.slice(0, 60),
+      run: (ctx) => runAsset(ctx, client, { mode: 'pixel', request: body }, 'z-image-turbo', label),
+    })
   }
 
-  const generateSprite = async () => {
+  const generateSprite = () => {
     const prompt = sprite.prompt.trim()
     if (!prompt) { toast.error('Prompt required', 'Describe the sprite you want to generate.'); return }
     const body: SpriteRequest = {
@@ -160,18 +173,13 @@ export function AssetsPage() {
     if (sprite.seed >= 0) body.seed = sprite.seed
     // qwen-image-2.1 renders the alpha channel natively instead of via rembg.
     if (sprite.removeBackground && sprite.model === 'qwen-image-2.1') body.transparent = true
-
-    setRunning(true)
-    abort.current = new AbortController()
-    try {
-      const blob = await client.sprite(body, abort.current.signal)
-      await saveResult(blob, body, `sprite ${sprite.outputSize}px`, sprite.model)
-      toast.success('Sprite saved', `${sprite.outputSize}px cutout added to the library.`)
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') toast.error(errorMessage(e))
-    } finally {
-      setRunning(false)
-    }
+    const label = `sprite ${sprite.outputSize}px`
+    jobs.enqueue({
+      page: 'assets',
+      label: `Sprite ${sprite.outputSize}px · ${sprite.model}`,
+      detail: prompt.slice(0, 60),
+      run: (ctx) => runAsset(ctx, client, { mode: 'sprite', request: body }, sprite.model, label),
+    })
   }
 
   const reuse = (item: MediaItem) => {
@@ -179,7 +187,7 @@ export function AssetsPage() {
     if (!isAssetMeta(meta)) return
     setMode(meta.mode)
     if (meta.mode === 'pixel') {
-      const r = meta.request as PixelArtRequest
+      const r = meta.request
       setPixel({
         prompt: r.prompt,
         negative: r.negative_prompt ?? DEFAULT_PIXEL_NEGATIVE,
@@ -189,7 +197,7 @@ export function AssetsPage() {
         removeBackground: r.remove_background ?? true,
       })
     } else {
-      const r = meta.request as SpriteRequest
+      const r = meta.request
       setSprite({
         prompt: r.prompt,
         negative: r.negative_prompt ?? '',
@@ -209,6 +217,22 @@ export function AssetsPage() {
   }
 
   const canGenerate = mode === 'pixel' ? !!pixel.prompt.trim() : !!sprite.prompt.trim() && !!sprite.model
+  const generate = mode === 'pixel' ? generatePixel : generateSprite
+  const generateLabel = ahead ? `Queue (${ahead} ahead)` : 'Generate'
+  const prompt = mode === 'pixel' ? pixel.prompt : sprite.prompt
+  const setPrompt = (v: string) => (mode === 'pixel' ? setP({ prompt: v }) : setS({ prompt: v }))
+
+  usePrimaryAction({ label: mode === 'pixel' ? 'Generate pixel art' : 'Generate sprite', run: generate, disabled: !canGenerate })
+
+  useCommands([
+    { id: 'assets.mode.pixel', label: 'Pixel art mode', group: 'Game assets', disabled: mode === 'pixel', run: () => setMode('pixel') },
+    { id: 'assets.mode.sprite', label: 'Sprite / cutout mode', group: 'Game assets', disabled: mode === 'sprite', run: () => setMode('sprite') },
+    {
+      id: 'assets.seed.random', label: 'Randomize seed', group: 'Game assets',
+      run: () => { const seed = Math.floor(Math.random() * 2 ** 31); if (mode === 'pixel') setP({ seed }); else setS({ seed }) },
+    },
+    { id: 'assets.cancel-queued', label: 'Cancel queued asset jobs', group: 'Game assets', disabled: !active.some((j) => j.state === 'queued'), run: () => jobs.cancelQueued({ page: 'assets' }) },
+  ])
 
   return (
     <div className="flex h-full">
@@ -232,11 +256,11 @@ export function AssetsPage() {
             </p>
           </Section>
 
-          <Section title="Prompt">
+          <Section title="Prompt" action={<EnhancePrompt value={prompt} onChange={setPrompt} kind="image" />}>
             <Textarea
               rows={4}
-              value={mode === 'pixel' ? pixel.prompt : sprite.prompt}
-              onChange={(e) => (mode === 'pixel' ? setP({ prompt: e.target.value }) : setS({ prompt: e.target.value }))}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
               placeholder={mode === 'pixel' ? 'a red potion bottle, game item icon' : 'a knight in idle stance, full body'}
             />
             <Label hint="click to fill">Asset presets</Label>
@@ -330,15 +354,12 @@ export function AssetsPage() {
             <div className="flex items-center gap-2">
               <Button
                 variant="primary"
-                icon={running ? <X size={15} /> : <Sparkles size={15} />}
-                onClick={() => {
-                  if (running) { abort.current?.abort(); return }
-                  void (mode === 'pixel' ? generatePixel() : generateSprite())
-                }}
-                disabled={running ? false : !canGenerate}
+                icon={<Sparkles size={15} />}
+                onClick={generate}
+                disabled={!canGenerate}
                 className="flex-1"
               >
-                {running ? 'Cancel' : 'Generate'}
+                {generateLabel}
               </Button>
             </div>
           </div>
@@ -348,7 +369,11 @@ export function AssetsPage() {
       {/* Results */}
       <div className="flex-1 scroll-area p-5">
         <div className="mx-auto flex max-w-6xl flex-col gap-4">
-          <ProgressStrip state={progress} label={mode === 'pixel' ? 'Generating pixel art' : 'Generating sprite'} />
+          {active.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {active.map((j) => <JobStrip key={j.id} job={j} />)}
+            </div>
+          )}
 
           <Section title={`Assets (${items.length})`}>
             <ArtifactGrid
@@ -357,7 +382,7 @@ export function AssetsPage() {
               onReuse={reuse}
               onDelete={remove}
               extraActions={(item) => (
-                <IconButton title="Download" onClick={() => downloadBlob(item.blob, itemFilename(item))}><Download size={14} /></IconButton>
+                <IconButton title="Download" onClick={() => downloadItem(item)}><Download size={14} /></IconButton>
               )}
               empty={{ title: 'No assets yet', detail: 'Pick a preset or write a prompt, then generate pixel art or a cutout sprite. Results land in your local library.' }}
             />

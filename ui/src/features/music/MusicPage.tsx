@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import { clsx } from 'clsx'
-import { Clock, Download, Music2, RotateCcw, Save, Square, Trash2, Wand2 } from 'lucide-react'
-import type { JobStatus, MusicAudioResult, MusicGenerateRequest } from '../../lib/types'
-import { useClient, useJobPoller, toast, errorMessage } from '../../lib/hooks'
-import { library, useLibrary } from '../../lib/library'
+import { Clock, Download, Music2, RotateCcw, Save, Trash2, Wand2, X } from 'lucide-react'
+import type { SillyClient } from '../../lib/api'
+import type { MusicGenerateRequest } from '../../lib/types'
+import { useClient, toast, errorMessage } from '../../lib/hooks'
+import { downloadItem, itemExtension, library, useLibrary } from '../../lib/library'
 import type { MediaItem } from '../../lib/library'
-import { downloadBlob, extensionFor, formatBytes, formatDuration } from '../../lib/media'
+import { formatBytes, formatDuration } from '../../lib/media'
 import { useApp } from '../../lib/store'
+import { jobs, throwIfCancelled, usePageJobs } from '../../lib/jobs'
+import type { Job, JobContext } from '../../lib/jobs'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
+import { JobStrip } from '../../components/Progress'
+import { EnhancePrompt } from '../../components/EnhancePrompt'
 import {
-  Button, Chip, EmptyState, IconButton, Input, Label, Panel, ProgressBar, Section, Segmented, Select, Slider, Spinner, StatusDot, Switch, Textarea,
+  Button, Chip, EmptyState, IconButton, Input, Label, Section, Segmented, Select, Slider, StatusDot, Switch, Textarea,
 } from '../../components/ui/primitives'
+import { ArtifactGrid } from '../../components/Artifact'
+import { pollServerJob, queueLabel, statusProgress, useGpuAhead } from '../audio/jobQueue'
 import {
   BUILTIN_PROFILES, GENRE_TEMPLATES, MUSIC_DEFAULTS, SECTION_TAGS, loadUserProfiles, readSettings, saveUserProfiles,
 } from './presets'
@@ -17,16 +25,16 @@ import type { MusicSettings, SongModel } from './presets'
 
 type MusicModel = { id: string; name: string; loaded: boolean; default_steps: number; estimated_vram_gb: number }
 
-/** A job submitted this session that has not (yet) produced library tracks. */
-interface PendingJob {
-  id: string
+/** Queue-job payload (`job.data`) of a music generation. */
+interface MusicJobData {
+  kind: 'music'
   caption: string
   model: SongModel
   duration: number
-  createdAt: number
-  status: 'queued' | 'processing' | 'saving' | 'failed' | 'stopped'
-  error: string | null
   settings: MusicSettings
+  /** Router job id on the backend, once submitted. */
+  serverJobId?: string
+  estimated?: number
 }
 
 interface Track {
@@ -49,13 +57,19 @@ interface HistoryEntry {
   tracks: Track[]
 }
 
+type View = { type: 'job'; job: Job } | { type: 'entry'; entry: HistoryEntry }
+
 const CAPTION_MAX = 512
 const LYRICS_MAX = 4096
+/** `job.group` of music generations (Enhance jobs share the page). */
+const GROUP = 'music'
 
 const TAGS = [
   'pop', 'rock', 'lo-fi', 'synthwave', 'ambient', 'jazz', 'orchestral',
   'hip-hop', 'edm', 'cinematic', 'chill', 'upbeat', 'melancholic', 'epic', 'dreamy',
 ]
+
+const isMusicData = (d: unknown): d is MusicJobData => typeof d === 'object' && d !== null && 'kind' in d && d.kind === 'music'
 
 function metaString(meta: MediaItem['meta'], key: string): string | null {
   const v = meta?.[key]
@@ -106,12 +120,117 @@ function fileJobIdFrom(downloadUrl: string): string | null {
 }
 
 function trackFilename(entry: HistoryEntry, t: Track): string {
-  const ext = extensionFor(t.item.blob.type)
-  return `music-${entry.jobId.slice(0, 8)}-${t.index + 1}.${ext === 'bin' ? (entry.settings.audioFormat ?? 'wav') : ext}`
+  return `music-${entry.jobId.slice(0, 8)}-${t.index + 1}.${itemExtension(t.item)}`
 }
 
 function modelLabel(model: string): string {
   return model === 'ace-step-quality' ? 'ACE-Step Quality' : model === 'ace-step' ? 'ACE-Step' : model || 'unknown model'
+}
+
+/**
+ * Queue-job body: submit to `/music/generate`, poll the server job, then pull
+ * every variation into the library. Self-contained (outlives the page).
+ */
+async function runMusic(client: SillyClient, body: MusicGenerateRequest, base: MusicJobData, ctx: JobContext): Promise<void> {
+  try {
+    ctx.report({ message: 'Submitting' })
+    const res = await client.music(body)
+    throwIfCancelled(ctx.signal)
+    const data: MusicJobData = { ...base, serverJobId: res.job_id, estimated: res.estimated_time_seconds }
+    ctx.setData(data)
+    const st = await pollServerJob(
+      ctx.signal,
+      (signal) => client.musicStatus(res.job_id, { signal }),
+      (s) => ctx.report(statusProgress(s, 'Generating audio')),
+    )
+    const audios = st.audios ?? []
+    if (!audios.length) throw new Error('The job produced no audio')
+    const elapsed = st.elapsed_seconds ?? null
+    const createdAt = Date.now()
+    const failures: string[] = []
+    let saved = 0
+    for (const [i, a] of audios.entries()) {
+      throwIfCancelled(ctx.signal)
+      ctx.report({ fraction: null, step: i + 1, total: audios.length, message: 'Saving tracks' })
+      try {
+        // The status payload's download_url carries the model-internal job id
+        // (the router's job id is unrelated), so trust it, not a rebuilt path.
+        const url = client.media(a.download_url) ?? client.musicDownloadUrl(res.job_id, a.index)
+        const r = await fetch(url, { signal: ctx.signal })
+        if (!r.ok) throw new Error(`Variation ${a.index + 1} download failed (${r.status})`)
+        const item = await library.add({
+          kind: 'audio',
+          source: 'music',
+          blob: await r.blob(),
+          name: `${base.caption.slice(0, 48) || 'music'} · ${a.index + 1}`,
+          prompt: base.caption,
+          model: base.model,
+          seed: a.seed,
+          durationSeconds: base.duration,
+          createdAt,
+          meta: {
+            jobId: res.job_id,
+            index: a.index,
+            sampleRate: a.sample_rate,
+            fileJobId: fileJobIdFrom(a.download_url),
+            elapsed,
+            settings: base.settings,
+          },
+        })
+        ctx.addItem(item.id)
+        saved++
+      } catch (e) {
+        if (ctx.signal.aborted) throw e
+        failures.push(errorMessage(e))
+      }
+    }
+    if (!saved) throw new Error(failures[0] ?? 'Could not load audio')
+    toast.success(
+      `Music ready (${saved} variation${saved === 1 ? '' : 's'})`,
+      elapsed != null ? `Generated in ${formatDuration(elapsed)}` : undefined,
+    )
+    if (failures.length) toast.error('Some variations could not be saved', failures.join('\n'))
+  } catch (e) {
+    if (!ctx.signal.aborted) toast.error('Music generation failed', errorMessage(e))
+    throw e
+  }
+}
+
+/** Main-area view of a queued / running / failed / cancelled music job. */
+function MusicJobView({ job, onRetry }: { job: Job; onRetry: () => void }) {
+  const d = isMusicData(job.data) ? job.data : null
+  const active = job.state === 'queued' || job.state === 'running'
+  const retryButton = <Button size="sm" icon={<RotateCcw size={13} />} onClick={onRetry}>Retry</Button>
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="min-w-0">
+        <h2 className="truncate text-base font-semibold text-ink" title={d?.caption}>{d?.caption || job.detail || 'Music generation'}</h2>
+        {d && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-faint">
+            <span>{modelLabel(d.model)}</span>
+            <span>{formatDuration(d.duration)} song</span>
+            <span>{d.settings.batchSize} variation{d.settings.batchSize === 1 ? '' : 's'}</span>
+            {active && d.estimated ? <span>est. ~{formatDuration(d.estimated)}</span> : null}
+          </div>
+        )}
+      </div>
+      {active && <JobStrip job={job} label="Music generation" />}
+      {job.state === 'failed' && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-bad/30 bg-bad/10 px-3 py-2.5 text-[12.5px] text-bad">
+          <span className="min-w-0">{job.error ?? 'Generation failed'}</span>
+          {retryButton}
+        </div>
+      )}
+      {job.state === 'cancelled' && (
+        <EmptyState
+          icon={<Music2 size={22} />}
+          title="Cancelled"
+          detail="Stopped waiting for this song. The server may still finish it, but it will not be saved to your library."
+          action={retryButton}
+        />
+      )}
+    </div>
+  )
 }
 
 export function MusicPage() {
@@ -120,10 +239,8 @@ export function MusicPage() {
 
   const [s, setS] = useState<MusicSettings>(MUSIC_DEFAULTS)
   const [models, setModels] = useState<MusicModel[]>([])
-  const [submitting, setSubmitting] = useState(false)
-  const [watchingId, setWatchingId] = useState<string | null>(null)
+  /** A queue job id or a history entry's server job id. */
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [pending, setPending] = useState<PendingJob[]>([])
   const [checked, setChecked] = useState<Set<string>>(() => new Set())
   const [activeGenre, setActiveGenre] = useState<string | null>(null)
   const [userProfiles, setUserProfiles] = useState(loadUserProfiles)
@@ -131,10 +248,13 @@ export function MusicPage() {
 
   const audioItems = useLibrary('audio')
   const history = useMemo(() => groupHistory(audioItems), [audioItems])
+  const pageJobs = usePageJobs('music')
+  const musicJobs = useMemo(() => pageJobs.filter((j) => j.group === GROUP), [pageJobs])
+  const sessionJobs = musicJobs.filter((j) => j.state === 'queued' || j.state === 'running' || j.state === 'failed')
+  const queuedCount = musicJobs.filter((j) => j.state === 'queued').length
+  const ahead = useGpuAhead()
 
   const set = (patch: Partial<MusicSettings>) => setS((prev) => ({ ...prev, ...patch }))
-  const patchPending = (id: string, patch: Partial<PendingJob>) =>
-    setPending((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)))
 
   useEffect(() => {
     let cancelled = false
@@ -159,109 +279,23 @@ export function MusicPage() {
   )
   const defaultSteps = byId[s.model]?.default_steps
 
-  const finishJob = async (id: string, st: JobStatus) => {
-    const job = pending.find((j) => j.id === id)
-    const audios: MusicAudioResult[] = st.audios ?? []
-    if (!audios.length) {
-      patchPending(id, { status: 'failed', error: 'The job produced no audio' })
-      setWatchingId(null)
-      toast.error('Music generation failed', 'The job produced no audio')
-      return
+  // What the main area shows: the selected job/entry, else the newest job, else the newest song.
+  const view = useMemo((): View | null => {
+    const viewFor = (job: Job): View | null => {
+      if (job.state !== 'done') return { type: 'job', job }
+      const entry = history.find((h) => h.tracks.some((t) => job.itemIds.includes(t.item.id)))
+      return entry ? { type: 'entry', entry } : null
     }
-    patchPending(id, { status: 'saving' })
-    const createdAt = Date.now()
-    const elapsed = st.elapsed_seconds ?? null
-    const caption = job?.caption ?? s.caption
-    let saved = 0
-    const failures: string[] = []
-    for (const a of audios) {
-      try {
-        // The status payload's download_url carries the model-internal job id
-        // (the router's job id is unrelated), so trust it, not a rebuilt path.
-        const url = client.media(a.download_url) ?? client.musicDownloadUrl(id, a.index)
-        const res = await fetch(url)
-        if (!res.ok) throw new Error(`Variation ${a.index + 1} download failed (${res.status})`)
-        const blob = await res.blob()
-        await library.add({
-          kind: 'audio',
-          source: 'music',
-          blob,
-          name: `${caption.slice(0, 48) || 'music'} · ${a.index + 1}`,
-          prompt: caption,
-          model: job?.model ?? s.model,
-          seed: a.seed,
-          durationSeconds: job?.duration ?? s.duration,
-          createdAt,
-          meta: {
-            jobId: id,
-            index: a.index,
-            sampleRate: a.sample_rate,
-            fileJobId: fileJobIdFrom(a.download_url),
-            elapsed,
-            settings: job?.settings ?? s,
-          },
-        })
-        saved++
-      } catch (e) {
-        failures.push(errorMessage(e))
-      }
-    }
-    setWatchingId(null)
-    if (saved > 0) {
-      setPending((prev) => prev.filter((j) => j.id !== id))
-      setSelectedId(id)
-      toast.success(
-        `Music ready (${saved} variation${saved === 1 ? '' : 's'})`,
-        elapsed != null ? `Generated in ${formatDuration(elapsed)}` : undefined,
-      )
-    } else {
-      patchPending(id, { status: 'failed', error: failures[0] ?? 'Could not load audio' })
-    }
-    if (failures.length) toast.error('Could not load audio', failures.join('\n'))
-  }
-
-  const poll = useJobPoller<JobStatus>(
-    watchingId,
-    async (id) => {
-      const st = await client.musicStatus(id)
-      return { ...st, data: st }
-    },
-    (st) => {
-      const id = watchingId
-      if (id && st && st.status === 'completed') void finishJob(id, st)
-    },
-  )
-
-  // Failures come either from the status payload or from a broken poll (e.g.
-  // the server restarted and forgot the job); both land here.
-  useEffect(() => {
-    if (!watchingId || poll.status !== 'failed') return
-    const error = poll.error ?? 'Generation failed'
-    patchPending(watchingId, { status: 'failed', error })
-    setWatchingId(null)
-    toast.error('Music generation failed', error)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poll.status, poll.error, watchingId])
-
-  useEffect(() => {
-    if (!watchingId || (poll.status !== 'queued' && poll.status !== 'processing')) return
-    patchPending(watchingId, { status: poll.status })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [poll.status, watchingId])
-
-  const activeId = selectedId ?? watchingId ?? pending[0]?.id ?? history[0]?.jobId ?? null
-  const activePending = pending.find((j) => j.id === activeId) ?? null
-  const activeEntry = activePending ? null : history.find((h) => h.jobId === activeId) ?? null
-  const isActiveWatching = activePending != null && activePending.id === watchingId
-  const running = isActiveWatching && (poll.status === 'queued' || poll.status === 'processing')
-
-  const totalSteps = poll.totalSteps ?? 0
-  const currentStep = poll.currentStep ?? 0
-  const percent = poll.status === 'completed'
-    ? 100
-    : totalSteps > 0
-      ? Math.max(0, Math.min(100, (currentStep / totalSteps) * 100))
-      : Math.max(0, Math.min(100, (poll.progress ?? 0) * 100))
+    const selectedJob = selectedId ? musicJobs.find((j) => j.id === selectedId) : undefined
+    const selectedEntry = selectedId && !selectedJob ? history.find((h) => h.jobId === selectedId) : undefined
+    const picked = selectedJob ? viewFor(selectedJob) : selectedEntry ? { type: 'entry' as const, entry: selectedEntry } : null
+    const latest = musicJobs[0]
+    return picked
+      ?? (latest && latest.state !== 'cancelled' ? viewFor(latest) : null)
+      ?? (history[0] ? { type: 'entry', entry: history[0] } : null)
+  }, [history, musicJobs, selectedId])
+  const activeId = view?.type === 'entry' ? view.entry.jobId : view?.job.id ?? null
+  const shownEntry = view?.type === 'entry' ? view.entry : null
 
   // --- composition helpers ---------------------------------------------------
 
@@ -338,7 +372,7 @@ export function MusicPage() {
 
   // --- jobs ------------------------------------------------------------------
 
-  const generate = async () => {
+  const generate = () => {
     const caption = s.caption.trim()
     if (!caption) { toast.error('Caption required', 'Describe the song you want to generate'); return }
 
@@ -359,44 +393,22 @@ export function MusicPage() {
       batch_size: Math.max(1, Math.min(4, s.batchSize)),
       model: s.model,
     }
-
-    setSubmitting(true)
-    try {
-      const res = await client.music(body)
-      setPending((prev) => [
-        {
-          id: res.job_id, caption, model: s.model, duration: body.duration ?? s.duration,
-          createdAt: Date.now(), status: 'queued', error: null, settings: { ...s, caption },
-        },
-        ...prev,
-      ])
-      setSelectedId(res.job_id)
-      setWatchingId(res.job_id)
-      toast.info('Music generation queued', res.estimated_time_seconds ? `Estimated ~${Math.round(res.estimated_time_seconds)}s` : undefined)
-    } catch (e) {
-      toast.error('Could not start music generation', errorMessage(e))
-    } finally {
-      setSubmitting(false)
-    }
+    const base: MusicJobData = { kind: 'music', caption, model: s.model, duration: body.duration ?? s.duration, settings: { ...s, caption } }
+    const id = jobs.enqueue({
+      page: 'music',
+      group: GROUP,
+      label: 'Music',
+      detail: caption.slice(0, 80),
+      data: base,
+      run: (ctx) => runMusic(client, body, base, ctx),
+    })
+    setSelectedId(id)
+    if (ahead > 0) toast.info('Music queued', `${ahead} job${ahead === 1 ? '' : 's'} ahead`)
   }
 
-  const stopWatching = () => {
-    if (watchingId) patchPending(watchingId, { status: 'stopped' })
-    setWatchingId(null)
-  }
-
-  const resumeWatching = (job: PendingJob) => {
-    setSelectedId(job.id)
-    patchPending(job.id, { status: 'queued', error: null })
-    setWatchingId(job.id)
-  }
-
-  const dismissPending = (job: PendingJob) => {
-    if (watchingId === job.id) setWatchingId(null)
-    setPending((prev) => prev.filter((j) => j.id !== job.id))
-    if (selectedId === job.id) setSelectedId(null)
-    // Clears the router's job record (and any files) for failed/abandoned jobs.
-    client.deleteMusic(job.id).catch(() => { /* best effort */ })
+  const retry = (job: Job) => {
+    const id = jobs.retry(job.id)
+    if (id) { jobs.remove(job.id); setSelectedId(id) }
   }
 
   const reuse = (entry: HistoryEntry, seed?: number) => {
@@ -416,7 +428,7 @@ export function MusicPage() {
   const downloadEntries = (entries: HistoryEntry[]) => {
     let count = 0
     for (const e of entries) {
-      for (const t of e.tracks) { downloadBlob(t.item.blob, trackFilename(e, t)); count++ }
+      for (const t of e.tracks) { downloadItem(t.item, trackFilename(e, t)); count++ }
     }
     if (count > 1) toast.success(`Downloading ${count} files…`)
   }
@@ -434,7 +446,7 @@ export function MusicPage() {
     const results = await Promise.allSettled([...serverIds].map((id) => client.deleteMusic(id)))
     const serverFailed = results.filter((r) => r.status === 'rejected').length
     try {
-      for (const e of entries) for (const t of e.tracks) await library.remove(t.item.id)
+      await library.removeMany(entries.flatMap((e) => e.tracks.map((t) => t.item.id)))
     } catch (err) {
       toast.error('Could not remove from library', errorMessage(err))
       return
@@ -453,6 +465,18 @@ export function MusicPage() {
   const checkedEntries = history.filter((h) => checked.has(h.jobId))
 
   const profileNames = Object.keys(userProfiles)
+  const generateLabel = queueLabel('Generate music', ahead)
+
+  usePrimaryAction({ label: generateLabel, run: generate })
+  useCommands([
+    { id: 'music.generate', label: 'Generate music', group: 'Music', shortcut: `${MOD_KEY}+Enter`, keywords: 'song compose', run: generate },
+    { id: 'music.instrumental', label: s.instrumental ? 'Switch to vocals (use lyrics)' : 'Switch to instrumental', group: 'Music', run: () => set({ instrumental: !s.instrumental }) },
+    { id: 'music.random-seed', label: 'Use a random seed', group: 'Music', run: () => set({ seed: -1 }) },
+    { id: 'music.save-profile', label: 'Save settings as profile…', group: 'Music', run: saveProfile },
+    { id: 'music.reuse', label: 'Reuse settings of the shown song', group: 'Music', disabled: !shownEntry, run: () => { if (shownEntry) reuse(shownEntry) } },
+    { id: 'music.download', label: 'Download the shown song', group: 'Music', disabled: !shownEntry, run: () => { if (shownEntry) downloadEntries([shownEntry]) } },
+    { id: 'music.cancel-queued', label: 'Cancel queued music jobs', group: 'Music', disabled: !queuedCount, run: () => jobs.cancelQueued({ page: 'music', group: GROUP }) },
+  ])
 
   return (
     <div className="flex h-full">
@@ -499,7 +523,15 @@ export function MusicPage() {
 
         <div className="my-4 h-px bg-line" />
 
-        <Section title="Caption / tags" action={<span className="text-[11px] text-ink-faint">{s.caption.length}/{CAPTION_MAX}</span>}>
+        <Section
+          title="Caption / tags"
+          action={
+            <span className="flex items-center gap-1.5">
+              <EnhancePrompt kind="music" value={s.caption} onChange={(v) => { setActiveGenre(null); set({ caption: v.slice(0, CAPTION_MAX) }) }} />
+              <span className="text-[11px] text-ink-faint">{s.caption.length}/{CAPTION_MAX}</span>
+            </span>
+          }
+        >
           <Textarea
             value={s.caption}
             maxLength={CAPTION_MAX}
@@ -626,17 +658,24 @@ export function MusicPage() {
 
         <div className="my-4 h-px bg-line" />
 
-        <Button size="lg" variant="primary" className="w-full" icon={<Wand2 size={16} />} loading={submitting} onClick={() => void generate()}>
-          Generate music
+        <Button size="lg" variant="primary" className="w-full" icon={<Wand2 size={16} />} onClick={generate}>
+          {generateLabel}
         </Button>
 
-        {pending.length > 0 && (
+        {sessionJobs.length > 0 && (
           <>
             <div className="my-4 h-px bg-line" />
-            <Section title="Session queue" action={<span className="text-[11px] text-ink-faint">{pending.length}</span>}>
+            <Section
+              title="Session queue"
+              action={queuedCount > 1
+                ? <Button size="sm" variant="ghost" icon={<X size={13} />} onClick={() => jobs.cancelQueued({ page: 'music', group: GROUP })}>Cancel queued</Button>
+                : <span className="text-[11px] text-ink-faint">{sessionJobs.length}</span>}
+            >
               <div className="flex flex-col gap-1.5">
-                {pending.map((j) => {
-                  const live = j.status === 'queued' || j.status === 'processing' || j.status === 'saving'
+                {sessionJobs.map((j) => {
+                  const d = isMusicData(j.data) ? j.data : null
+                  const pct = j.progress.fraction != null ? `${Math.round(j.progress.fraction * 100)}%` : null
+                  const status = j.state === 'running' ? [j.progress.message, pct].filter(Boolean).join(' · ') || 'running' : j.state
                   return (
                     <div
                       key={j.id}
@@ -646,21 +685,25 @@ export function MusicPage() {
                       )}
                     >
                       <button className="min-w-0 flex-1 text-left" onClick={() => setSelectedId(j.id)}>
-                        <div className="truncate text-[12.5px] text-ink">{j.caption || 'untitled'}</div>
+                        <div className="truncate text-[12.5px] text-ink">{d?.caption || j.detail || 'untitled'}</div>
                         <div className="flex items-center gap-2 text-[10.5px] text-ink-faint">
-                          <span>{j.model === 'ace-step-quality' ? 'quality' : 'fast'}</span>
+                          <span>{d?.model === 'ace-step-quality' ? 'quality' : 'fast'}</span>
                           <span>·</span>
-                          <span className={clsx(j.status === 'failed' && 'text-bad', live && 'text-accent')}>{j.status}</span>
+                          <span className={clsx(j.state === 'failed' && 'text-bad', j.state === 'running' && 'text-accent')}>{status}</span>
                           <span>·</span>
-                          <span>{formatDuration(j.duration)}</span>
+                          <span>{formatDuration(d?.duration)}</span>
                         </div>
                       </button>
-                      {j.status === 'stopped' && (
-                        <IconButton title="Resume watching" onClick={() => resumeWatching(j)}><RotateCcw size={13} /></IconButton>
+                      {j.state === 'failed' ? (
+                        <>
+                          <IconButton title="Retry" onClick={() => retry(j)}><RotateCcw size={13} /></IconButton>
+                          <IconButton title="Dismiss" onClick={() => jobs.remove(j.id)}><Trash2 size={13} /></IconButton>
+                        </>
+                      ) : (
+                        <IconButton title={j.state === 'running' ? 'Cancel (stops waiting; the server may finish the song)' : 'Remove from queue'} onClick={() => jobs.cancel(j.id)}>
+                          <X size={13} />
+                        </IconButton>
                       )}
-                      {live && j.status !== 'saving'
-                        ? <IconButton title="Stop watching" onClick={() => { if (watchingId === j.id) stopWatching() }}><Square size={13} /></IconButton>
-                        : j.status !== 'saving' && <IconButton title="Dismiss" onClick={() => dismissPending(j)}><Trash2 size={13} /></IconButton>}
                     </div>
                   )
                 })}
@@ -673,107 +716,40 @@ export function MusicPage() {
       {/* Results + history */}
       <div className="scroll-area flex-1 p-5">
         <div className="flex flex-col gap-6">
-          {activePending ? (
+          {view?.type === 'job' ? (
+            <MusicJobView job={view.job} onRetry={() => retry(view.job)} />
+          ) : view?.type === 'entry' ? (
             <div>
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h2 className="truncate text-base font-semibold text-ink">{activePending.caption || 'Music generation'}</h2>
-                    {(running || activePending.status === 'saving') && <Spinner />}
-                  </div>
-                  <div className="mt-1 flex items-center gap-3 text-[11.5px] text-ink-faint">
-                    <span>{modelLabel(activePending.model)}</span>
-                    <span>{formatDuration(activePending.duration)} song</span>
-                    <span>{activePending.settings.batchSize} variation{activePending.settings.batchSize === 1 ? '' : 's'}</span>
-                  </div>
-                </div>
-                {running && (
-                  <Button variant="danger" size="sm" icon={<Square size={13} />} onClick={stopWatching}>Cancel</Button>
-                )}
-              </div>
-
-              {running && (
-                <div className="rounded-xl border border-accent/30 bg-accent/5 px-3 py-2.5">
-                  <div className="mb-1.5 flex items-center justify-between text-[11.5px]">
-                    <span className="font-medium text-ink">{poll.status === 'queued' ? 'Queued…' : 'Generating audio'}</span>
-                    <span className="flex items-center gap-3 text-ink-dim">
-                      <span>Step {currentStep} / {totalSteps || '?'}</span>
-                      <span className="flex items-center gap-1"><Clock size={11} /> {Math.round(poll.elapsedSeconds ?? 0)}s elapsed</span>
-                      <span>{Math.round(percent)}%</span>
-                    </span>
-                  </div>
-                  <ProgressBar value={percent} />
-                </div>
-              )}
-
-              {activePending.status === 'saving' && (
-                <p className="text-[12.5px] text-ink-dim">Downloading tracks into your library…</p>
-              )}
-
-              {activePending.status === 'failed' && (
-                <div className="rounded-xl border border-bad/30 bg-bad/10 px-3 py-2.5 text-[12.5px] text-bad">
-                  {activePending.error ?? 'Generation failed'}
-                </div>
-              )}
-
-              {activePending.status === 'stopped' && (
-                <EmptyState
-                  icon={<Music2 size={22} />}
-                  title="Stopped watching"
-                  detail="Polling was stopped before the job finished. The server may still be generating."
-                  action={<Button size="sm" icon={<RotateCcw size={13} />} onClick={() => resumeWatching(activePending)}>Resume</Button>}
-                />
-              )}
-            </div>
-          ) : activeEntry ? (
-            <div>
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="truncate text-base font-semibold text-ink" title={activeEntry.caption}>{activeEntry.caption || 'Music generation'}</h2>
+                  <h2 className="truncate text-base font-semibold text-ink" title={view.entry.caption}>{view.entry.caption || 'Music generation'}</h2>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-faint">
-                    <span>{modelLabel(activeEntry.model)}</span>
-                    <span>{formatDuration(activeEntry.duration)} song</span>
-                    {activeEntry.elapsed != null && (
-                      <span className="flex items-center gap-1"><Clock size={11} /> generated in {formatDuration(activeEntry.elapsed)}</span>
+                    <span>{modelLabel(view.entry.model)}</span>
+                    <span>{formatDuration(view.entry.duration)} song</span>
+                    {view.entry.elapsed != null && (
+                      <span className="flex items-center gap-1"><Clock size={11} /> generated in {formatDuration(view.entry.elapsed)}</span>
                     )}
-                    <span>{activeEntry.tracks.length} variation{activeEntry.tracks.length === 1 ? '' : 's'}</span>
-                    <span>{new Date(activeEntry.createdAt).toLocaleString()}</span>
+                    <span>{view.entry.tracks.length} variation{view.entry.tracks.length === 1 ? '' : 's'}</span>
+                    {view.entry.tracks.some((t) => t.item.seed != null) && (
+                      <span title="Seed per variation (↺ on a row reuses the settings with that seed)">
+                        seed {view.entry.tracks.map((t) => t.item.seed ?? '?').join(' / ')}
+                      </span>
+                    )}
+                    {view.entry.tracks[0]?.sampleRate != null && <span>{view.entry.tracks[0].sampleRate / 1000} kHz</span>}
+                    <span>{formatBytes(view.entry.tracks.reduce((n, t) => n + t.item.size, 0))}</span>
+                    <span>{new Date(view.entry.createdAt).toLocaleString()}</span>
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <Button size="sm" icon={<RotateCcw size={13} />} onClick={() => reuse(activeEntry)}>Reuse settings</Button>
-                  <Button size="sm" icon={<Download size={13} />} onClick={() => downloadEntries([activeEntry])}>Download</Button>
-                  <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => void deleteEntries([activeEntry])}>Delete</Button>
+                  <Button size="sm" icon={<RotateCcw size={13} />} onClick={() => reuse(view.entry)}>Reuse settings</Button>
+                  <Button size="sm" icon={<Download size={13} />} onClick={() => downloadEntries([view.entry])}>Download</Button>
+                  <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => void deleteEntries([view.entry])}>Delete</Button>
                 </div>
               </div>
-              <div className="flex flex-col gap-3">
-                {activeEntry.tracks.map((t) => (
-                  <Panel key={t.item.id} className="p-3">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 text-[12.5px]">
-                        <Music2 size={14} className="text-accent" />
-                        <span className="font-medium text-ink">Variation {t.index + 1}</span>
-                        <span className="text-ink-faint">
-                          {t.item.seed != null ? `· seed ${t.item.seed} ` : ''}
-                          {t.sampleRate != null ? `· ${t.sampleRate / 1000} kHz ` : ''}
-                          · {formatBytes(t.item.blob.size)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {t.item.seed != null && (
-                          <IconButton title="Reuse settings with this seed" onClick={() => reuse(activeEntry, t.item.seed)}>
-                            <RotateCcw size={14} />
-                          </IconButton>
-                        )}
-                        <IconButton title="Download" onClick={() => downloadBlob(t.item.blob, trackFilename(activeEntry, t))}>
-                          <Download size={14} />
-                        </IconButton>
-                      </div>
-                    </div>
-                    <audio controls preload="metadata" src={t.item.url} className="w-full" />
-                  </Panel>
-                ))}
-              </div>
+              <ArtifactGrid
+                items={view.entry.tracks.map((t) => t.item)}
+                onReuse={(item) => reuse(view.entry, item.seed)}
+              />
             </div>
           ) : (
             <EmptyState

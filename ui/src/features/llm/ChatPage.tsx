@@ -2,8 +2,8 @@
  * LLM page — huihui-qwen3-4b, an uncensored creative-writing model.
  *
  * Two modes:
- *  - Chat: multi-conversation sidebar with localStorage persistence, editable /
- *    deletable messages, regenerate + continue, Markdown/JSON export.
+ *  - Chat: multi-conversation sidebar persisted in the profile's settings (kv),
+ *    editable / deletable messages, regenerate + continue, Markdown/JSON export.
  *  - Raw: single `prompt` (+ optional `system_prompt`) completion, no chat
  *    history — the backend skips the chat template when no system prompt is set.
  *
@@ -22,6 +22,8 @@ import type { ChatMessage, LLMRequest } from '../../lib/types'
 import { errorMessage, toast, useClient } from '../../lib/hooks'
 import { downloadBlob } from '../../lib/media'
 import { useApp } from '../../lib/store'
+import { kv } from '../../lib/kv'
+import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
 import {
   Button, Chip, EmptyState, IconButton, Input, Label, Panel, Section,
   Segmented, Slider, Spinner, StatusDot, Switch, Textarea,
@@ -147,22 +149,17 @@ function emptyState(): PersistedState {
 }
 
 function loadState(): PersistedState {
-  try {
-    const raw = localStorage.getItem(STORE_KEY)
-    if (!raw) return emptyState()
-    const parsed = JSON.parse(raw) as Partial<PersistedState>
-    const conversations = Array.isArray(parsed.conversations) ? parsed.conversations : []
-    if (conversations.length === 0) return emptyState()
-    return {
-      conversations,
-      activeId: parsed.activeId ?? conversations[0]?.id ?? null,
-      params: { ...DEFAULT_PARAMS, ...(parsed.params ?? {}) },
-      streaming: parsed.streaming ?? true,
-      mode: parsed.mode === 'raw' ? 'raw' : 'chat',
-      raw: { ...EMPTY_RAW, ...(parsed.raw ?? {}) },
-    }
-  } catch {
-    return emptyState()
+  const parsed = kv.getJson<Partial<PersistedState> | null>(STORE_KEY, null)
+  if (!parsed || typeof parsed !== 'object') return emptyState()
+  const conversations = Array.isArray(parsed.conversations) ? parsed.conversations : []
+  if (conversations.length === 0) return emptyState()
+  return {
+    conversations,
+    activeId: parsed.activeId ?? conversations[0]?.id ?? null,
+    params: { ...DEFAULT_PARAMS, ...(parsed.params ?? {}) },
+    streaming: parsed.streaming ?? true,
+    mode: parsed.mode === 'raw' ? 'raw' : 'chat',
+    raw: { ...EMPTY_RAW, ...(parsed.raw ?? {}) },
   }
 }
 
@@ -290,15 +287,11 @@ export function ChatPage() {
   const mountedRef = useRef(true)
   const persist = (state: PersistedState) => {
     savedRef.current = state
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state))
-    } catch {
-      /* storage unavailable — chat still works in-memory */
-    }
+    kv.setJson(STORE_KEY, state)
   }
   useEffect(() => {
     persist({ conversations, activeId: active?.id ?? null, params, streaming, mode, raw })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- persist only touches refs/localStorage
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- persist only touches refs/kv
   }, [conversations, activeId, params, streaming, mode, raw, active?.id])
 
   /* Navigating away aborts the in-flight request; its partial reply is saved via savedRef. */
@@ -548,19 +541,29 @@ export function ChatPage() {
     }
   }
 
-  const onRawKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      void runRaw()
-    }
-  }
-
   const setP = (patch: Partial<LLMParams>) => setParams((p) => ({ ...p, ...patch }))
 
   const messages = active?.messages ?? []
   const canContinue = !busy && messages.length > 0
   const canRegenerate = !busy && messages.some((m) => m.role === 'user')
   const lastAssistant = messages.length > 0 && messages[messages.length - 1].role === 'assistant' ? messages.length - 1 : -1
+
+  // Ctrl/⌘+Enter: send in chat (plain Enter in the composer also sends), generate in raw mode.
+  usePrimaryAction(mode === 'chat'
+    ? { label: 'Send', run: () => send(draft), disabled: busy || !draft.trim() }
+    : { label: 'Generate', run: () => void runRaw(), disabled: busy || !raw.prompt.trim() })
+
+  useCommands([
+    { id: 'chat.new', label: 'New conversation', group: 'Chat', keywords: 'llm create', disabled: busy, run: createChat },
+    { id: 'chat.clear', label: 'Clear messages in this chat', group: 'Chat', keywords: 'llm reset', disabled: busy || mode !== 'chat' || messages.length === 0, run: clearMessages },
+    { id: 'chat.regenerate', label: 'Regenerate last reply', group: 'Chat', disabled: mode !== 'chat' || !canRegenerate, run: regenerate },
+    { id: 'chat.continue', label: 'Continue last reply', group: 'Chat', disabled: mode !== 'chat' || !canContinue, run: () => send('') },
+    { id: 'chat.stop', label: 'Stop generating', group: 'Chat', disabled: !busy, run: () => abortRef.current?.abort() },
+    { id: 'chat.mode', label: mode === 'chat' ? 'Switch to raw completion' : 'Switch to chat', group: 'Chat', disabled: busy, run: () => setMode(mode === 'chat' ? 'raw' : 'chat') },
+    { id: 'chat.export.md', label: 'Export chat as Markdown', group: 'Chat', disabled: !active || messages.length === 0, run: () => exportChat('md') },
+    { id: 'chat.export.json', label: 'Export chat as JSON', group: 'Chat', disabled: !active || messages.length === 0, run: () => exportChat('json') },
+    { id: 'chat.focus', label: 'Focus message box', group: 'Chat', disabled: mode !== 'chat', run: () => composerRef.current?.focus() },
+  ])
 
   const systemValue = mode === 'raw' ? raw.system : active?.system ?? ''
   const setSystemValue = (v: string) => {
@@ -876,12 +879,11 @@ export function ChatPage() {
           <div ref={scrollRef} className="scroll-area min-h-0 flex-1 p-5">
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
               <div>
-                <Label hint={`${raw.prompt.length} chars · Ctrl+Enter to run`}>Prompt</Label>
+                <Label hint={`${raw.prompt.length} chars · ${MOD_KEY}+Enter to run`}>Prompt</Label>
                 <Textarea
                   rows={10}
                   value={raw.prompt}
                   onChange={(e) => setRaw((r) => ({ ...r, prompt: e.target.value }))}
-                  onKeyDown={onRawKey}
                   disabled={rawLive}
                   placeholder="Raw text sent as `prompt`. Without a system prompt the model simply continues this text."
                   className="text-[13px] leading-relaxed"
