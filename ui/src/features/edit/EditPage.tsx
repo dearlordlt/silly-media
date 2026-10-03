@@ -1,0 +1,1039 @@
+/**
+ * Edit (img2img) — natural-language image editing, ported from ui-img2img.html
+ * (plus the edit modal of ui.html): a sidebar of saved originals with their
+ * edits, the preset-chip composer (compose mode = one prompt, otherwise one
+ * edit per chip), qwen-image-2.1 references / presets / output size, per-model
+ * sampling defaults, batch progress with timing, and a result viewer with
+ * compare, regenerate, reuse and "edit again".
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clsx } from 'clsx'
+import { CheckSquare, Download, FolderOpen, ImagePlus, Images, Plus, RotateCcw, Search, Trash2, Wand2, X } from 'lucide-react'
+import type { Img2ImgRequest } from '../../lib/types'
+import type { MediaItem } from '../../lib/library'
+import { useClient, toast, errorMessage } from '../../lib/hooks'
+import { useModels } from '../../lib/query'
+import { library, useLibrary } from '../../lib/library'
+import { useApp } from '../../lib/store'
+import { blobToDataUrl, downloadBlob, stripDataUrl } from '../../lib/media'
+import { useProgressPoll } from '../../components/Progress'
+import { ImageDrop, useClipboardImage } from '../../components/ImageDrop'
+import { Button, Chip, EmptyState, IconButton, Input, Label, Panel, Section, Select, Slider, Switch, Textarea } from '../../components/ui/primitives'
+import { createZip } from '../../lib/zip'
+import { useHandoffImage } from '../../lib/handoff'
+import { BatchProgress } from './BatchProgress'
+import type { BatchState } from './BatchProgress'
+import { CHECKERBOARD, EditViewer, editLabel, imageHasAlpha, metaFlag, metaNumber, metaString, safeFilename } from './EditResults'
+import { ArtifactGrid } from '../../components/Artifact'
+import {
+  CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
+  QWEN21_EDIT_PRESETS, QWEN21_MAX_REFS, QWEN21_MODEL, QWEN21_SETTINGS_PRESETS, QWEN21_TEXTURE_NEGATIVE, SIZE_MODES,
+  computeOutputSize, joinPromptParts, modelDefaults,
+} from './presets'
+import type { EditOption, SizeMode } from './presets'
+
+const MODEL_KEY = 'silly-edit-model'
+const QWEN21_GROUP = 'qwen21'
+const CUSTOM_LOCATION_ID = 'custom-location'
+
+type SeedMode = 'random' | 'fixed' | 'custom'
+type UpscaleModel = 'clean' | 'sharp'
+
+/** One edit request of a batch. */
+interface EditEntry {
+  label: string
+  prompt: string
+  negative: string
+  transparent: boolean
+  needsRef: boolean
+  /** Eligible for the clothed-variants pair (qwen-image-2.1 preset edits are not). */
+  variants: boolean
+  basePrompt?: string
+  clothedPrompt?: string
+}
+
+/** Sampling settings snapshotted for a batch / stored on every edit. */
+interface RunSettings {
+  model: string
+  steps: number
+  cfg: number
+  useLora: boolean
+  upscale: boolean
+  upscaleFactor: number
+  upscaleModel: UpscaleModel
+  transparent: boolean
+  sizeMode: SizeMode
+  outWidth?: number
+  outHeight?: number
+  references: string[]
+}
+
+function loadSavedModel(): string {
+  try { return localStorage.getItem(MODEL_KEY) ?? QWEN21_MODEL } catch { return QWEN21_MODEL }
+}
+
+function dataUrlSize(url: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
+    img.onerror = () => resolve({ width: 0, height: 0 })
+    img.src = url
+  })
+}
+
+export function EditPage() {
+  const client = useClient()
+  const confirmDeletes = useApp((s) => s.confirmDeletes)
+  const { data: models } = useModels()
+  const img2imgModels = useMemo(() => models?.img2img.available ?? [], [models])
+
+  /* ---------------------------------------------------------------- model */
+  const [model, setModel] = useState(loadSavedModel)
+  const defaults = modelDefaults(model)
+  const [useLora, setUseLora] = useState(false)
+  const [steps, setSteps] = useState(() => modelDefaults(loadSavedModel()).off.steps)
+  const [cfg, setCfg] = useState(() => modelDefaults(loadSavedModel()).off.cfg)
+  const isQ21 = model === QWEN21_MODEL
+
+  /** Model switch: LoRA off and that model's base steps/cfg (legacy applyModelSettings). */
+  const changeModel = useCallback((next: string) => {
+    setModel(next)
+    try { localStorage.setItem(MODEL_KEY, next) } catch { /* storage unavailable */ }
+    const d = modelDefaults(next).off
+    setUseLora(false)
+    setSteps(d.steps)
+    setCfg(d.cfg)
+  }, [])
+
+  // Fall back to the first available model when the saved one is gone.
+  useEffect(() => {
+    if (img2imgModels.length && !img2imgModels.includes(model)) changeModel(img2imgModels[0])
+  }, [img2imgModels, model, changeModel])
+
+  /** LoRA toggle sets the steps/cfg defaults for that mode (legacy toggleLoraOption). */
+  const toggleLora = (on: boolean) => {
+    const d = on ? defaults.on : defaults.off
+    setUseLora(on)
+    setSteps(d.steps)
+    setCfg(d.cfg)
+  }
+  const stepsMin = (useLora ? defaults.on : defaults.off).minSteps
+  const cfgLocked = useLora && defaults.loraLocksCfg
+
+  /* -------------------------------------------------------------- source */
+  const [source, setSource] = useState<string | null>(null)
+  const [srcDims, setSrcDims] = useState<{ width: number; height: number } | null>(null)
+  const [currentOriginalId, setCurrentOriginalId] = useState<string | null>(null)
+  const [originalName, setOriginalName] = useState('')
+
+  useEffect(() => {
+    if (!source) { setSrcDims(null); return }
+    let alive = true
+    void dataUrlSize(source).then((d) => { if (alive) setSrcDims(d.width ? d : null) })
+    return () => { alive = false }
+  }, [source])
+
+  /** A new (unsaved) source image: it becomes an original on the first Proceed. */
+  const loadNewSource = (dataUrl: string | null, name = '') => {
+    setSource(dataUrl)
+    setCurrentOriginalId(null)
+    setOriginalName(dataUrl ? name : '')
+  }
+
+  // Hand-off from other pages (e.g. Studio / Library "Edit"): load once.
+  useHandoffImage('edit', (dataUrl) => loadNewSource(dataUrl))
+
+  /* ------------------------------------------------------------ library */
+  const images = useLibrary('image')
+  const originals = useMemo(
+    () => images.filter((i) => i.source === 'edit-original').sort((a, b) => b.createdAt - a.createdAt),
+    [images],
+  )
+  const edits = useMemo(
+    () => images.filter((i) => i.source === 'edit').sort((a, b) => b.createdAt - a.createdAt),
+    [images],
+  )
+  const originalsById = useMemo(() => new Map(originals.map((o) => [o.id, o])), [originals])
+  const editCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const e of edits) {
+      const id = metaString(e, 'originalId')
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+    return counts
+  }, [edits])
+
+  /** null = "All Images". */
+  const [view, setView] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const viewItems = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return edits.filter((e) => {
+      const origId = metaString(e, 'originalId')
+      if (view && origId !== view) return false
+      if (!q) return true
+      const origName = origId ? originalsById.get(origId)?.name ?? '' : ''
+      return [e.prompt ?? '', editLabel(e), origName].some((s) => s.toLowerCase().includes(q))
+    })
+  }, [edits, view, query, originalsById])
+  const viewOriginal = view ? originalsById.get(view) ?? null : null
+
+  const selectOriginal = async (orig: MediaItem) => {
+    setView(orig.id)
+    setSelection(new Set())
+    setCurrentOriginalId(orig.id)
+    setOriginalName(orig.name === 'Untitled' ? '' : orig.name)
+    setSource(await blobToDataUrl(orig.blob))
+  }
+
+  const renameOriginal = () => {
+    if (!currentOriginalId) return
+    const orig = originalsById.get(currentOriginalId)
+    const name = originalName.trim() || 'Untitled'
+    if (orig && orig.name !== name) void library.update(orig.id, { name })
+  }
+
+  const deleteOriginal = async (orig: MediaItem) => {
+    const count = editCounts.get(orig.id) ?? 0
+    if (!confirm(`Delete "${orig.name}" and its ${count} edit(s)?`)) return
+    await Promise.all(edits.filter((e) => metaString(e, 'originalId') === orig.id).map((e) => library.remove(e.id)))
+    await library.remove(orig.id)
+    if (view === orig.id) setView(null)
+    if (currentOriginalId === orig.id) setCurrentOriginalId(null)
+  }
+
+  const clearAll = async () => {
+    if (!confirm('Delete ALL originals and their edits? This cannot be undone.')) return
+    await Promise.all([...edits, ...originals].map((i) => library.remove(i.id)))
+    setView(null)
+    setSelection(new Set())
+    loadNewSource(null)
+    toast.success('All images deleted')
+  }
+
+  /* --------------------------------------------------------- references */
+  const [references, setReferences] = useState<string[]>([])
+  const addReferences = (files: FileList | File[] | null) => {
+    if (!files) return
+    const list = [...files].filter((f) => f.type.startsWith('image/'))
+    const room = Math.max(0, QWEN21_MAX_REFS - references.length)
+    if (list.length > room) toast.info(`Max ${QWEN21_MAX_REFS} reference images; ${list.length - room} skipped`)
+    void Promise.all(list.slice(0, room).map(blobToDataUrl)).then((urls) => setReferences((prev) => [...prev, ...urls].slice(0, QWEN21_MAX_REFS)))
+  }
+  // Pasting while the pointer is over the reference strip appends a reference;
+  // otherwise the source drop zone handles the paste.
+  const [refsHover, setRefsHover] = useState(false)
+  useClipboardImage((file) => addReferences([file]), { enabled: isQ21 && refsHover && references.length < QWEN21_MAX_REFS })
+
+  /* --------------------------------------------------------------- chips */
+  const [composeMode, setComposeModeState] = useState(true)
+  const [custom, setCustom] = useState('')
+  const customRef = useRef<HTMLTextAreaElement>(null)
+  const [selected, setSelected] = useState<Record<string, Set<string>>>({})
+  const [customLocation, setCustomLocation] = useState<string | null>(null)
+  const [locationDraft, setLocationDraft] = useState('')
+  const [transparent, setTransparent] = useState(false)
+
+  const categories = useMemo(() => EDIT_CATEGORIES.map((c) => (
+    c.id === 'locations' && customLocation
+      ? { ...c, options: [{ id: CUSTOM_LOCATION_ID, label: customLocation, prompt: `Change location to ${customLocation}` }, ...c.options] }
+      : c
+  )), [customLocation])
+
+  /** Compose mode: single-select per category; otherwise multi-select (one edit per chip). */
+  const toggleChip = (group: string, id: string) => {
+    setSelected((prev) => {
+      const set = new Set(prev[group] ?? [])
+      if (set.has(id)) set.delete(id)
+      else {
+        if (composeMode) set.clear()
+        set.add(id)
+      }
+      return { ...prev, [group]: set }
+    })
+  }
+
+  const toggleAll = (group: string, options: EditOption[]) => {
+    setSelected((prev) => ({
+      ...prev,
+      [group]: prev[group]?.size === options.length ? new Set() : new Set(options.map((o) => o.id)),
+    }))
+  }
+
+  /** Entering compose mode trims every category to its first selection. */
+  const setComposeMode = (on: boolean) => {
+    setComposeModeState(on)
+    if (!on) return
+    setSelected((prev) => {
+      const next: Record<string, Set<string>> = {}
+      for (const [k, set] of Object.entries(prev)) {
+        const first = set.values().next()
+        next[k] = first.done ? new Set() : new Set([first.value])
+      }
+      return next
+    })
+  }
+
+  const applyCustomLocation = () => {
+    const text = locationDraft.trim()
+    if (!text) return
+    setCustomLocation(text)
+    setSelected((prev) => ({ ...prev, locations: new Set([CUSTOM_LOCATION_ID]) }))
+    setLocationDraft('')
+  }
+
+  /** Dashed "fill" presets replace the instruction and select their [PLACEHOLDER]. */
+  const insertFillPrompt = (prompt: string) => {
+    setCustom(prompt)
+    requestAnimationFrame(() => {
+      const ta = customRef.current
+      if (!ta) return
+      ta.focus()
+      const start = prompt.indexOf('[')
+      const end = prompt.indexOf(']', start)
+      if (start >= 0 && end > start) ta.setSelectionRange(start, end + 1)
+    })
+  }
+
+  const clickQwen21 = (id: string) => {
+    const preset = QWEN21_EDIT_PRESETS.find((p) => p.id === id)
+    if (!preset) return
+    if (preset.fill) { insertFillPrompt(preset.prompt); return }
+    const willSelect = !selected[QWEN21_GROUP]?.has(id)
+    toggleChip(QWEN21_GROUP, id)
+    // Extract Subject in compose mode also ticks Transparent (batch mode applies it per edit).
+    if (composeMode && willSelect && preset.transparent) setTransparent(true)
+  }
+
+  const resetSelections = () => { setSelected({}); setCustom(''); setCustomLocation(null) }
+
+  /* ------------------------------------------------------------ options */
+  const [negativeOn, setNegativeOn] = useState(false)
+  const [negative, setNegative] = useState('')
+  const [clothesOn, setClothesOn] = useState(false)
+  const [clothesPrompt, setClothesPrompt] = useState('')
+  const [seedMode, setSeedMode] = useState<SeedMode>('random')
+  const [seedValue, setSeedValue] = useState('')
+  const [sizeMode, setSizeMode] = useState<SizeMode>('match')
+  const [upscale, setUpscale] = useState(false)
+  const [upscaleFactor, setUpscaleFactor] = useState(2)
+  const [upscaleModel, setUpscaleModel] = useState<UpscaleModel>('clean')
+
+  const addTextureNegative = () => {
+    setNegative((n) => (n.includes(QWEN21_TEXTURE_NEGATIVE) ? n : `${n.trim() || DEFAULT_NEGATIVE}, ${QWEN21_TEXTURE_NEGATIVE}`))
+    setNegativeOn(true)
+  }
+
+  const applySettingsPreset = (p: (typeof QWEN21_SETTINGS_PRESETS)[number]) => {
+    setUseLora(p.lora)
+    setSteps(p.steps)
+    setCfg(p.cfg)
+    if (p.textureNegative) addTextureNegative()
+  }
+
+  const outputSize = isQ21 && srcDims ? computeOutputSize(sizeMode, srcDims.width, srcDims.height) : null
+  const sizeHint = !srcDims ? '' : outputSize
+    ? `Output: ${outputSize.width}×${outputSize.height}`
+    : `Input ${srcDims.width}×${srcDims.height} → ~1MP, same aspect`
+
+  /* ------------------------------------------------------ prompt building */
+  const activeQwen21 = useMemo(
+    () => (isQ21 ? QWEN21_EDIT_PRESETS.filter((p) => selected[QWEN21_GROUP]?.has(p.id)) : []),
+    [isQ21, selected],
+  )
+  const needsRefWarning = activeQwen21.some((p) => p.needsRef) && references.length === 0
+
+  const entries = useMemo((): EditEntry[] => {
+    const baseNeg = negativeOn && negative.trim() ? negative.trim() : DEFAULT_NEGATIVE
+    const withClothes = `${baseNeg}, ${CLOTHES_NEGATIVE}`
+    const text = custom.trim()
+    const chips: { label: string; prompt: string; nude: boolean; transparent: boolean; needsRef: boolean; q21: boolean }[] = []
+    for (const p of activeQwen21) chips.push({ label: p.label, prompt: p.prompt, nude: false, transparent: !!p.transparent, needsRef: !!p.needsRef, q21: true })
+    for (const c of categories) {
+      for (const o of c.options) {
+        if (selected[c.id]?.has(o.id)) chips.push({ label: o.label, prompt: o.prompt, nude: c.id === 'body' && !!NUDE_BODY_IDS[o.id], transparent: false, needsRef: false, q21: false })
+      }
+    }
+
+    let out: EditEntry[] = []
+    if (composeMode) {
+      const parts = [...(text ? [text] : []), ...chips.map((c) => c.prompt)]
+      if (parts.length) {
+        out.push({
+          label: [...(text ? ['Custom'] : []), ...chips.map((c) => c.label)].join(' + '),
+          prompt: joinPromptParts(parts),
+          negative: chips.some((c) => c.nude) ? withClothes : baseNeg,
+          transparent: chips.some((c) => c.transparent),
+          needsRef: chips.some((c) => c.needsRef),
+          variants: true,
+        })
+      }
+    } else {
+      if (text) out.push({ label: 'Custom', prompt: text, negative: baseNeg, transparent: false, needsRef: false, variants: true })
+      for (const c of chips) {
+        out.push({ label: c.label, prompt: c.prompt, negative: c.nude ? withClothes : baseNeg, transparent: c.transparent, needsRef: c.needsRef, variants: !c.q21 })
+      }
+    }
+
+    // ui.html "Generate clothed variants (2x images)": a Naked + a Dressed edit per prompt.
+    const clothes = clothesPrompt.trim()
+    if (clothesOn && clothes) {
+      out = out.flatMap((e) => (e.variants ? [
+        { ...e, label: `${e.label} (Naked)`, prompt: joinPromptParts([e.prompt, NAKED_VARIANT_SUFFIX]), negative: withClothes, basePrompt: e.prompt },
+        { ...e, label: `${e.label} (Dressed)`, prompt: joinPromptParts([e.prompt, `Wearing ${clothes}`]), negative: baseNeg, basePrompt: e.prompt, clothedPrompt: clothes },
+      ] : [e]))
+    }
+    return out
+  }, [activeQwen21, categories, selected, custom, composeMode, negativeOn, negative, clothesOn, clothesPrompt])
+
+  /* ---------------------------------------------------------- generation */
+  const [running, setRunning] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [batch, setBatch] = useState<BatchState | null>(null)
+  const stopRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const buildRequest = (image: string, prompt: string, negativePrompt: string, seed: number | undefined, s: RunSettings): Img2ImgRequest => {
+    const req: Img2ImgRequest = {
+      image: stripDataUrl(image),
+      prompt,
+      negative_prompt: negativePrompt || ' ',
+      num_inference_steps: s.steps,
+      true_cfg_scale: s.cfg,
+      use_lora: s.useLora,
+    }
+    if (seed != null) req.seed = seed
+    if (s.upscale) { req.upscale = true; req.upscale_factor = s.upscaleFactor; req.upscale_model = s.upscaleModel }
+    if (s.model === QWEN21_MODEL) {
+      req.transparent = s.transparent
+      if (s.outWidth && s.outHeight) { req.width = s.outWidth; req.height = s.outHeight }
+      if (s.references.length) req.reference_images = s.references.map(stripDataUrl)
+    }
+    return req
+  }
+
+  /** Persist an edit result, linked to its original. */
+  const saveEdit = async (blob: Blob, originalId: string, entry: { label: string; prompt: string; negative: string; basePrompt?: string; clothedPrompt?: string }, seed: number | undefined, s: RunSettings, keep?: { id: string; createdAt: number }) => {
+    const [hasAlpha, dims] = await Promise.all([imageHasAlpha(blob), blobToDataUrl(blob).then(dataUrlSize)])
+    await library.add({
+      ...keep,
+      kind: 'image', source: 'edit', blob,
+      name: entry.label,
+      prompt: entry.prompt,
+      negativePrompt: entry.negative,
+      model: s.model, seed, width: dims.width, height: dims.height,
+      meta: {
+        originalId,
+        label: entry.label,
+        steps: s.steps, cfg: s.cfg, useLora: s.useLora,
+        upscale: s.upscale, upscaleFactor: s.upscaleFactor, upscaleModel: s.upscaleModel,
+        hasAlpha,
+        ...(entry.basePrompt ? { basePrompt: entry.basePrompt } : {}),
+        ...(entry.clothedPrompt ? { clothedPrompt: entry.clothedPrompt } : {}),
+        ...(s.model === QWEN21_MODEL ? {
+          transparent: s.transparent, sizeMode: s.sizeMode,
+          ...(s.outWidth && s.outHeight ? { outWidth: s.outWidth, outHeight: s.outHeight } : {}),
+          referenceCount: s.references.length,
+        } : {}),
+      },
+    })
+  }
+
+  const runEdit = async () => {
+    if (!entries.length) { toast.error('Select at least one prompt or enter a custom prompt'); return }
+    if (!source) { toast.error('No source image loaded'); return }
+    if (isQ21 && !references.length && entries.some((e) => e.needsRef)) {
+      toast.error('That preset needs a reference image (image 2) - add one first')
+      return
+    }
+
+    // Snapshot settings for the whole batch.
+    const settings: RunSettings = {
+      model, steps, cfg, useLora, upscale, upscaleFactor, upscaleModel,
+      transparent, sizeMode,
+      outWidth: outputSize?.width, outHeight: outputSize?.height,
+      references: isQ21 ? references.slice() : [],
+    }
+    const image = source
+    const batchEntries = entries
+
+    // Save the original on the first run.
+    let originalId = currentOriginalId
+    if (!originalId) {
+      const blob = await (await fetch(image)).blob()
+      const name = originalName.trim() || 'Untitled'
+      const orig = await library.add({ kind: 'image', source: 'edit-original', blob, name, width: srcDims?.width, height: srcDims?.height })
+      originalId = orig.id
+      setCurrentOriginalId(orig.id)
+    }
+    setView(originalId)
+    setSelection(new Set())
+
+    const batchSeed = Math.floor(Math.random() * 2147483647)
+    const customSeed = Number.parseInt(seedValue, 10)
+    const seed = seedMode === 'fixed' ? batchSeed : seedMode === 'custom' && !Number.isNaN(customSeed) ? customSeed : undefined
+
+    stopRef.current = false
+    setStopping(false)
+    setRunning(true)
+    let done = 0
+    const total = batchEntries.length
+    setBatch({ done: 0, total, current: 1, label: batchEntries[0].label, finished: false })
+    try {
+      for (let i = 0; i < total; i++) {
+        if (stopRef.current) { toast.info(`Cancelled after ${done} edit(s)`); break }
+        const entry = batchEntries[i]
+        setBatch({ done, total, current: i + 1, label: entry.label, finished: false })
+        const run = { ...settings, transparent: settings.transparent || entry.transparent }
+        abortRef.current = new AbortController()
+        try {
+          const blob = await client.img2img(model, buildRequest(image, entry.prompt, entry.negative, seed, run), abortRef.current.signal)
+          await saveEdit(blob, originalId, entry, seed, run)
+          done += 1
+          setBatch({ done, total, current: i + 1, label: entry.label, finished: false })
+        } catch (e) {
+          if (e instanceof DOMException && e.name === 'AbortError') { toast.info(`Cancelled after ${done} edit(s)`); break }
+          toast.error(`Edit "${entry.label}" failed`, errorMessage(e))
+        }
+        // Pause between edits (legacy debounce, counted as idle time).
+        if (i < total - 1 && !stopRef.current) await new Promise<void>((resolve) => { setTimeout(resolve, 2000) })
+      }
+    } finally {
+      abortRef.current = null
+      setRunning(false)
+      setStopping(false)
+      if (done > 0) {
+        setBatch({ done, total, current: total, label: '', finished: true })
+        toast.success(`Created ${done} edited image(s)`)
+      } else setBatch(null)
+    }
+  }
+
+  /** First click: stop after the current edit (legacy). Second click: abort the request. */
+  const cancel = () => {
+    if (!stopping) { stopRef.current = true; setStopping(true); return }
+    abortRef.current?.abort()
+  }
+
+  /* ---------------------------------------------------------- selection */
+  const [selection, setSelection] = useState<Set<string>>(new Set())
+  const toggleSelect = (id: string) => setSelection((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const allSelected = viewItems.length > 0 && viewItems.every((i) => selection.has(i.id))
+  const toggleSelectAll = () => setSelection(allSelected ? new Set() : new Set(viewItems.map((i) => i.id)))
+
+  const deleteEdit = async (item: MediaItem) => {
+    if (confirmDeletes && !confirm('Delete this image?')) return
+    await library.remove(item.id)
+    setSelection((prev) => { const n = new Set(prev); n.delete(item.id); return n })
+  }
+
+  const deleteSelected = async () => {
+    if (!selection.size) return
+    if (!confirm(`Delete ${selection.size} selected image(s)?`)) return
+    await Promise.all([...selection].map((id) => library.remove(id)))
+    setSelection(new Set())
+  }
+
+  const [zipping, setZipping] = useState(false)
+  const downloadZip = async (items: MediaItem[], prefix: string, original: MediaItem | null) => {
+    const files = [
+      ...(original ? [{ label: 'Original', blob: original.blob }] : []),
+      ...items.map((i) => ({ label: editLabel(i), blob: i.blob })),
+    ]
+    if (!files.length) { toast.info('No images to download'); return }
+    setZipping(true)
+    try {
+      const zip = await createZip(files.map((f, i) => ({ name: safeFilename(f.label, f.blob, i), blob: f.blob })))
+      downloadBlob(zip, `${prefix}-${Date.now()}.zip`)
+      toast.success(`Downloaded ${files.length} images as ZIP`)
+    } catch (e) {
+      toast.error('Failed to create ZIP', errorMessage(e))
+    } finally {
+      setZipping(false)
+    }
+  }
+
+  /* -------------------------------------------------------------- viewer */
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  const [regenerating, setRegenerating] = useState(false)
+  const regenProgress = useProgressPoll(() => client.img2imgProgress(), regenerating)
+
+  // Original an edit was made from, for the viewer's compare toggle (pre-originals edits stored a data URL).
+  const originalUrl = useCallback((item: MediaItem): string | null => {
+    const id = metaString(item, 'originalId')
+    const orig = id ? originalsById.get(id) : undefined
+    return orig ? orig.url : metaString(item, 'sourceImage') ?? null
+  }, [originalsById])
+
+  const regenerate = async (item: MediaItem) => {
+    if (!item.prompt) { toast.error('Cannot regenerate: missing prompt'); return }
+    const origId = metaString(item, 'originalId')
+    const orig = origId ? originalsById.get(origId) : undefined
+    const legacySource = metaString(item, 'sourceImage')
+    if (!orig && !legacySource) { toast.error('Original image not found'); return }
+    const itemModel = item.model ?? 'qwen-image-edit'
+    const refCount = metaNumber(item, 'referenceCount') ?? 0
+    if (itemModel === QWEN21_MODEL && refCount > 0 && references.length !== refCount) {
+      toast.error(`This edit used ${refCount} reference image(s) - load the same ${refCount} again to regenerate`)
+      return
+    }
+    const d = modelDefaults(itemModel).off
+    const sm = metaString(item, 'sizeMode')
+    const um = metaString(item, 'upscaleModel')
+    const s: RunSettings = {
+      model: itemModel,
+      steps: metaNumber(item, 'steps') ?? d.steps,
+      cfg: metaNumber(item, 'cfg') ?? d.cfg,
+      useLora: metaFlag(item, 'useLora'),
+      upscale: metaFlag(item, 'upscale'),
+      upscaleFactor: metaNumber(item, 'upscaleFactor') ?? 2,
+      upscaleModel: um === 'sharp' ? 'sharp' : 'clean',
+      transparent: metaFlag(item, 'transparent'),
+      sizeMode: SIZE_MODES.find((m) => m.value === sm)?.value ?? 'match',
+      outWidth: metaNumber(item, 'outWidth'),
+      outHeight: metaNumber(item, 'outHeight'),
+      references: refCount > 0 ? references.slice() : [],
+    }
+    setRegenerating(true)
+    try {
+      const image = orig ? await blobToDataUrl(orig.blob) : legacySource ?? ''
+      const negativePrompt = item.negativePrompt ?? ''
+      const blob = await client.img2img(itemModel, buildRequest(image, item.prompt, negativePrompt, item.seed, s))
+      // Replace in place: same id + timestamp keeps its grid / viewer position.
+      await library.remove(item.id)
+      await saveEdit(blob, origId ?? '', {
+        label: editLabel(item), prompt: item.prompt, negative: negativePrompt,
+        basePrompt: metaString(item, 'basePrompt'), clothedPrompt: metaString(item, 'clothedPrompt'),
+      }, item.seed, s, { id: item.id, createdAt: item.createdAt })
+      toast.success('Regenerated successfully')
+    } catch (e) {
+      toast.error('Regeneration failed', errorMessage(e))
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  /** Load an edit's prompt and its sampling settings back into the editor. */
+  const reusePrompt = (item: MediaItem) => {
+    if (!item.prompt) return
+    const itemModel = item.model ?? model
+    if (itemModel !== model && (!img2imgModels.length || img2imgModels.includes(itemModel))) changeModel(itemModel)
+    setSelected({})
+    setCustomLocation(null)
+    setClothesOn(false)
+    setCustom(item.prompt)
+    setUseLora(metaFlag(item, 'useLora'))
+    const st = metaNumber(item, 'steps')
+    const c = metaNumber(item, 'cfg')
+    if (st != null) setSteps(st)
+    if (c != null) setCfg(c)
+    const neg = item.negativePrompt ?? ''
+    setNegativeOn(!!neg && neg !== DEFAULT_NEGATIVE)
+    setNegative(neg && neg !== DEFAULT_NEGATIVE ? neg : '')
+    if (item.seed != null) { setSeedMode('custom'); setSeedValue(String(item.seed)) } else setSeedMode('random')
+    setUpscale(metaFlag(item, 'upscale'))
+    setUpscaleFactor(metaNumber(item, 'upscaleFactor') ?? 2)
+    setUpscaleModel(metaString(item, 'upscaleModel') === 'sharp' ? 'sharp' : 'clean')
+    setTransparent(metaFlag(item, 'transparent'))
+    const sm = SIZE_MODES.find((m) => m.value === metaString(item, 'sizeMode'))
+    setSizeMode(sm?.value ?? 'match')
+    setViewerIndex(null)
+    toast.info('Prompt and settings loaded')
+  }
+
+  const editAgain = async (item: MediaItem) => {
+    loadNewSource(await blobToDataUrl(item.blob), `${editLabel(item)} (edit)`)
+    setViewerIndex(null)
+    toast.info('Result loaded as a new source image')
+  }
+
+  const deleteFromViewer = async (item: MediaItem) => {
+    if (confirmDeletes && !confirm('Delete this image?')) return
+    await library.remove(item.id)
+    setViewerIndex((idx) => (idx == null || viewItems.length <= 1 ? null : Math.min(idx, viewItems.length - 2)))
+    toast.info('Image deleted')
+  }
+
+  /* ---------------------------------------------------------------- render */
+  const selectedCount = Object.values(selected).reduce((n, s) => n + s.size, 0)
+  const modelOptions = img2imgModels.length ? img2imgModels : [model]
+  const hint = !isQ21 ? null : useLora
+    ? 'Turbo: steps 5-7 = turbo only, 8+ = 9-step hybrid (7 turbo + 2 base, more detail). CFG is forced to 1.'
+    : 'CFG 1 = off. CFG above 1 enables true CFG (uses the negative prompt, about 2x slower).'
+
+  return (
+    <div className="flex h-full">
+      {/* ------------------------------------------------ controls column */}
+      <div className="scroll-area w-[400px] shrink-0 border-r border-line p-5">
+        <Section title="Source image">
+          <ImageDrop value={source} onChange={(v) => loadNewSource(v)} />
+          {source && (
+            <div className="flex items-center gap-2">
+              <Label>Name</Label>
+              <Input
+                className="flex-1"
+                value={originalName}
+                onChange={(e) => setOriginalName(e.target.value)}
+                onBlur={renameOriginal}
+                onKeyDown={(e) => { if (e.key === 'Enter') renameOriginal() }}
+                placeholder="Optional name for this image"
+              />
+            </div>
+          )}
+          {source && !currentOriginalId && <p className="text-[11px] text-ink-faint">New image — saved as an original on the first edit.</p>}
+        </Section>
+
+        <div className="my-4 h-px bg-line" />
+
+        <Section title="Instruction" action={<IconButton onClick={resetSelections} title="Clear prompt and selections"><RotateCcw size={14} /></IconButton>}>
+          <div className="flex items-center gap-3">
+            <Switch checked={composeMode} onChange={setComposeMode} label="Compose mode" />
+            <span className="text-[11px] text-ink-faint">{composeMode ? 'Combine selections into one prompt' : 'Each selection = separate image'}</span>
+          </div>
+          {/* Plain textarea (same `field` styling as <Textarea>) so fill presets can focus/select their placeholder. */}
+          <textarea ref={customRef} rows={3} className="field resize-y leading-relaxed" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Enter custom edit instruction…" />
+          {composeMode ? (
+            entries[0] && (
+              <Panel className="p-2.5 text-[11.5px] leading-relaxed text-ink-dim">
+                <span className="font-semibold text-ink-faint">Preview: </span>{entries[0].prompt}
+              </Panel>
+            )
+          ) : (
+            <span className="text-[11px] text-ink-faint">{selectedCount} chip(s) selected → {entries.length} image(s)</span>
+          )}
+        </Section>
+
+        {isQ21 && (
+          <>
+            <div className="my-4 h-px bg-line" />
+            <Section
+              title="Reference images"
+              action={
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-ink-faint">{references.length}/{QWEN21_MAX_REFS}</span>
+                  {references.length > 0 && <Button size="sm" variant="ghost" onClick={() => setReferences([])}>Clear</Button>}
+                </div>
+              }
+            >
+              <div className="flex flex-wrap gap-2" onMouseEnter={() => setRefsHover(true)} onMouseLeave={() => setRefsHover(false)}>
+                {references.map((r, i) => (
+                  <div key={i} className="group relative">
+                    <img src={r} alt={`image ${i + 2}`} className="h-16 w-16 rounded-lg border border-line bg-bg object-contain" />
+                    <span className="absolute inset-x-0 bottom-0 rounded-b-lg bg-black/60 text-center text-[9.5px] text-white">image {i + 2}</span>
+                    <button
+                      className="absolute right-1 top-1 rounded bg-black/70 p-0.5 text-white opacity-0 group-hover:opacity-100"
+                      onClick={() => setReferences((prev) => prev.filter((_, j) => j !== i))}
+                      title="Remove"
+                    ><X size={11} /></button>
+                  </div>
+                ))}
+                {references.length < QWEN21_MAX_REFS && (
+                  <button
+                    className="grid h-16 w-16 place-items-center rounded-lg border border-dashed border-line text-ink-faint hover:border-line-strong hover:text-ink"
+                    title="Add reference images (or paste while hovering here)"
+                    onClick={() => {
+                      const input = document.createElement('input')
+                      input.type = 'file'; input.multiple = true; input.accept = 'image/*'
+                      input.onchange = () => addReferences(input.files)
+                      input.click()
+                    }}
+                  ><Plus size={18} /></button>
+                )}
+              </div>
+              <p className="text-[11px] text-ink-faint">The main image is “image 1”; references are “image 2”, “image 3”, … in the prompt (max {QWEN21_MAX_REFS}).</p>
+            </Section>
+
+            <div className="my-4 h-px bg-line" />
+            <Section title="Qwen 2.1 edits">
+              <div className="flex flex-wrap gap-1.5">
+                {QWEN21_EDIT_PRESETS.map((p) => p.fill ? (
+                  <button
+                    key={p.id}
+                    type="button"
+                    title="Inserts into the instruction - edit the [placeholder]"
+                    onClick={() => clickQwen21(p.id)}
+                    className="rounded-full border border-dashed border-accent-2/50 px-2.5 py-1 text-[12px] text-accent-2 hover:bg-accent-2/10"
+                  >{p.label}</button>
+                ) : (
+                  <Chip
+                    key={p.id}
+                    tone="cyan"
+                    active={!!selected[QWEN21_GROUP]?.has(p.id)}
+                    title={p.needsRef ? 'Needs a reference image (image 2)' : p.prompt}
+                    onClick={() => clickQwen21(p.id)}
+                  >{p.label}</Chip>
+                ))}
+              </div>
+              {needsRefWarning && (
+                <p className="text-[11.5px] text-warn">This preset needs a reference image: add one above (it becomes image 2).</p>
+              )}
+              <p className="text-[11px] text-ink-faint">Dashed chips insert an editable prompt into the instruction.</p>
+            </Section>
+          </>
+        )}
+
+        <div className="my-4 h-px bg-line" />
+
+        {categories.map((g) => (
+          <Section
+            key={g.id}
+            title={g.label}
+            className="mb-4"
+            action={g.id === 'body' ? undefined : (
+              <Button size="sm" variant="ghost" onClick={() => toggleAll(g.id, g.options)}>
+                {selected[g.id]?.size === g.options.length ? 'None' : 'All'}
+              </Button>
+            )}
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {g.options.map((o) => (
+                <Chip key={o.id} active={!!selected[g.id]?.has(o.id)} title={o.prompt} onClick={() => toggleChip(g.id, o.id)}>{o.label}</Chip>
+              ))}
+            </div>
+            {g.id === 'locations' && (
+              <div className="flex gap-2">
+                <Input
+                  className="flex-1"
+                  value={locationDraft}
+                  onChange={(e) => setLocationDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') applyCustomLocation() }}
+                  placeholder="Custom location…"
+                />
+                <Button size="sm" onClick={applyCustomLocation} disabled={!locationDraft.trim()}>Use</Button>
+              </div>
+            )}
+          </Section>
+        ))}
+
+        <div className="my-4 h-px bg-line" />
+
+        <Section title="Options">
+          <Switch checked={negativeOn} onChange={setNegativeOn} label="Custom negative" />
+          {negativeOn && (
+            <>
+              <Textarea rows={2} value={negative} onChange={(e) => setNegative(e.target.value)} placeholder="Things to avoid…" />
+              <p className="text-[11px] text-ink-faint">Empty = default: {DEFAULT_NEGATIVE}</p>
+            </>
+          )}
+          <p className="text-[11px] text-ink-faint">Nude body chips automatically add a “no clothes” negative.</p>
+          <Switch checked={clothesOn} onChange={setClothesOn} label="Generate clothed variants (2x images)" />
+          {clothesOn && (
+            <Textarea rows={2} value={clothesPrompt} onChange={(e) => setClothesPrompt(e.target.value)} placeholder="e.g. Business suit, stockings, heels" />
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch checked={upscale} onChange={setUpscale} label="Upscale result" />
+            {upscale && (
+              <>
+                <Select className="w-20" value={upscaleFactor} onChange={(e) => setUpscaleFactor(Number(e.target.value))} title="Upscale factor">
+                  {[1.5, 2, 3, 4].map((f) => <option key={f} value={f}>{f}×</option>)}
+                </Select>
+                <Select
+                  className="flex-1"
+                  value={upscaleModel}
+                  onChange={(e) => setUpscaleModel(e.target.value === 'sharp' ? 'sharp' : 'clean')}
+                  title="Clean removes grain/halftone texture; Sharp keeps fine detail"
+                >
+                  <option value="clean">Clean (removes grain)</option>
+                  <option value="sharp">Sharp (keeps detail)</option>
+                </Select>
+              </>
+            )}
+          </div>
+        </Section>
+
+        <div className="my-4 h-px bg-line" />
+
+        <Section title="Model & sampling">
+          <Select value={model} onChange={(e) => changeModel(e.target.value)}>
+            {modelOptions.map((m) => <option key={m} value={m}>{MODEL_LABELS[m] ?? m}</option>)}
+          </Select>
+          <Switch checked={useLora} onChange={toggleLora} label={defaults.loraLabel} />
+          {isQ21 && (
+            <div>
+              <Label>Settings presets</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {QWEN21_SETTINGS_PRESETS.map((p) => (
+                  <Chip
+                    key={p.id}
+                    active={useLora === p.lora && steps === p.steps && cfg === p.cfg}
+                    title={p.title}
+                    onClick={() => applySettingsPreset(p)}
+                  >{p.label}</Chip>
+                ))}
+              </div>
+            </div>
+          )}
+          <Slider label="Steps" value={steps} min={stepsMin} max={MAX_STEPS} onValueChange={setSteps} />
+          {cfgLocked ? (
+            <div><Label hint="1.0">CFG</Label><p className="text-[11px] text-ink-faint">Locked to 1 while the turbo LoRA is on.</p></div>
+          ) : (
+            <Slider label="CFG" value={cfg} min={1} max={10} step={0.5} onValueChange={setCfg} format={(v) => v.toFixed(1)} />
+          )}
+          {hint && <p className="text-[11px] text-ink-faint">{hint}</p>}
+          {isQ21 && cfg > 1 && !negative.includes(QWEN21_TEXTURE_NEGATIVE) && (
+            <Button size="sm" variant="ghost" onClick={addTextureNegative} title={QWEN21_TEXTURE_NEGATIVE}>Add anti-texture negative</Button>
+          )}
+          {isQ21 && (
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <Label hint={sizeHint}>Output size</Label>
+                <Select value={sizeMode} onChange={(e) => setSizeMode(SIZE_MODES.find((m) => m.value === e.target.value)?.value ?? 'match')}>
+                  {SIZE_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </Select>
+              </div>
+              <div className="pb-2"><Switch checked={transparent} onChange={setTransparent} label="Transparent BG" /></div>
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Label>Seed</Label>
+              <Select value={seedMode} onChange={(e) => setSeedMode(e.target.value === 'fixed' ? 'fixed' : e.target.value === 'custom' ? 'custom' : 'random')}>
+                <option value="random">Random</option>
+                <option value="fixed">Fixed (same for whole batch)</option>
+                <option value="custom">Custom</option>
+              </Select>
+            </div>
+            {seedMode === 'custom' && (
+              <Input className="w-32" type="number" value={seedValue} onChange={(e) => setSeedValue(e.target.value)} placeholder="Seed" />
+            )}
+          </div>
+        </Section>
+
+        <div className="sticky bottom-0 -mx-5 mt-5 border-t border-line bg-panel/95 px-5 py-4 backdrop-blur">
+          {running ? (
+            <Button variant="danger" size="lg" className="w-full" icon={<X size={16} />} onClick={cancel}>
+              {stopping ? 'Stopping after this edit… (click to abort now)' : 'Cancel'}
+            </Button>
+          ) : (
+            <Button variant="primary" size="lg" className="w-full" icon={<Wand2 size={16} />} onClick={runEdit} disabled={!source || !entries.length}>
+              Proceed{entries.length > 1 ? ` (${entries.length} images)` : ''}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* ------------------------------------------------ originals sidebar */}
+      <div className="scroll-area flex w-60 shrink-0 flex-col gap-1 border-r border-line p-3">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-ink">Originals</h3>
+          <Button size="sm" variant="ghost" onClick={clearAll} disabled={!originals.length && !edits.length} title="Delete all originals and edits">Clear all</Button>
+        </div>
+        <button
+          className={clsx('flex items-center gap-2 rounded-lg px-2 py-2 text-left text-[12.5px]', view == null ? 'bg-accent/15 text-ink' : 'text-ink-dim hover:bg-panel-2')}
+          onClick={() => { setView(null); setSelection(new Set()) }}
+        >
+          <Images size={15} /> All images <span className="ml-auto text-[11px] text-ink-faint">{edits.length}</span>
+        </button>
+        {originals.map((o) => (
+          <div
+            key={o.id}
+            className={clsx('group flex cursor-pointer items-center gap-2 rounded-lg p-1.5', view === o.id ? 'bg-accent/15' : 'hover:bg-panel-2')}
+            onClick={() => void selectOriginal(o)}
+          >
+            <img src={o.url} alt="" className="h-11 w-11 shrink-0 rounded-md border border-line bg-bg object-contain" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] text-ink">{o.name || 'Untitled'}</div>
+              <div className="flex items-center gap-1.5 text-[10.5px] text-ink-faint">
+                <span>{new Date(o.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                {(editCounts.get(o.id) ?? 0) > 0 && <span className="rounded-full bg-accent/25 px-1.5 text-ink">{editCounts.get(o.id)}</span>}
+              </div>
+            </div>
+            <button
+              className="rounded p-1 text-ink-faint opacity-0 hover:text-bad group-hover:opacity-100"
+              onClick={(e) => { e.stopPropagation(); void deleteOriginal(o) }}
+              title="Delete original and its edits"
+            ><Trash2 size={13} /></button>
+          </div>
+        ))}
+        {!originals.length && <p className="px-2 py-3 text-[11.5px] text-ink-faint">Originals appear here after your first edit.</p>}
+      </div>
+
+      {/* ------------------------------------------------------- results */}
+      <div className="scroll-area flex-1 p-5">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4">
+          <BatchProgress running={running} batch={batch} poll={() => client.img2imgProgress()} />
+
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-ink">
+              {viewOriginal ? viewOriginal.name || 'Untitled' : 'All edits'} <span className="font-normal text-ink-faint">({viewItems.length})</span>
+            </h3>
+            <div className="relative ml-auto w-64">
+              <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-faint" />
+              <Input className="w-full pl-8" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search prompts, names…" />
+            </div>
+            <Button size="sm" variant="secondary" icon={<CheckSquare size={13} />} onClick={toggleSelectAll} disabled={!viewItems.length}>
+              {allSelected ? 'Deselect all' : 'Select all'}
+            </Button>
+            <Button
+              size="sm" variant="secondary" icon={<Download size={13} />} loading={zipping}
+              disabled={!viewItems.length}
+              onClick={() => void downloadZip(viewItems, 'img2img-results', viewOriginal)}
+              title={viewOriginal ? 'ZIP of the original and its edits' : 'ZIP of all shown edits'}
+            >Download ZIP</Button>
+          </div>
+
+          {selection.size > 0 && (
+            <Panel className="flex items-center gap-2 border-accent/40 px-3 py-2 text-[12.5px]">
+              <span className="text-ink">{selection.size} selected</span>
+              <Button size="sm" variant="secondary" icon={<Download size={13} />} loading={zipping}
+                onClick={() => void downloadZip(edits.filter((e) => selection.has(e.id)), 'img2img-selected', null)}>Download ZIP</Button>
+              <Button size="sm" variant="danger" icon={<Trash2 size={13} />} onClick={() => void deleteSelected()}>Delete</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelection(new Set())}>Deselect</Button>
+            </Panel>
+          )}
+
+          {viewOriginal && (
+            <Panel className="flex items-center gap-4 p-3">
+              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-line bg-bg" style={CHECKERBOARD}>
+                <img src={viewOriginal.url} alt="" className="h-full w-full object-contain" />
+              </div>
+              <div className="min-w-0 text-[12px] text-ink-dim">
+                <div className="flex items-center gap-1.5 font-medium text-ink"><FolderOpen size={13} /> Original</div>
+                <div className="mt-1">{viewOriginal.width ? `${viewOriginal.width}×${viewOriginal.height} · ` : ''}{new Date(viewOriginal.createdAt).toLocaleString()}</div>
+              </div>
+              {currentOriginalId !== viewOriginal.id && (
+                <Button className="ml-auto" size="sm" variant="ghost" icon={<ImagePlus size={13} />} onClick={() => void selectOriginal(viewOriginal)}>Use as source</Button>
+              )}
+            </Panel>
+          )}
+
+          {viewItems.length ? (
+            <ArtifactGrid
+              items={viewItems}
+              columns={4}
+              selected={selection}
+              onToggleSelect={(item) => toggleSelect(item.id)}
+              onOpen={(item) => setViewerIndex(viewItems.findIndex((i) => i.id === item.id))}
+              onDelete={(item) => void deleteEdit(item)}
+            />
+          ) : (
+            <EmptyState
+              icon={<Images size={22} />}
+              title={query ? 'No edits match your search' : originals.length || source ? 'No edits yet' : 'No images yet'}
+              detail={query ? undefined : 'Paste or upload an image, pick an instruction and press Proceed.'}
+            />
+          )}
+        </div>
+      </div>
+
+      <EditViewer
+        items={viewItems}
+        index={viewerIndex}
+        onIndex={setViewerIndex}
+        onClose={() => setViewerIndex(null)}
+        originalUrl={originalUrl}
+        regenerating={regenerating}
+        regenPercent={regenProgress.percent}
+        busy={running}
+        onRegenerate={(item) => void regenerate(item)}
+        onReuse={reusePrompt}
+        onEditAgain={(item) => void editAgain(item)}
+        onDelete={(item) => void deleteFromViewer(item)}
+      />
+    </div>
+  )
+}

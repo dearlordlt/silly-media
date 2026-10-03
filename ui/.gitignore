@@ -1,0 +1,6 @@
+node_modules/
+dist/
+
+# The repo-root .gitignore has an unanchored Python-template `lib/` rule that
+# would otherwise exclude the app's shared layer (src/lib).
+!/src/lib/
