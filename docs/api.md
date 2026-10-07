@@ -377,7 +377,7 @@ Adding a LoRA = dropping its `.safetensors` into the family folder (the host fol
 - `default_scale` is used when a request omits `scale` (otherwise 1.0).
 - `trigger_words` are appended to the prompt automatically while the LoRA is active, so clients never add them.
 - `modes` tells UIs where to offer the LoRA; the API accepts it in both modes.
-- `tags` are free-form labels UIs can key features on (e.g. `outfit-swap`: the Edit page suggests that LoRA for outfit runs and leaves it out of steps without an image 2).
+- `tags` are free-form labels UIs can key features on (e.g. `outfit-swap`: the Edit page suggests that LoRA for outfit runs and leaves it out of steps without an image 2; `edit-consistency`: suggested for local edits, with a warning when pose / gaze / composition changes are selected).
 
 **Request rules**
 - `loras: [{"name": "...", "scale": 0.8}, ...]` on `POST /generate/{model}`, `POST /img2img/edit/{model}`, and as a form field on `/img2img/edit/{model}/upload` (JSON list or `"name:scale,name2"`).
@@ -394,6 +394,9 @@ Adding a LoRA = dropping its `.safetensors` into the family folder (the host fol
 | `nsfw-alpacas` | [NSFW LORA v2 (TheseAlpacas)](https://civitai.com/models/2958918) | 0.9 | Base model, 25+ steps, CFG 3-6 |
 | `femaled-vaginus` | [FemaledVaginus-NSFW v1.3b](https://civitai.com/models/2986844) | 0.8 | CFG 3, 20 steps; works with turbo |
 | `full-body` | [Full Body](https://civitai.com/models/2983070) | 0.8 | Base model, 25 steps, CFG 4 |
+| `glamour-realism` | [Glamour Realism](https://civitai.com/models/2986100) | 0.6 | More natural skin and photographic colour (less plastic, washed-out look); 0.5-0.7, outfit/pose drift from 0.8. Generate and edit |
+| `detail-fix` | [Fix v2.0](https://civitai.com/models/2957332) | 1.0 | General detail / quality fix (MLP-only, 15 blocks; ships kohya alphas ≈2.6-3x rank, folded automatically). More skin texture and contrast; pairs well with `glamour-realism` at ~0.7 |
+| `edit-consistency` | [Consistency LoRA](https://civitai.com/models/2969143) | 1.0 | **Edit only** (tag `edit-consistency`): the edit happens on the original's frame, so only what the instruction asks for changes (no re-framing, repainted hair or background). For local edits, restyles, relighting, colour changes; leave it off for new poses, camera angles or zoom |
 | `outfit-swap` | [Outfit Swap Consistency](https://civitai.com/models/2983159) | 1.0 | **Edit only** (`modes: ["edit"]`, tag `outfit-swap`): image 1 = person, image 2 (`reference_images`) = outfit, prompt *"Dress the person in image 1 in the &lt;outfit&gt; shown in image 2. Keep their face, hair, hands, pose and the background exactly the same."* ~25 steps, CFG 1; works with turbo. Keeps the frame, face and background in place instead of re-framing the shot |
 
 ```bash

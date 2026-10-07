@@ -312,6 +312,9 @@ def edit_image(
     swaps use loras=["outfit-swap"] with the outfit photo in reference_image_paths and
     "Dress the person in image 1 in the <outfit> shown in image 2. Keep their face, hair,
     hands, pose and the background exactly the same." (keeps face/pose/background fixed).
+    For local edits (colour, restyle, relight, background) add "edit-consistency" so nothing
+    else moves; leave it off for pose / camera / framing changes. "glamour-realism" (0.6) and
+    "detail-fix" improve skin and detail on both generate and edit.
     upscale / upscale_factor / upscale_model: optional ESRGAN
     upscale of the result, same as generate_image (any edit model).
     Returns edited image inline + path."""

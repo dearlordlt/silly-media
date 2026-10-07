@@ -8,12 +8,13 @@
  * the page renders its jobs as batch progress + placeholder tiles.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { clsx } from 'clsx'
 import { CheckSquare, Download, FolderOpen, ImagePlus, Images, Plus, RotateCcw, Search, Trash2, Wand2, X } from 'lucide-react'
 import type { MediaItem } from '../../lib/library'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useModelLoras, useModels } from '../../lib/query'
-import type { LoraSpec } from '../../lib/types'
+import type { LoraInfo, LoraSpec } from '../../lib/types'
 import { LoraPicker, activeLorasFor } from '../../components/LoraPicker'
 import { itemBlob, itemExtension, library, useLibrary } from '../../lib/library'
 import { kv } from '../../lib/kv'
@@ -44,6 +45,17 @@ import type { EditOption, SizeMode } from './presets'
 
 const MODEL_KEY = 'silly-edit-model'
 const QWEN21_GROUP = 'qwen21'
+/** Chip groups that change the pose, gaze or framing (an Edit Consistency LoRA would hold them in place). */
+const STRUCTURAL_GROUPS = ['poses', 'gazes', 'composition']
+
+function LoraHint({ tone, action, onAction, children }: { tone: 'suggest' | 'warn'; action: string; onAction: () => void; children: ReactNode }) {
+  return (
+    <div className={clsx('mb-3 flex items-start gap-2 rounded-lg border px-3 py-2', tone === 'warn' ? 'border-warn/50 bg-warn/10' : 'border-accent/40 bg-accent/10')}>
+      <p className="flex-1 text-[11.5px] text-ink-dim">{children}</p>
+      <Button size="sm" variant={tone === 'warn' ? 'ghost' : undefined} onClick={onAction}>{action}</Button>
+    </div>
+  )
+}
 /** Custom chip texts per category, newest first (persisted per profile). */
 const CUSTOM_CHIPS_KEY = 'silly-edit-custom-chips'
 const CUSTOM_CHIPS_MAX = 12
@@ -448,6 +460,16 @@ export function EditPage() {
   const outfitSwapLora = isOutfitRun && modelLoras?.model === model
     ? modelLoras.loras.find((l) => l.tags?.includes('outfit-swap') && !sendLoras.some((x) => x.name === l.name))
     : undefined
+
+  // Edit Consistency (tag "edit-consistency"): suggest it for local edits, warn when it's on
+  // for structural ones (pose / gaze / composition chips), which it would hold in place.
+  const isStructural = STRUCTURAL_GROUPS.some((g) => (selected[g]?.size ?? 0) > 0)
+  const hasEdit = entries.length > 0 || !!custom.trim() || (isQ21 && !!activeSet)
+  const consistencyLora = modelLoras?.model === model ? modelLoras.loras.find((l) => l.tags?.includes('edit-consistency')) : undefined
+  const consistencyOn = !!consistencyLora && sendLoras.some((x) => x.name === consistencyLora.name)
+  const consistencySuggest = consistencyLora && !consistencyOn && hasEdit && !isStructural && !isOutfitRun ? consistencyLora : undefined
+  const consistencyConflict = consistencyLora && consistencyOn && isStructural ? consistencyLora : undefined
+  const enableLora = (l: LoraInfo) => setLoras((cur) => [...cur.filter((x) => x.name !== l.name), { name: l.name, scale: l.default_scale ?? 1 }])
   const runCount = runEntries.length + (withBaseStep ? 1 : 0)
 
   /* ---------------------------------------------------------- generation */
@@ -1102,17 +1124,19 @@ export function EditPage() {
           <>
             <div className="my-4 h-px bg-line" />
             {outfitSwapLora && (
-              <div className="mb-3 flex items-start gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2">
-                <p className="flex-1 text-[11.5px] text-ink-dim">
-                  Outfit swap: <span className="text-ink">{outfitSwapLora.display_name || outfitSwapLora.name}</span> keeps the face, pose and background in place while only the clothes change.
-                </p>
-                <Button
-                  size="sm"
-                  onClick={() => setLoras((cur) => [...cur.filter((x) => x.name !== outfitSwapLora.name), { name: outfitSwapLora.name, scale: outfitSwapLora.default_scale ?? 1 }])}
-                >
-                  Turn on
-                </Button>
-              </div>
+              <LoraHint tone="suggest" action="Turn on" onAction={() => enableLora(outfitSwapLora)}>
+                Outfit swap: <span className="text-ink">{outfitSwapLora.display_name || outfitSwapLora.name}</span> keeps the face, pose and background in place while only the clothes change.
+              </LoraHint>
+            )}
+            {consistencySuggest && (
+              <LoraHint tone="suggest" action="Turn on" onAction={() => enableLora(consistencySuggest)}>
+                Local edit: <span className="text-ink">{consistencySuggest.display_name || consistencySuggest.name}</span> keeps everything except the requested change in place (no re-framing or repainted background).
+              </LoraHint>
+            )}
+            {consistencyConflict && (
+              <LoraHint tone="warn" action="Turn off" onAction={() => setLoras((cur) => cur.filter((x) => x.name !== consistencyConflict.name))}>
+                <span className="text-ink">{consistencyConflict.display_name || consistencyConflict.name}</span> pins the original frame, so pose, gaze and composition changes may not happen. Turn it off for those.
+              </LoraHint>
             )}
             <LoraPicker model={model} value={loras} onChange={setLoras} mode="edit" />
           </>
