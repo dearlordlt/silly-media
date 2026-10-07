@@ -9,8 +9,6 @@ export interface ImageModelInfo {
   cfg: boolean
   /** Turbo LoRA toggle (`use_lora`) and its steps/cfg schedule. */
   turboLora?: { label: string; steps: number; cfg: number }
-  /** Stackable user LoRAs from data/loras (Z-Image family). */
-  supportsUserLoras?: boolean
   /** Qwen 2.1 extras: RGBA output, size + settings presets. */
   supportsTransparent?: boolean
   note?: string
@@ -23,7 +21,6 @@ export const IMAGE_MODELS: ImageModelInfo[] = [
     steps: 9,
     cfgDefault: 0,
     cfg: false,
-    supportsUserLoras: true,
     note: 'Default. 9-step turbo, bilingual text rendering. CFG is ignored internally.',
   },
   {
@@ -32,7 +29,6 @@ export const IMAGE_MODELS: ImageModelInfo[] = [
     steps: 30,
     cfgDefault: 4.0,
     cfg: true,
-    supportsUserLoras: true,
     note: 'Full CFG support (3.0–5.0) and negative prompts. Higher quality, slower.',
   },
   {
@@ -41,7 +37,6 @@ export const IMAGE_MODELS: ImageModelInfo[] = [
     steps: 9,
     cfgDefault: 0,
     cfg: true,
-    supportsUserLoras: true,
     note: 'PornMaster V3.5 NSFW fine-tune. cfg_scale honoured (≤1.5 recommended with negatives).',
   },
   {

@@ -8,10 +8,12 @@ import type {
   HealthResponse,
   LLMRequest,
   LLMResponse,
+  LoraListResponse,
   MayaActor,
   MayaTTSRequest,
   Model3DRequest,
   Model3DResult,
+  ModelLorasResponse,
   ModelsResponse,
   MusicGenerateRequest,
   ProgressResponse,
@@ -103,7 +105,9 @@ export class SillyClient {
   // --- status ---------------------------------------------------------------
   health = (o?: CallOpts) => this.json<HealthResponse>('/health', undefined, o)
   models = (o?: CallOpts) => this.json<ModelsResponse>('/models', undefined, o)
-  loras = (o?: CallOpts) => this.json<{ loras: { name: string; size_mb: number }[]; compatible_models: string[] }>('/loras', undefined, o)
+  loras = (o?: CallOpts) => this.json<LoraListResponse>('/loras', undefined, o)
+  modelLoras = (model: string, o?: CallOpts) =>
+    this.json<ModelLorasResponse>(`/loras?model=${encodeURIComponent(model)}`, undefined, o)
   aspectRatios = (o?: CallOpts) => this.json<Record<string, { name: string; dimensions_at_1024: [number, number] }>>('/aspect-ratios', undefined, o)
   progress = (o?: CallOpts) => this.json<ProgressResponse>('/progress', undefined, o)
 

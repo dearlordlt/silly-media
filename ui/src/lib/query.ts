@@ -31,6 +31,12 @@ export function useLoras() {
   return useQuery({ queryKey: ['loras', client.base], queryFn: () => client.loras() })
 }
 
+/** User LoRAs usable with one model (its LoRA family); `supported` is false for models without LoRA support. */
+export function useModelLoras(model: string) {
+  const client = useClient()
+  return useQuery({ queryKey: ['loras', client.base, model], queryFn: () => client.modelLoras(model), enabled: !!model })
+}
+
 export function useAspectRatios() {
   const client = useClient()
   return useQuery({ queryKey: ['aspect-ratios', client.base], queryFn: () => client.aspectRatios() })

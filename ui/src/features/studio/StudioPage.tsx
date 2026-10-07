@@ -4,11 +4,12 @@ import { clsx } from 'clsx'
 import { useNavigate } from '@tanstack/react-router'
 import {
   ArrowLeftRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Dice5, Download, Eraser, Eye, FileArchive, HelpCircle, Layers,
-  ListChecks, Maximize2, RefreshCw, RotateCcw, Rows3, Save, Search, Sparkles, Trash2, Wand2, X, Zap,
+  ListChecks, Maximize2, RotateCcw, Rows3, Save, Search, Sparkles, Trash2, Wand2, X, Zap,
 } from 'lucide-react'
 import type { AspectRatio, GenerateRequest, LoraSpec } from '../../lib/types'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
-import { useHealth, useLoras } from '../../lib/query'
+import { useHealth, useModelLoras } from '../../lib/query'
+import { LoraPicker, activeLorasFor } from '../../components/LoraPicker'
 import type { MediaItem } from '../../lib/library'
 import { downloadItem, itemBlob, library, useLibrary } from '../../lib/library'
 import { kv } from '../../lib/kv'
@@ -167,7 +168,9 @@ export function StudioPage() {
   const jsonHistory = useTextHistory(HISTORY_KEYS.json)
 
   const allImages = useLibrary('image')
-  const { data: loraData, isError: lorasError, refetch: refetchLoras, isFetching: lorasFetching } = useLoras()
+  const { data: modelLoras } = useModelLoras(s.model)
+  const modelLorasRef = useRef(modelLoras)
+  modelLorasRef.current = modelLoras
   const { data: health } = useHealth()
 
   const info = modelInfo(s.model)
@@ -286,7 +289,10 @@ export function StudioPage() {
       req.upscale_factor = cur.upscaleFactor
       req.upscale_model = cur.upscaleModel
     }
-    if (m?.supportsUserLoras && cur.loras.length) req.loras = cur.loras
+    // Only this model's LoRA family; the selection is kept across model switches
+    const lorasData = modelLorasRef.current?.model === cur.model ? modelLorasRef.current : undefined
+    const loras = activeLorasFor(cur.loras, lorasData)
+    if (loras.length) req.loras = loras
     return req
   }
 
@@ -781,62 +787,10 @@ export function StudioPage() {
           )}
         </Section>
 
-        {info?.supportsUserLoras && (
+        {modelLoras?.supported && modelLoras.model === s.model && (
           <>
             {divider}
-            <Section
-              title={
-                <span className="flex items-center gap-2">
-                  LoRAs
-                  {s.loras.length > 0 && <span className="rounded-full bg-accent/20 px-1.5 py-px text-[10.5px] font-semibold text-accent">{s.loras.length} active</span>}
-                </span>
-              }
-              action={
-                <div className="flex items-center gap-1">
-                  {s.loras.length > 0 && <Button variant="ghost" size="sm" onClick={() => set({ loras: [] })} title="Turn all LoRAs off">Clear</Button>}
-                  <span className="text-[11px] text-ink-faint">{loraData?.loras.length ?? 0} installed</span>
-                  <IconButton onClick={() => void refetchLoras()} title="Reload LoRA list from server">
-                    <RefreshCw size={13} className={clsx(lorasFetching && 'animate-spin')} />
-                  </IconButton>
-                </div>
-              }
-            >
-              {lorasError ? <p className="text-[11.5px] text-bad">Could not load LoRA list.</p>
-                : loraData?.loras.length || s.loras.length ? (
-                  <div className="flex flex-col gap-1.5">
-                    {[
-                      ...(loraData?.loras ?? []).map((l) => ({ name: l.name, note: `${l.size_mb} MB`, missing: false })),
-                      // Active (e.g. from reused settings) but not installed: still sent, so keep it switchable.
-                      ...(loraData ? s.loras.filter((x) => !loraData.loras.some((l) => l.name === x.name)).map((x) => ({ name: x.name, note: 'not installed', missing: true })) : []),
-                    ].map((l) => {
-                      const active = s.loras.find((x) => x.name === l.name)
-                      return (
-                        <div key={l.name} className={clsx('flex flex-col gap-2 rounded-lg border px-2.5 py-2', active ? 'border-accent/50 bg-accent/10' : 'border-line')}>
-                          <div className="flex items-center justify-between gap-2">
-                            <Switch
-                              checked={!!active}
-                              onChange={(on) => set({ loras: on ? [...s.loras, { name: l.name, scale: 1 }] : s.loras.filter((x) => x.name !== l.name) })}
-                              label={<span className={clsx('break-all text-[12.5px]', active ? 'text-ink' : 'text-ink-dim')}>{l.name}</span>}
-                            />
-                            <span className={clsx('shrink-0 text-[10.5px]', l.missing ? 'text-warn' : 'text-ink-faint')}>{l.note}</span>
-                          </div>
-                          {active && (
-                            <Slider
-                              label="Scale"
-                              value={active.scale}
-                              min={0}
-                              max={2}
-                              step={0.05}
-                              onValueChange={(v) => set({ loras: s.loras.map((x) => (x.name === l.name ? { ...x, scale: v } : x)) })}
-                              format={(v) => `× ${v.toFixed(2)}`}
-                            />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : <p className="text-[11.5px] text-ink-faint">No LoRAs installed — drop .safetensors files into data/loras.</p>}
-            </Section>
+            <LoraPicker model={s.model} value={s.loras} onChange={(loras) => set({ loras })} mode="generate" />
           </>
         )}
 

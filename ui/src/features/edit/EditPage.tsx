@@ -12,7 +12,9 @@ import { clsx } from 'clsx'
 import { CheckSquare, Download, FolderOpen, ImagePlus, Images, Plus, RotateCcw, Search, Trash2, Wand2, X } from 'lucide-react'
 import type { MediaItem } from '../../lib/library'
 import { useClient, toast, errorMessage } from '../../lib/hooks'
-import { useModels } from '../../lib/query'
+import { useModelLoras, useModels } from '../../lib/query'
+import type { LoraSpec } from '../../lib/types'
+import { LoraPicker, activeLorasFor } from '../../components/LoraPicker'
 import { itemBlob, itemExtension, library, useLibrary } from '../../lib/library'
 import { kv } from '../../lib/kv'
 import { jobs, throwIfCancelled, useJobCounts, usePageJobs } from '../../lib/jobs'
@@ -26,7 +28,7 @@ import { Button, Chip, EmptyState, IconButton, Input, Label, Panel, Section, Sel
 import { createZip } from '../../lib/zip'
 import { useHandoffImage } from '../../lib/handoff'
 import { BatchProgress } from './BatchProgress'
-import { CHECKERBOARD, EditViewer, PendingEditTile, editLabel, metaFlag, metaNumber, metaString, safeFilename } from './EditResults'
+import { CHECKERBOARD, EditViewer, PendingEditTile, editLabel, metaFlag, metaLoras, metaNumber, metaString, safeFilename } from './EditResults'
 import type { CompareMode } from './EditResults'
 import { editJobData, enqueueEdit, isActive } from './editJobs'
 import type { EditPrompt, RunSettings, UpscaleModel } from './editJobs'
@@ -337,6 +339,10 @@ export function EditPage() {
   const [upscale, setUpscale] = useState(false)
   const [upscaleFactor, setUpscaleFactor] = useState(2)
   const [upscaleModel, setUpscaleModel] = useState<UpscaleModel>('clean')
+  // User LoRAs; kept across model switches, only the selected model's family is sent
+  const [loras, setLoras] = useState<LoraSpec[]>([])
+  const { data: modelLoras } = useModelLoras(model)
+  const sendLoras = activeLorasFor(loras, modelLoras?.model === model ? modelLoras : undefined)
 
   const addTextureNegative = () => {
     setNegative((n) => (n.includes(QWEN21_TEXTURE_NEGATIVE) ? n : `${n.trim() || DEFAULT_NEGATIVE}, ${QWEN21_TEXTURE_NEGATIVE}`))
@@ -463,6 +469,7 @@ export function EditPage() {
       transparent, sizeMode,
       outWidth: outputSize?.width, outHeight: outputSize?.height,
       references: isQ21 ? references.slice() : [],
+      loras: sendLoras,
     }
     const image = source
     const batchEntries = runEntries
@@ -682,6 +689,7 @@ export function EditPage() {
       outWidth: metaNumber(item, 'outWidth'),
       outHeight: metaNumber(item, 'outHeight'),
       references: [...setRefs, ...(manualCount > 0 ? references : [])],
+      loras: metaLoras(item),
     }
     let image: string
     try {
@@ -732,6 +740,7 @@ export function EditPage() {
     setUpscale(metaFlag(item, 'upscale'))
     setUpscaleFactor(metaNumber(item, 'upscaleFactor') ?? 2)
     setUpscaleModel(metaString(item, 'upscaleModel') === 'sharp' ? 'sharp' : 'clean')
+    setLoras(metaLoras(item))
     setTransparent(metaFlag(item, 'transparent'))
     const sm = SIZE_MODES.find((m) => m.value === metaString(item, 'sizeMode'))
     setSizeMode(sm?.value ?? 'match')
@@ -1079,6 +1088,13 @@ export function EditPage() {
             )}
           </div>
         </Section>
+
+        {modelLoras?.supported && modelLoras.model === model && (
+          <>
+            <div className="my-4 h-px bg-line" />
+            <LoraPicker model={model} value={loras} onChange={setLoras} mode="edit" />
+          </>
+        )}
 
         <div className="sticky bottom-0 -mx-5 mt-5 border-t border-line bg-panel/95 px-5 py-4 backdrop-blur">
           <Button

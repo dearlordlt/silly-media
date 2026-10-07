@@ -10,6 +10,7 @@ import type { CSSProperties } from 'react'
 import { clsx } from 'clsx'
 import { AlertTriangle, ChevronLeft, ChevronRight, ChevronsLeftRight, Download, Hourglass, Loader2, RefreshCw, RotateCcw, Trash2, Wand2, X } from 'lucide-react'
 import type { MediaItem } from '../../lib/library'
+import type { LoraSpec } from '../../lib/types'
 import { downloadItem, itemExtension } from '../../lib/library'
 import { jobs } from '../../lib/jobs'
 import type { Job } from '../../lib/jobs'
@@ -32,6 +33,13 @@ export function metaNumber(item: MediaItem, key: string): number | undefined {
 
 export function metaFlag(item: MediaItem, key: string): boolean {
   return item.meta?.[key] === true
+}
+
+/** User LoRAs an edit ran with ([] for older items). */
+export function metaLoras(item: MediaItem): LoraSpec[] {
+  const v = item.meta?.loras
+  if (!Array.isArray(v)) return []
+  return v.filter((l): l is LoraSpec => !!l && typeof l.name === 'string' && typeof l.scale === 'number')
 }
 
 /** Display label of an edit (chip label(s) / "Custom"), falling back to its prompt. */

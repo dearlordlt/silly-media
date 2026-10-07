@@ -50,7 +50,7 @@ npm run typecheck  # tsc --noEmit
 | Route      | Covers |
 | ---------- | ------ |
 | `/studio`  | Text-to-image: every registered image model, batch mode, stacked LoRAs, ESRGAN upscale, transparency, presets |
-| `/edit`    | img2img with the preset-chip composer (+ saved custom chips), reference images and reference sets (Qwen 2.1: one edit per set image, e.g. a person × 10 outfits), RGBA output |
+| `/edit`    | img2img with the preset-chip composer (+ saved custom chips), reference images and reference sets (Qwen 2.1: one edit per set image, e.g. a person × 10 outfits), stacked LoRAs, RGBA output |
 | `/assets`  | Pixel art (`/pixelart`) and sprite cutouts (`/sprite`) |
 | `/audio`   | TTS (XTTS v2 + Maya), actors (upload / YouTube), Maya voice presets, history |
 | `/music`   | ACE-Step 1.5 music generation with captions, lyrics and metadata |

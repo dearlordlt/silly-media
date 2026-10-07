@@ -38,8 +38,30 @@ export type AspectRatio =
   | '5:4' | '4:3' | '3:2' | '16:9' | '21:9'
 
 export interface LoraSpec { name: string; scale: number }
+/** An installed user LoRA (GET /loras); metadata fields come from its optional sidecar JSON. */
+export interface LoraInfo {
+  name: string
+  size_mb: number
+  display_name?: string
+  description?: string
+  default_scale?: number
+  recommended?: string
+  source?: string
+  modes?: ('generate' | 'edit')[]
+  trigger_words?: string[]
+}
+/** GET /loras (no model): the legacy Z-Image list plus every model family. */
 export interface LoraListResponse {
-  loras: { name: string; size_mb: number }[]
+  loras: LoraInfo[]
+  compatible_models: string[]
+  families?: Record<string, { models: string[]; loras: LoraInfo[] }>
+}
+/** GET /loras?model=<id>: that model's LoRA family, if it supports user LoRAs. */
+export interface ModelLorasResponse {
+  model: string
+  family: string | null
+  supported: boolean
+  loras: LoraInfo[]
   compatible_models: string[]
 }
 
@@ -61,7 +83,7 @@ export interface GenerateRequest {
   loras?: LoraSpec[]
 }
 
-export interface Img2ImgRequest extends Omit<GenerateRequest, 'aspect_ratio' | 'base_size' | 'cfg_scale' | 'loras'> {
+export interface Img2ImgRequest extends Omit<GenerateRequest, 'aspect_ratio' | 'base_size' | 'cfg_scale'> {
   image?: string
   true_cfg_scale?: number
   reference_images?: string[]

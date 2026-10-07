@@ -5,7 +5,7 @@
  * saves the result to the library linked to its original and reports it via
  * `ctx.addItem`.
  */
-import type { Img2ImgRequest } from '../../lib/types'
+import type { Img2ImgRequest, LoraSpec } from '../../lib/types'
 import type { SillyClient } from '../../lib/api'
 import { library } from '../../lib/library'
 import type { MediaItem } from '../../lib/library'
@@ -33,6 +33,8 @@ export interface RunSettings {
   outHeight?: number
   /** Reference images (data URLs), qwen-image-2.1 only. */
   references: string[]
+  /** User LoRAs (already filtered to the model's LoRA family). */
+  loras: LoraSpec[]
 }
 
 /** The prompt side of one edit. */
@@ -81,6 +83,7 @@ function buildRequest(image: string, prompt: string, negativePrompt: string, see
     use_lora: s.useLora,
   }
   if (seed != null) req.seed = seed
+  if (s.loras.length) req.loras = s.loras
   if (s.upscale) { req.upscale = true; req.upscale_factor = s.upscaleFactor; req.upscale_model = s.upscaleModel }
   if (s.model === QWEN21_MODEL) {
     req.transparent = s.transparent
@@ -133,6 +136,7 @@ async function saveEdit(blob: Blob, originalId: string, entry: EditPrompt, seed:
       steps: s.steps, cfg: s.cfg, useLora: s.useLora,
       upscale: s.upscale, upscaleFactor: s.upscaleFactor, upscaleModel: s.upscaleModel,
       hasAlpha,
+      ...(s.loras.length ? { loras: s.loras } : {}),
       ...(entry.basePrompt ? { basePrompt: entry.basePrompt } : {}),
       ...(entry.clothedPrompt ? { clothedPrompt: entry.clothedPrompt } : {}),
       ...(entry.refSet ? { refSetId: entry.refSet.setId, refSetName: entry.refSet.setName, refItemId: entry.refSet.itemId, refLabel: entry.refSet.label } : {}),
