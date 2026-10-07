@@ -9,6 +9,7 @@ It exposes one API for image generation, image editing, pixel art, text-to-speec
 - **Image Generation**: Multiple text-to-image models including fast and quality-oriented options
 - **Image Editing**: Img2img editing with natural-language instructions
 - **Upscaling**: Optional ESRGAN upscale (`upscale: true`) on generation and editing, any model
+- **LoRAs**: Stackable user LoRAs per model family (Z-Image, Qwen-Image 2.1) via `loras` on generation and editing; drop files into `data/loras/<family>/`
 - **Pixel Art**: Small icon/pixel art generation with background removal
 - **Text-to-Speech**: XTTS voice cloning and Maya description-based TTS
 - **Actor System**: Save reusable voice profiles from uploaded audio or YouTube extraction

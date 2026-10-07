@@ -1,7 +1,6 @@
 """Z-Image-Turbo model implementation."""
 
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -9,6 +8,7 @@ import torch
 from PIL import Image
 
 from ..config import settings
+from ..loras import LoraStackMixin
 from .base import BaseImageModel
 
 if TYPE_CHECKING:
@@ -17,71 +17,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _adapter_name(lora_name: str) -> str:
-    """peft adapter names become module-dict keys, so dots etc. must go."""
-    return re.sub(r"[^0-9A-Za-z_-]", "_", lora_name)
+class ZImageLoraMixin(LoraStackMixin):
+    """Stacked user LoRAs for the Z-Image pipelines (legacy flat data/loras dir).
 
-
-class ZImageLoraMixin:
-    """Hot-swap named LoRAs on a ZImagePipeline between requests.
-
-    Any number of adapters can be stacked at once; the active set is diffed
-    against the request so repeated calls with the same combo don't reload
-    files, and a scale-only change skips the reload too.
-    Civitai/ComfyUI-style checkpoints (diffusion_model.*.lora_A) are converted
-    automatically by diffusers' ZImageLoraLoaderMixin.
+    Files are handed to diffusers by path so its ZImageLoraLoaderMixin converts
+    Civitai/ComfyUI-style checkpoints (diffusion_model.*.lora_A) itself.
     """
 
-    _pipe: Any
+    lora_family = "z-image"
 
-    def __init__(self):
-        super().__init__()
-        self._active_loras: list[tuple[str, float]] = []
-
-    def _reset_lora_state(self) -> None:
-        self._active_loras = []
-
-    def _sync_loras(self, request: "GenerateRequest") -> None:
-        wanted = [(spec.name, spec.scale) for spec in request.loras]
-        if wanted == self._active_loras:
-            return
-
-        wanted_names = [name for name, _ in wanted]
-        active_names = [name for name, _ in self._active_loras]
-
-        if wanted_names != active_names:
-            # Resolve all paths first so a bad name fails before touching the pipe.
-            paths = {name: self._resolve_lora_path(name) for name in wanted_names}
-            if active_names:
-                logger.info(f"Unloading LoRAs {active_names}")
-                self._pipe.unload_lora_weights()
-                self._active_loras = []
-            try:
-                for name, scale in wanted:
-                    logger.info(f"Loading LoRA '{name}' (scale={scale})")
-                    self._pipe.load_lora_weights(str(paths[name]), adapter_name=_adapter_name(name))
-            except Exception:
-                # Don't leave a half-loaded adapter set behind (e.g. unsupported
-                # checkpoint format) — the tracker must match the pipe.
-                self._pipe.unload_lora_weights()
-                self._active_loras = []
-                raise
-
-        if wanted:
-            self._pipe.set_adapters(
-                [_adapter_name(name) for name, _ in wanted],
-                adapter_weights=[scale for _, scale in wanted],
-            )
-        self._active_loras = wanted
-
-    @staticmethod
-    def _resolve_lora_path(name: str) -> Path:
-        lora_dir = Path(settings.lora_dir).resolve()
-        path = (lora_dir / f"{name}.safetensors").resolve()
-        if path.parent != lora_dir or not path.is_file():
-            available = sorted(p.stem for p in lora_dir.glob("*.safetensors"))
-            raise ValueError(f"LoRA '{name}' not found in {lora_dir}. Available: {available}")
-        return path
+    def _load_user_lora(self, path: Path, adapter: str) -> None:
+        self._pipe.load_lora_weights(str(path), adapter_name=adapter)
 
 
 class ZImageTurboModel(ZImageLoraMixin, BaseImageModel):
@@ -154,7 +100,7 @@ class ZImageTurboModel(ZImageLoraMixin, BaseImageModel):
         if not self._loaded or self._pipe is None:
             raise RuntimeError("Model not loaded")
 
-        self._sync_loras(request)
+        self._sync_loras(request.loras)
 
         generator = None
         if request.seed is not None and request.seed >= 0:
@@ -173,7 +119,7 @@ class ZImageTurboModel(ZImageLoraMixin, BaseImageModel):
         )
 
         result = self._pipe(
-            prompt=request.prompt,
+            prompt=self._prompt_with_triggers(request.prompt),
             negative_prompt=request.negative_prompt or None,
             num_inference_steps=steps,
             guidance_scale=cfg,
@@ -254,7 +200,7 @@ class ZImageModel(ZImageLoraMixin, BaseImageModel):
         if not self._loaded or self._pipe is None:
             raise RuntimeError("Model not loaded")
 
-        self._sync_loras(request)
+        self._sync_loras(request.loras)
 
         generator = None
         if request.seed is not None and request.seed >= 0:
@@ -270,7 +216,7 @@ class ZImageModel(ZImageLoraMixin, BaseImageModel):
         )
 
         result = self._pipe(
-            prompt=request.prompt,
+            prompt=self._prompt_with_triggers(request.prompt),
             negative_prompt=request.negative_prompt or None,
             num_inference_steps=steps,
             guidance_scale=cfg,

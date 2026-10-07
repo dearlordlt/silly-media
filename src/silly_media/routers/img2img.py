@@ -10,9 +10,11 @@ from fastapi import APIRouter, File, Form, HTTPException, Path, Response, Upload
 from PIL import Image
 from pydantic import ValidationError
 
+from .. import loras as lora_files
 from .. import upscaler
 from ..img2img import Img2ImgRegistry
 from ..img2img.schemas import Img2ImgRequest
+from ..schemas import parse_lora_list
 from ..progress import img2img_progress
 from ..vram_manager import ModelType, vram_manager
 
@@ -77,6 +79,15 @@ def _validate_request(model: str, instance, request: Img2ImgRequest, n_reference
     for side in (request.width, request.height):
         if side is not None and side > max_side:
             raise HTTPException(400, f"Model '{model}' supports output sides up to {max_side}px")
+    if request.loras:
+        family = getattr(instance, "lora_family", "")
+        if not family:
+            raise HTTPException(400, f"Model '{model}' does not support loras")
+        try:
+            for spec in request.loras:
+                lora_files.resolve_path(family, spec.name)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     if n_references:
         if "reference_images" not in inspect.signature(instance.edit).parameters:
             raise HTTPException(400, f"Model '{model}' does not support reference_images")
@@ -197,6 +208,9 @@ async def edit_image_upload(
     height: int | None = Form(None, description="Output height (defaults to input image height)"),
     use_lora: bool = Form(False, description="Use the model's speed LoRA"),
     transparent: bool = Form(False, description="Return a transparent (RGBA) result (qwen-image-2.1)"),
+    loras: str | None = Form(
+        None, description='User LoRAs: JSON [{"name": ..., "scale": ...}] or "name:scale,name2" (models with LoRA support)'
+    ),
     upscale: bool = Form(False, description="Upscale the result with an ESRGAN model"),
     upscale_factor: float = Form(2.0, description="Upscale factor (1-4]"),
     upscale_model: str = Form("clean", description="clean (removes grain) or sharp (keeps detail)"),
@@ -222,12 +236,15 @@ async def edit_image_upload(
             height=height,
             use_lora=use_lora,
             transparent=transparent,
+            loras=parse_lora_list(loras),
             upscale=upscale,
             upscale_factor=upscale_factor,
             upscale_model=upscale_model,
         )
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False, include_context=False, include_input=False))
+    except ValueError as e:
+        raise HTTPException(422, f"Invalid loras: {e}")
 
     references = reference_images or []
     _validate_request(model, instance, request, len(references))

@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..schemas import LoraSpec
+
 
 class Img2ImgRequest(BaseModel):
     """Request for image editing."""
@@ -54,6 +56,10 @@ class Img2ImgRequest(BaseModel):
     transparent: bool = Field(
         default=False,
         description="Return a transparent (RGBA) result (qwen-image-2.1; automatic when the input has alpha)",
+    )
+    loras: list[LoraSpec] = Field(
+        default_factory=list,
+        description="User LoRAs, each {name, scale}; models with LoRA support only (see GET /loras?model=<id>)",
     )
     upscale: bool = Field(default=False, description="Upscale the result with an ESRGAN model after editing")
     upscale_factor: float = Field(default=2.0, gt=1.0, le=4.0, description="Upscale factor (1-4], used when upscale is true")

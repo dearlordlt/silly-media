@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import torch
 from PIL import Image
 
+from ..loras import LoraStackMixin
 from ..utils import drop_tree_cache, repo_cached
 from .base import BaseImageModel
 
@@ -26,6 +27,7 @@ BASE_MODEL = "Qwen/Qwen-Image-2.1"  # text encoder, processor, VAE, scheduler (n
 # shift_terminal=0.02 wrecks the last turbo step.
 TURBO_REPO = "Viggle/Qwen-Image-2.1-viggle-turbo"
 TURBO_LORA_FILENAME = "Qwen-Image-2.1-viggle-turbo-v0.3-6step-lora-r256.safetensors"
+TURBO_ADAPTER = "turbo"
 
 # Raw sigma nodes from the turbo model card; the pipeline applies its
 # resolution-dependent shift on top, so they're passed as-is at every size. Step
@@ -110,7 +112,7 @@ def _has_alpha(image: Image.Image) -> bool:
     return image.convert("RGBA").getchannel("A").getextrema()[0] < 255
 
 
-class QwenImage21Model(BaseImageModel):
+class QwenImage21Model(LoraStackMixin, BaseImageModel):
     """Qwen-Image-2.1 Uncensored: 7B single-stream DiT + Qwen3-VL-8B text encoder.
 
     One pipeline serves both /generate (text-to-image) and /img2img/edit (up to 10
@@ -130,6 +132,8 @@ class QwenImage21Model(BaseImageModel):
     turbo_default_steps = 6
     max_side = 3072  # edit output cap; 2K presets reach ~2.7-3K on the long side
 
+    lora_family = "qwen-image-2.1"  # user LoRAs in data/loras/qwen-image-2.1/
+
     supports_transparency = True
     supports_alpha_input = True
     supports_reference_images = True
@@ -140,8 +144,7 @@ class QwenImage21Model(BaseImageModel):
         self._pipe: Any = None
         self._base_scheduler: Any = None
         self._turbo_scheduler: Any = None
-        self._lora_loaded = False
-        self._lora_active = False
+        self._turbo_loaded = False
 
     @classmethod
     def weights_cached(cls) -> bool:
@@ -223,8 +226,8 @@ class QwenImage21Model(BaseImageModel):
         logger.info(f"{self.display_name} loaded")
 
     def _load_turbo(self) -> None:
-        """Lazy-load the turbo LoRA (inactive) and its scheduler."""
-        if self._lora_loaded:
+        """Lazy-load the turbo LoRA and its scheduler (activated by _sync_loras)."""
+        if self._turbo_loaded:
             return
 
         from diffusers import FlowMatchEulerDiscreteScheduler
@@ -232,29 +235,19 @@ class QwenImage21Model(BaseImageModel):
 
         logger.info(f"Loading turbo LoRA: {TURBO_REPO}")
         lora_path = hf_hub_download(TURBO_REPO, TURBO_LORA_FILENAME)
-        self._pipe.load_lora_weights(lora_path, adapter_name="turbo")
-        self._pipe.disable_lora()
+        self._pipe.load_lora_weights(lora_path, adapter_name=TURBO_ADAPTER)
         self._turbo_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
             TURBO_REPO, subfolder="scheduler"
         )
-        self._lora_loaded = True
-        self._lora_active = False
-        logger.info("Turbo LoRA loaded (inactive)")
+        self._turbo_loaded = True
+        logger.info("Turbo LoRA loaded")
 
-    def _set_turbo(self, on: bool) -> None:
-        if on:
+    def _prepare_adapters(self, loras: list[Any], use_lora: bool) -> None:
+        """Activate the user LoRAs, plus the turbo adapter and scheduler when use_lora."""
+        if use_lora:
             self._load_turbo()
-            if not self._lora_active:
-                # set_adapters only selects the adapter; it doesn't undo disable_lora().
-                self._pipe.set_adapters(["turbo"], adapter_weights=[1.0])
-                self._pipe.enable_lora()
-                self._lora_active = True
-            self._pipe.scheduler = self._turbo_scheduler
-        else:
-            if self._lora_active:
-                self._pipe.disable_lora()
-                self._lora_active = False
-            self._pipe.scheduler = self._base_scheduler
+        self._sync_loras(loras, pinned={TURBO_ADAPTER: 1.0} if use_lora else None)
+        self._pipe.scheduler = self._turbo_scheduler if use_lora else self._base_scheduler
 
     def unload(self) -> None:
         if not self._loaded:
@@ -267,8 +260,8 @@ class QwenImage21Model(BaseImageModel):
             self._pipe = None
         self._base_scheduler = None
         self._turbo_scheduler = None
-        self._lora_loaded = False
-        self._lora_active = False
+        self._turbo_loaded = False
+        self._reset_lora_state()
         self._loaded = False
 
         gc.collect()
@@ -303,12 +296,14 @@ class QwenImage21Model(BaseImageModel):
         transparent: bool,
         seed: int | None,
         progress_callback: Callable | None,
+        loras: list[Any] | None = None,
         wrap_transparent: bool = True,
     ) -> Image.Image:
         if not self._loaded or self._pipe is None:
             raise RuntimeError("Model not loaded")
 
-        self._set_turbo(use_lora)
+        self._prepare_adapters(loras or [], use_lora)
+        prompt = self._prompt_with_triggers(prompt)
         steps = self.resolve_steps(steps, use_lora)
         hybrid = use_lora and steps == len(HYBRID_SIGMAS)
 
@@ -350,7 +345,8 @@ class QwenImage21Model(BaseImageModel):
 
         def on_step_end(pipe, step, timestep, callback_kwargs):
             if hybrid and step == HYBRID_TURBO_STEPS - 1:
-                pipe.disable_lora()
+                # Base model finishes: drop only turbo, user LoRAs stay active.
+                self._apply_adapters({})
                 reextract[0] = True
             if progress_callback is not None:
                 return progress_callback(pipe, step, timestep, callback_kwargs)
@@ -361,7 +357,8 @@ class QwenImage21Model(BaseImageModel):
         logger.info(
             f"Qwen-Image-2.1: {width}x{height}, steps={steps}{' (hybrid)' if hybrid else ''}, "
             f"cfg={cfg}, turbo={use_lora}, transparent={transparent}, "
-            f"condition_images={len(images) if images else 0}"
+            f"condition_images={len(images) if images else 0}, "
+            f"loras={[(n, s) for n, s in self._active_loras]}"
         )
         try:
             # Not torch.inference_mode(): the offload hooks move weights to the GPU
@@ -372,7 +369,7 @@ class QwenImage21Model(BaseImageModel):
         finally:
             if hybrid:
                 transformer.forward = orig_forward
-                self._pipe.enable_lora()
+                self._apply_adapters({TURBO_ADAPTER: 1.0})
 
         # The VAE always decodes RGBA. Keep alpha only when asked, so every other
         # caller still gets the plain RGB image other models return.
@@ -401,6 +398,7 @@ class QwenImage21Model(BaseImageModel):
             transparent=getattr(request, "transparent", False),
             seed=request.seed,
             progress_callback=progress_callback,
+            loras=request.loras,
         )
 
     def edit(
@@ -444,5 +442,6 @@ class QwenImage21Model(BaseImageModel):
             transparent=request.transparent or input_alpha,
             seed=request.seed,
             progress_callback=progress_callback,
+            loras=request.loras,
             wrap_transparent=False,
         )

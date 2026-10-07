@@ -241,16 +241,47 @@ List available aspect ratio presets with calculated dimensions.
 
 ### `GET /loras`
 
-List LoRA adapters installed in `data/loras` (any `*.safetensors` file dropped there is picked up — no restart needed). Usable with the Z-Image models via the `loras` request field.
+List installed user LoRAs (see [LoRAs](#loras) for the framework). Files dropped into a family's folder are picked up live — no restart needed.
+
+**Query parameters**
+| Parameter | Description |
+|-----------|-------------|
+| `model` | Optional. Only the LoRAs usable with this model (its LoRA family), plus whether it supports LoRAs. 404 for an unknown model |
+
+Without `model` the response keeps its original shape (the Z-Image list and `compatible_models`) and adds a `families` map covering every model family:
 
 ```json
 {
   "loras": [
-    { "name": "my-style-lora", "size_mb": 170.4 }
+    { "name": "my-style-lora", "size_mb": 170.4, "display_name": "my-style-lora", "description": "", "default_scale": 1.0,
+      "recommended": "", "source": "", "modes": ["generate", "edit"], "trigger_words": [] }
   ],
-  "compatible_models": ["z-image", "z-image-turbo", "z-image-turbo-pm"]
+  "compatible_models": ["z-image", "z-image-turbo", "z-image-turbo-pm"],
+  "families": {
+    "qwen-image-2.1": { "models": ["qwen-image-2.1"], "loras": [ { "name": "full-body", "size_mb": 76.0, "display_name": "Full Body Anatomy", "default_scale": 0.8, "...": "..." } ] },
+    "z-image": { "models": ["z-image", "z-image-turbo", "z-image-turbo-pm"], "loras": [ "..." ] }
+  }
 }
 ```
+
+With `?model=qwen-image-2.1`:
+
+```json
+{
+  "model": "qwen-image-2.1",
+  "family": "qwen-image-2.1",
+  "supported": true,
+  "loras": [
+    { "name": "full-body", "size_mb": 76.0, "display_name": "Full Body Anatomy",
+      "description": "Keeps genitals and anus as coherent anatomy in full-body poses instead of a blur.",
+      "default_scale": 0.8, "recommended": "Base model, 25 steps, CFG 4, strength 0.8; trained up to ~1792x2400",
+      "source": "https://civitai.com/models/2983070?modelVersionId=3381816", "modes": ["generate", "edit"], "trigger_words": [] }
+  ],
+  "compatible_models": ["qwen-image-2.1"]
+}
+```
+
+Models without LoRA support return `{"model": "krea-2-turbo", "family": null, "supported": false, "loras": [], "compatible_models": []}`.
 
 ### `POST /generate/{model}`
 
@@ -279,13 +310,13 @@ Generate an image using the specified model.
   "upscale": "bool, optional (default false) — ESRGAN upscale after generation, any model (see Upscaling)",
   "upscale_factor": "float, optional (>1.0-4.0, default 2.0)",
   "upscale_model": "string, optional — \"clean\" (default) or \"sharp\"",
-  "loras": "array, optional — [{\"name\": \"...\", \"scale\": 1.0}, ...] stacks any number of LoRAs from data/loras (Z-Image models only; scale 0.0-2.0, default 1.0)",
+  "loras": "array, optional — [{\"name\": \"...\", \"scale\": 1.0}, ...] stacks any number of user LoRAs (models with LoRA support: Z-Image family, qwen-image-2.1 — see GET /loras?model=<id>; scale 0.0-2.0, omitted = the LoRA's default_scale, else 1.0; ignored by other models)",
   "lora": "string, optional — deprecated single-LoRA form, merged into loras",
   "lora_scale": "float, optional (0.0-2.0, default 1.0) — strength for the deprecated lora field"
 }
 ```
 
-**LoRA stacking (Z-Image models):** list installed adapters with `GET /loras`, then pass e.g. `"loras": [{"name": "style-a"}, {"name": "style-b", "scale": 0.7}]`. Adapters are hot-swapped between requests — repeating the same combo costs nothing; changing scales only re-weights without reloading files. Old clients sending `lora`/`lora_scale` keep working unchanged.
+**LoRA stacking (Z-Image models, qwen-image-2.1):** list a model's installed adapters with `GET /loras?model=<id>`, then pass e.g. `"loras": [{"name": "style-a"}, {"name": "style-b", "scale": 0.7}]`. Adapters are hot-swapped between requests — repeating the same combo costs nothing; changing scales only re-weights without reloading files. Old clients sending `lora`/`lora_scale` keep working unchanged. See [LoRAs](#loras).
 
 **Model-specific defaults:**
 
@@ -312,6 +343,68 @@ Generate an image using the specified model.
 | 400 | Invalid request parameters (including an upscaled size over 8192px per side) |
 | 404 | Model not found |
 | 500 | Generation failed |
+
+---
+
+## LoRAs
+
+User LoRAs are a framework shared by every model that supports them: a request lists the LoRAs to stack in `loras`, and the backend loads, swaps and weights them — no trigger words or `<lora:…>` tags in the prompt.
+
+**Model families and folders**
+
+| Family | Models | Folder |
+|--------|--------|--------|
+| `z-image` | `z-image`, `z-image-turbo`, `z-image-turbo-pm` | `data/loras/*.safetensors` (unchanged) |
+| `qwen-image-2.1` | `qwen-image-2.1` (generate **and** `/img2img/edit`) | `data/loras/qwen-image-2.1/*.safetensors` |
+
+Adding a LoRA = dropping its `.safetensors` into the family folder (the host folder is root-owned: `docker cp file.safetensors silly-media-silly-media-1:/app/data/loras/<family>/`). It shows up in `GET /loras` immediately. The LoRA name is the filename without `.safetensors`.
+
+**Optional sidecar metadata** — `<name>.json` next to the file:
+
+```json
+{
+  "display_name": "Full Body Anatomy",
+  "description": "Keeps genitals and anus as coherent anatomy in full-body poses.",
+  "default_scale": 0.8,
+  "recommended": "Base model, 25 steps, CFG 4, strength 0.8",
+  "source": "https://civitai.com/models/2983070",
+  "modes": ["generate", "edit"],
+  "trigger_words": []
+}
+```
+
+- `default_scale` is used when a request omits `scale` (otherwise 1.0).
+- `trigger_words` are appended to the prompt automatically while the LoRA is active, so clients never add them.
+- `modes` tells UIs where to offer the LoRA; the API accepts it in both modes.
+
+**Request rules**
+- `loras: [{"name": "...", "scale": 0.8}, ...]` on `POST /generate/{model}`, `POST /img2img/edit/{model}`, and as a form field on `/img2img/edit/{model}/upload` (JSON list or `"name:scale,name2"`).
+- Unknown name → 400 listing the family's LoRAs. `loras` sent to an edit model without LoRA support (`qwen-image-edit`) → 400. On `/generate`, models without LoRA support ignore `loras` (unchanged behaviour).
+- Scale 0.0-2.0; any number can be stacked (keep the combined strength reasonable, ~≤1.5).
+- With `qwen-image-2.1` they combine with the turbo LoRA (`use_lora: true`); in the 9-step hybrid the user LoRAs stay active for the two base-model steps.
+
+**File formats** — diffusers/PEFT and ComfyUI/Civitai layouts load as-is. For non-Z-Image families the backend also normalises: `diffusion_model.` prefixes, kohya `.alpha` tensors (folded into the weights) and Qwen-Image 2.1's fused `img_mlp.gate_up` (split into diffusers' `gate_layer` / `proj`). LyCORIS LoKr/LoHa files are rejected with 400.
+
+**Installed `qwen-image-2.1` LoRAs** (NSFW, no trigger words):
+
+| Name | Source | Default scale | Author's settings |
+|------|--------|---------------|-------------------|
+| `nsfw-alpacas` | [NSFW LORA v2 (TheseAlpacas)](https://civitai.com/models/2958918) | 0.9 | Base model, 25+ steps, CFG 3-6 |
+| `femaled-vaginus` | [FemaledVaginus-NSFW v1.3b](https://civitai.com/models/2986844) | 0.8 | CFG 3, 20 steps; works with turbo |
+| `full-body` | [Full Body](https://civitai.com/models/2983070) | 0.8 | Base model, 25 steps, CFG 4 |
+
+```bash
+# Generate with two stacked LoRAs (default scales)
+curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Full body photo of a woman in a sunlit bedroom", "num_inference_steps": 30, "cfg_scale": 3.5,
+       "loras": [{"name": "full-body"}, {"name": "nsfw-alpacas", "scale": 0.7}]}' -o out.png
+
+# Same LoRAs on an edit (turbo)
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1/upload \
+  -F image=@photo.png -F "prompt=Make her completely naked, keep the face and pose" -F use_lora=true \
+  -F "loras=femaled-vaginus:0.8,full-body" -o edited.png
+```
 
 ---
 
@@ -788,6 +881,7 @@ Edit an image using base64-encoded image in JSON body.
   "use_lora": false,
   "reference_images": null,
   "transparent": false,
+  "loras": [],
   "upscale": false,
   "upscale_factor": 2.0,
   "upscale_model": "clean"
@@ -806,6 +900,7 @@ Edit an image using base64-encoded image in JSON body.
 | `height`              | int    | No       | `null`  | Output height (64-3072, same per-model max and defaults as `width`)       |
 | `use_lora`            | bool   | No       | `false` | Use the model's speed LoRA: `qwen-image-edit` Lightning (recommended: 4-6 steps, CFG 1.0); `qwen-image-2.1` 6-step turbo (5-7 steps snap to the published schedules, ≥8 = 9-step hybrid; CFG forced to 1.0) |
 | `reference_images`    | array  | No       | `null`  | Extra base64 images (max 9) — `image 2`, `image 3`… in the prompt. `qwen-image-2.1` only (400 on other models) |
+| `loras`               | array  | No       | `[]`    | User LoRAs `[{"name", "scale"}]` (see [LoRAs](#loras)); `qwen-image-2.1` only (400 on other models). Omitted scale = the LoRA's `default_scale` |
 | `transparent`         | bool   | No       | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`; automatic when the input image has alpha) |
 | `upscale`             | bool   | No       | `false` | ESRGAN upscale of the result, any model (see Upscaling)                   |
 | `upscale_factor`      | float  | No       | `2.0`   | Upscale factor, >1.0-4.0                                                  |
@@ -825,7 +920,7 @@ Edit an image using base64-encoded image in JSON body.
 **Errors**
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request or missing image field, `width`/`height` above the model's max side, `reference_images` on a model that doesn't support them |
+| 400 | Invalid request or missing image field, `width`/`height` above the model's max side, `reference_images` or `loras` on a model that doesn't support them, unknown LoRA name |
 | 404 | Model not found |
 | 500 | Edit failed |
 
@@ -852,6 +947,7 @@ Edit an image using multipart file upload.
 | `use_lora` | bool | No | `false` | Use the model's speed LoRA (Lightning / 6-step turbo) |
 | `transparent` | bool | No | `false` | Return a transparent RGBA PNG (`qwen-image-2.1`) |
 | `reference_images` | file | No | - | Extra reference image (repeat the field for several, max 9) — `qwen-image-2.1` only |
+| `loras` | string | No | - | User LoRAs as a JSON list `[{"name": ..., "scale": ...}]` or `"name:scale,name2"` — `qwen-image-2.1` only |
 | `upscale` | bool | No | `false` | ESRGAN upscale of the result (see Upscaling) |
 | `upscale_factor` | float | No | `2.0` | Upscale factor, >1.0-4.0 |
 | `upscale_model` | string | No | `"clean"` | `clean` or `sharp` |

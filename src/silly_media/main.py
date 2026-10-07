@@ -8,7 +8,7 @@ import sys
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Path, Request
+from fastapi import Query, FastAPI, HTTPException, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
@@ -393,21 +393,44 @@ async def get_progress():
 
 
 @app.get("/loras")
-async def list_loras():
-    """List LoRA adapters installed in the lora directory."""
-    import pathlib
+async def list_loras(
+    model: str | None = Query(None, description="Only LoRAs usable with this model (e.g. qwen-image-2.1)"),
+):
+    """List installed user LoRAs.
 
-    lora_dir = pathlib.Path(settings.lora_dir)
-    loras = [
-        {
-            "name": f.stem,
-            "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+    Without `model`: the legacy Z-Image list plus a `families` map covering every
+    model family. With `model`: that model's family, whether it supports LoRAs at
+    all, and its LoRAs.
+    """
+    from . import loras as lora_files
+
+    families: dict[str, list[str]] = {}
+    for name in vram_manager.get_available_models():
+        family = getattr(vram_manager.get_model_info(name).instance, "lora_family", "")
+        if family:
+            families.setdefault(family, []).append(name)
+
+    if model is not None:
+        info = vram_manager.get_model_info(model)
+        if info is None:
+            raise HTTPException(status_code=404, detail=f"Model '{model}' not found")
+        family = getattr(info.instance, "lora_family", "") or None
+        return {
+            "model": model,
+            "family": family,
+            "supported": family is not None,
+            "loras": lora_files.list_loras(family) if family else [],
+            "compatible_models": sorted(families.get(family, [])) if family else [],
         }
-        for f in sorted(lora_dir.glob("*.safetensors"))
-    ] if lora_dir.is_dir() else []
+
+    legacy = lora_files.LEGACY_FAMILY
     return {
-        "loras": loras,
-        "compatible_models": ["z-image", "z-image-turbo", "z-image-turbo-pm"],
+        "loras": lora_files.list_loras(legacy),
+        "compatible_models": sorted(families.get(legacy, [])),
+        "families": {
+            family: {"models": sorted(models), "loras": lora_files.list_loras(family)}
+            for family, models in sorted(families.items())
+        },
     }
 
 

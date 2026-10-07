@@ -57,7 +57,7 @@ def calculate_dimensions(
 
 
 class LoraSpec(BaseModel):
-    """A named LoRA adapter with its strength, referencing a file in lora_dir."""
+    """A named LoRA adapter with its strength (see GET /loras?model=<id>)."""
 
     name: Annotated[
         str,
@@ -65,12 +65,18 @@ class LoraSpec(BaseModel):
             min_length=1,
             max_length=128,
             pattern=r"^[^/\\]+$",
-            description="LoRA filename (without .safetensors) from data/loras",
+            description="LoRA name from GET /loras?model=<id> (filename without .safetensors)",
         ),
     ]
     scale: Annotated[
-        float, Field(default=1.0, ge=0.0, le=2.0, description="LoRA strength")
-    ] = 1.0
+        float | None,
+        Field(
+            default=None,
+            ge=0.0,
+            le=2.0,
+            description="LoRA strength (omit for the LoRA's default_scale from GET /loras, else 1.0)",
+        ),
+    ] = None
 
 
 class GenerateRequest(BaseModel):
@@ -127,11 +133,11 @@ class GenerateRequest(BaseModel):
         ),
     ] = "clean"
 
-    # Named LoRAs from the lora_dir (e.g. "my-lora" -> data/loras/my-lora.safetensors).
-    # Any number can be stacked; currently supported by the Z-Image models.
+    # Named user LoRAs for models with LoRA support (z-image family, qwen-image-2.1);
+    # list them with GET /loras?model=<id>. Ignored by models without LoRA support.
     loras: Annotated[
         list[LoraSpec],
-        Field(default_factory=list, description="LoRAs to apply together, each {name, scale}"),
+        Field(default_factory=list, description="LoRAs to apply together, each {name, scale} (see GET /loras?model=<id>)"),
     ]
 
     # Legacy single-LoRA fields, kept for backwards compatibility. Merged into
@@ -272,3 +278,22 @@ class SpriteRequest(GenerateRequest):
         int | None,
         Field(default=None, ge=8, le=2048, description="Longest side of final image (aspect preserved); omit to keep full resolution"),
     ] = None
+
+
+def parse_lora_list(value: str | None) -> list[LoraSpec]:
+    """Parse LoRAs from a form/CLI string: a JSON list of {name, scale} or "name:scale,name2"."""
+    import json
+
+    if not value or not value.strip():
+        return []
+    value = value.strip()
+    if value.startswith("["):
+        return [LoraSpec(**item) if isinstance(item, dict) else LoraSpec(name=str(item)) for item in json.loads(value)]
+    specs = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        name, sep, scale = item.rpartition(":")
+        specs.append(LoraSpec(name=name, scale=float(scale)) if sep else LoraSpec(name=item))
+    return specs

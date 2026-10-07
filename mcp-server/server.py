@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "mcp>=1.2.0",
+#   "mcp>=1.2.0,<2",  # 2.x renamed FastMCP (mcp.server.mcpserver.MCPServer)
 #   "httpx>=0.27",
 # ]
 # ///
@@ -67,6 +67,20 @@ def _b64_of(path: str) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def _lora_specs(loras: Optional[list[str]]) -> Optional[list[dict]]:
+    """["name", "name:scale"] -> [{"name": ..., "scale": ...}] (scale omitted = LoRA default)."""
+    if not loras:
+        return None
+    specs = []
+    for item in loras:
+        name, sep, scale_str = item.rpartition(":")
+        try:
+            specs.append({"name": name, "scale": float(scale_str)} if sep else {"name": item})
+        except ValueError:
+            specs.append({"name": item})
+    return specs
+
+
 def _drop_none(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
@@ -91,11 +105,14 @@ def service_status() -> str:
 
 
 @mcp.tool()
-def list_loras() -> str:
-    """List installed LoRA adapters (files in data/loras). Use their names with
-    generate_image's `loras` parameter — Z-Image models only."""
+def list_loras(model: Optional[str] = None) -> str:
+    """List installed user LoRAs. With `model` (e.g. "qwen-image-2.1", "z-image-turbo")
+    only the LoRAs usable with that model, plus whether it supports LoRAs at all;
+    without it, the Z-Image list and a `families` map of every model family. Pass the
+    names to generate_image / edit_image `loras`. Entries include display_name,
+    description, default_scale (used when no scale is given) and recommended settings."""
     with _client() as c:
-        r = c.get("/loras")
+        r = c.get("/loras", params={"model": model} if model else None)
     if r.status_code != 200:
         return _err(r)
     return r.text
@@ -149,20 +166,13 @@ def generate_image(
     texture) or "sharp" (4x-UltraSharp, keeps fine detail); max 8192px per side.
     Cleanest qwen-image-2.1 output: 40 steps, cfg_scale 3, negative_prompt "halftone,
     dithering, noise, grain, printed texture, paper texture, jpeg artifacts, oversharpened".
-    loras: stack any number of installed LoRAs (see list_loras), each entry
-    "name" or "name:scale" (e.g. ["style-a", "style-b:0.7"]); Z-Image models only.
-    lora/lora_scale are the legacy single-LoRA form. Returns the image inline
-    and the saved PNG path."""
-    lora_specs = None
-    if loras:
-        lora_specs = []
-        for item in loras:
-            name, sep, scale_str = item.rpartition(":")
-            try:
-                spec = {"name": name, "scale": float(scale_str)} if sep else {"name": item}
-            except ValueError:
-                spec = {"name": item}
-            lora_specs.append(spec)
+    loras: stack any number of installed LoRAs (see list_loras(model)), each entry
+    "name" or "name:scale" (e.g. ["style-a", "style-b:0.7"]); omitting the scale uses the
+    LoRA's default_scale. Supported by the Z-Image models and qwen-image-2.1 (e.g.
+    "nsfw-alpacas", "femaled-vaginus", "full-body"; no trigger words needed). Ignored by
+    other models. lora/lora_scale are the legacy single-LoRA form. Returns the image
+    inline and the saved PNG path."""
+    lora_specs = _lora_specs(loras)
     payload = _drop_none(
         {
             "prompt": prompt,
@@ -282,6 +292,7 @@ def edit_image(
     use_lora: bool = False,
     reference_image_paths: Optional[list[str]] = None,
     transparent: bool = False,
+    loras: Optional[list[str]] = None,
     upscale: bool = False,
     upscale_factor: float = 2.0,
     upscale_model: str = "clean",
@@ -296,7 +307,9 @@ def edit_image(
     person from image 2 into the scene of image 1"; transparent=True returns an RGBA
     cutout (also automatic when the input has alpha); phrase it like "Remove the
     background and make it transparent, keep only the dog" ("extract"/"RGBA" wordings
-    tend to erase the subject). upscale / upscale_factor / upscale_model: optional ESRGAN
+    tend to erase the subject). loras: user LoRAs as in generate_image ("name" or
+    "name:scale"; qwen-image-2.1 only, see list_loras("qwen-image-2.1")).
+    upscale / upscale_factor / upscale_model: optional ESRGAN
     upscale of the result, same as generate_image (any edit model).
     Returns edited image inline + path."""
     payload = _drop_none(
@@ -304,6 +317,7 @@ def edit_image(
             "image": _b64_of(image_path),
             "reference_images": [_b64_of(p) for p in reference_image_paths] if reference_image_paths else None,
             "transparent": transparent or None,
+            "loras": _lora_specs(loras),
             "upscale": upscale or None,
             "upscale_factor": upscale_factor if upscale else None,
             "upscale_model": upscale_model if upscale else None,
