@@ -15,7 +15,7 @@ Copies local `src/silly_media/` files directly into the running container and re
 - Modifying Python code (adding/editing models, routes, logic)
 - Adding new model classes or registrations
 - Updating configurations in Python files
-- UI changes (ui.html is served statically)
+- (The UI is the React app in `ui/`, served by `./ui.sh`; no container restart needed)
 
 **How it works**:
 1. Checks if container is running
@@ -42,7 +42,8 @@ Dev mode mounts `./src:/app/src:ro` so Python changes are picked up automaticall
 
 - `docker-compose.yml` - Defines both `silly-media` (prod) and `silly-media-dev` (dev) services
 - `src/silly_media/` - Main Python package
-- `ui.html` - Single-file frontend (served statically, no build needed)
+- `ui/` - React desktop UI, built and served by `./ui.sh` (`./ui.sh --dev` for HMR)
+- `legacy/` - old single-file HTML clients; legacy, don't modify
 
 ## Architecture Notes
 

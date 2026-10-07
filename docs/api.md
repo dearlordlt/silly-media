@@ -3400,7 +3400,7 @@ The reference image (the text→image result, or your uploaded image) that fed t
 reconstruction — saved alongside each GLB. The generate response also returns an
 `X-Ref-Url` header pointing here.
 
-> Test UI: open `ui-3d.html` (live `<model-viewer>` preview + download).
+> Test UI: the `/3d` page of `./ui.sh` (live `<model-viewer>` preview + download).
 
 ---
 

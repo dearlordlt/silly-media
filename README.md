@@ -252,16 +252,11 @@ This lets one machine serve image, audio, video, vision, and text workloads with
 - Docker with NVIDIA Container Toolkit
 - Significant disk space for model weights and generated media
 
-## Web UIs
+## Web UI
 
-The repository includes simple static HTML clients you can open directly in a browser:
+`./ui.sh` builds and serves the React desktop UI in `ui/` (Studio, Edit, Assets, Audio, Music, Video, 3D, Vision, Chat) at `http://127.0.0.1:5273/ui/` — see [ui/README.md](ui/README.md).
 
-- `ui.html` for text-to-image
-- `ui-audio.html` for TTS and actor management
-- `ui-video.html` for video generation
-- `ui-img2img.html` for image editing
-- `ui-music.html` for music generation
-- `llm.html` for local LLM interaction
+The old single-file HTML clients (`ui.html`, `ui-img2img.html`, `ui-audio.html`, `ui-video.html`, `ui-music.html`, `ui-3d.html`, `llm.html`) are kept unmaintained in `legacy/`.
 
 ## Documentation
 
