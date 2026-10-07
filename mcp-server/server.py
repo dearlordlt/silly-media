@@ -308,7 +308,10 @@ def edit_image(
     cutout (also automatic when the input has alpha); phrase it like "Remove the
     background and make it transparent, keep only the dog" ("extract"/"RGBA" wordings
     tend to erase the subject). loras: user LoRAs as in generate_image ("name" or
-    "name:scale"; qwen-image-2.1 only, see list_loras("qwen-image-2.1")).
+    "name:scale"; qwen-image-2.1 only, see list_loras("qwen-image-2.1")). For outfit
+    swaps use loras=["outfit-swap"] with the outfit photo in reference_image_paths and
+    "Dress the person in image 1 in the <outfit> shown in image 2. Keep their face, hair,
+    hands, pose and the background exactly the same." (keeps face/pose/background fixed).
     upscale / upscale_factor / upscale_model: optional ESRGAN
     upscale of the result, same as generate_image (any edit model).
     Returns edited image inline + path."""

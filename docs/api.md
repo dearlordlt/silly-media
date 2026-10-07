@@ -369,13 +369,15 @@ Adding a LoRA = dropping its `.safetensors` into the family folder (the host fol
   "recommended": "Base model, 25 steps, CFG 4, strength 0.8",
   "source": "https://civitai.com/models/2983070",
   "modes": ["generate", "edit"],
-  "trigger_words": []
+  "trigger_words": [],
+  "tags": []
 }
 ```
 
 - `default_scale` is used when a request omits `scale` (otherwise 1.0).
 - `trigger_words` are appended to the prompt automatically while the LoRA is active, so clients never add them.
 - `modes` tells UIs where to offer the LoRA; the API accepts it in both modes.
+- `tags` are free-form labels UIs can key features on (e.g. `outfit-swap`: the Edit page suggests that LoRA for outfit runs and leaves it out of steps without an image 2).
 
 **Request rules**
 - `loras: [{"name": "...", "scale": 0.8}, ...]` on `POST /generate/{model}`, `POST /img2img/edit/{model}`, and as a form field on `/img2img/edit/{model}/upload` (JSON list or `"name:scale,name2"`).
@@ -385,13 +387,14 @@ Adding a LoRA = dropping its `.safetensors` into the family folder (the host fol
 
 **File formats** — diffusers/PEFT and ComfyUI/Civitai layouts load as-is. For non-Z-Image families the backend also normalises: `diffusion_model.` prefixes, kohya `.alpha` tensors (folded into the weights) and Qwen-Image 2.1's fused `img_mlp.gate_up` (split into diffusers' `gate_layer` / `proj`). LyCORIS LoKr/LoHa files are rejected with 400.
 
-**Installed `qwen-image-2.1` LoRAs** (NSFW, no trigger words):
+**Installed `qwen-image-2.1` LoRAs** (no trigger words):
 
 | Name | Source | Default scale | Author's settings |
 |------|--------|---------------|-------------------|
 | `nsfw-alpacas` | [NSFW LORA v2 (TheseAlpacas)](https://civitai.com/models/2958918) | 0.9 | Base model, 25+ steps, CFG 3-6 |
 | `femaled-vaginus` | [FemaledVaginus-NSFW v1.3b](https://civitai.com/models/2986844) | 0.8 | CFG 3, 20 steps; works with turbo |
 | `full-body` | [Full Body](https://civitai.com/models/2983070) | 0.8 | Base model, 25 steps, CFG 4 |
+| `outfit-swap` | [Outfit Swap Consistency](https://civitai.com/models/2983159) | 1.0 | **Edit only** (`modes: ["edit"]`, tag `outfit-swap`): image 1 = person, image 2 (`reference_images`) = outfit, prompt *"Dress the person in image 1 in the &lt;outfit&gt; shown in image 2. Keep their face, hair, hands, pose and the background exactly the same."* ~25 steps, CFG 1; works with turbo. Keeps the frame, face and background in place instead of re-framing the shot |
 
 ```bash
 # Generate with two stacked LoRAs (default scales)
@@ -399,6 +402,12 @@ curl -X POST http://localhost:4201/generate/qwen-image-2.1 \
   -H "Content-Type: application/json" \
   -d '{"prompt": "Full body photo of a woman in a sunlit bedroom", "num_inference_steps": 30, "cfg_scale": 3.5,
        "loras": [{"name": "full-body"}, {"name": "nsfw-alpacas", "scale": 0.7}]}' -o out.png
+
+# Outfit swap: person + outfit photo, only the clothes change
+curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1/upload \
+  -F image=@person.png -F reference_images=@dress.png -F num_inference_steps=25 \
+  -F "prompt=Dress the person in image 1 in the red sequin dress shown in image 2. Keep their face, hair, hands, pose and the background exactly the same." \
+  -F "loras=outfit-swap" -o swapped.png
 
 # Same LoRAs on an edit (turbo)
 curl -X POST http://localhost:4201/img2img/edit/qwen-image-2.1/upload \

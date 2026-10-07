@@ -440,6 +440,14 @@ export function EditPage() {
   }, [isQ21, activeSet, setImages, entries, negativeOn, negative])
   /** Undress-first outfit sets add one naked base edit in front of the batch. */
   const withBaseStep = isQ21 && !!activeSet && undressesFirst(activeSet) && runEntries.some((e) => e.refSet)
+
+  // Outfit runs (an Outfits reference set, or the "Wear Image 2 Outfit" chip): suggest an
+  // installed LoRA tagged "outfit-swap" while it's off.
+  const outfitSwapNames = new Set((modelLoras?.loras ?? []).filter((l) => l.tags?.includes('outfit-swap')).map((l) => l.name))
+  const isOutfitRun = isQ21 && (activeSet?.kind === 'outfit' || !!selected[QWEN21_GROUP]?.has('q21-outfit-ref'))
+  const outfitSwapLora = isOutfitRun && modelLoras?.model === model
+    ? modelLoras.loras.find((l) => l.tags?.includes('outfit-swap') && !sendLoras.some((x) => x.name === l.name))
+    : undefined
   const runCount = runEntries.length + (withBaseStep ? 1 : 0)
 
   /* ---------------------------------------------------------- generation */
@@ -529,7 +537,8 @@ export function EditPage() {
       const baseJob = enqueueEdit({
         client, image, seed, group,
         entry: { label, prompt: NAKED_BASE_PROMPT, negative: `${negativeOn && negative.trim() ? negative.trim() : DEFAULT_NEGATIVE}, ${CLOTHES_NEGATIVE}` },
-        settings: { ...settings, references: [] },
+        // No image 2 in the base step: an outfit-swap LoRA has nothing to swap there
+        settings: { ...settings, references: [], loras: settings.loras.filter((l) => !outfitSwapNames.has(l.name)) },
         data: { originalId, label, preview },
         onSaved: (item) => { baseItemId = item.id },
       })
@@ -1092,6 +1101,19 @@ export function EditPage() {
         {modelLoras?.supported && modelLoras.model === model && (
           <>
             <div className="my-4 h-px bg-line" />
+            {outfitSwapLora && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-accent/40 bg-accent/10 px-3 py-2">
+                <p className="flex-1 text-[11.5px] text-ink-dim">
+                  Outfit swap: <span className="text-ink">{outfitSwapLora.display_name || outfitSwapLora.name}</span> keeps the face, pose and background in place while only the clothes change.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setLoras((cur) => [...cur.filter((x) => x.name !== outfitSwapLora.name), { name: outfitSwapLora.name, scale: outfitSwapLora.default_scale ?? 1 }])}
+                >
+                  Turn on
+                </Button>
+              </div>
+            )}
             <LoraPicker model={model} value={loras} onChange={setLoras} mode="edit" />
           </>
         )}

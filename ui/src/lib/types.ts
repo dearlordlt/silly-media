@@ -49,6 +49,8 @@ export interface LoraInfo {
   source?: string
   modes?: ('generate' | 'edit')[]
   trigger_words?: string[]
+  /** Free-form labels UIs key features on (e.g. "outfit-swap"). */
+  tags?: string[]
 }
 /** GET /loras (no model): the legacy Z-Image list plus every model family. */
 export interface LoraListResponse {

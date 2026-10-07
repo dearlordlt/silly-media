@@ -8,7 +8,8 @@ An optional sidecar `<name>.json` next to a LoRA adds metadata that `GET /loras`
 returns and the backend applies:
     display_name, description, default_scale, recommended, source,
     modes (["generate", "edit"]), trigger_words (appended to the prompt
-    automatically while the LoRA is active, so clients never add tags).
+    automatically while the LoRA is active, so clients never add tags),
+    tags (free-form labels UIs can key features on, e.g. "outfit-swap").
 
 Files are discovered live: dropping a new LoRA (and optionally its sidecar) into
 the family folder is enough, no restart or code change.
@@ -65,6 +66,7 @@ def list_loras(family: str) -> list[dict[str, Any]]:
                 "source": meta.get("source", ""),
                 "modes": meta.get("modes", ["generate", "edit"]),
                 "trigger_words": meta.get("trigger_words", []),
+                "tags": meta.get("tags", []),
             }
         )
     return loras
