@@ -42,6 +42,10 @@ export interface EditPrompt {
   negative: string
   basePrompt?: string
   clothedPrompt?: string
+  /** Reference-set run: which set image was image 2. */
+  refSet?: { setId: string; setName: string; itemId: string; label: string }
+  /** The edit ran on this library item (e.g. a naked base step) instead of the original. */
+  sourceItemId?: string
 }
 
 /** Payload of an edit job, read back by the page for placeholders / batch progress. */
@@ -131,6 +135,8 @@ async function saveEdit(blob: Blob, originalId: string, entry: EditPrompt, seed:
       hasAlpha,
       ...(entry.basePrompt ? { basePrompt: entry.basePrompt } : {}),
       ...(entry.clothedPrompt ? { clothedPrompt: entry.clothedPrompt } : {}),
+      ...(entry.refSet ? { refSetId: entry.refSet.setId, refSetName: entry.refSet.setName, refItemId: entry.refSet.itemId, refLabel: entry.refSet.label } : {}),
+      ...(entry.sourceItemId ? { sourceItemId: entry.sourceItemId } : {}),
       ...(s.model === QWEN21_MODEL ? {
         transparent: s.transparent, sizeMode: s.sizeMode,
         ...(s.outWidth && s.outHeight ? { outWidth: s.outWidth, outHeight: s.outHeight } : {}),
@@ -141,10 +147,14 @@ async function saveEdit(blob: Blob, originalId: string, entry: EditPrompt, seed:
 }
 
 /** Queue one edit on the GPU lane; returns the job id. */
-export function enqueueEdit({ client, image, entry, seed, settings, group, data, keep }: {
+export function enqueueEdit({ client, image, entry, seed, settings, group, data, keep, onSaved }: {
   client: SillyClient
-  /** Source image as a data URL (snapshot). */
-  image: string
+  /**
+   * Source image as a data URL (snapshot), or a resolver awaited when the job
+   * starts (a previous step's output; `sourceItemId` is stored so regenerate
+   * reuses that step's image instead of the original).
+   */
+  image: string | ((signal: AbortSignal) => Promise<{ image: string; sourceItemId: string }>)
   entry: EditPrompt
   seed: number | undefined
   settings: RunSettings
@@ -153,6 +163,8 @@ export function enqueueEdit({ client, image, entry, seed, settings, group, data,
   data: EditJobData
   /** Regenerate: replace this item, keeping its id + timestamp (grid / viewer position). */
   keep?: { id: string; createdAt: number }
+  /** Called with the saved result (feeds later steps of a multi-step run). */
+  onSaved?: (item: MediaItem, blob: Blob) => void
 }): string {
   return jobs.enqueue({
     page: 'edit',
@@ -163,12 +175,22 @@ export function enqueueEdit({ client, image, entry, seed, settings, group, data,
     run: async (ctx) => {
       let ok = false
       try {
+        let source: string
+        let sourceItemId: string | undefined
+        if (typeof image === 'string') source = image
+        else {
+          ctx.report({ message: 'Waiting for the previous step' })
+          const step = await image(ctx.signal)
+          source = step.image
+          sourceItemId = step.sourceItemId
+        }
         const stop = ctx.poll(() => client.img2imgProgress().then(fromBackendProgress), 500)
-        const blob = await client.img2img(settings.model, buildRequest(image, entry.prompt, entry.negative, seed, settings), ctx.signal)
+        const blob = await client.img2img(settings.model, buildRequest(source, entry.prompt, entry.negative, seed, settings), ctx.signal)
         stop()
         ctx.report({ message: 'Saving' })
         if (keep && library.get(keep.id)) await library.remove(keep.id)
-        const item = await saveEdit(blob, data.originalId, entry, seed, settings, keep)
+        const item = await saveEdit(blob, data.originalId, sourceItemId ? { ...entry, sourceItemId } : entry, seed, settings, keep)
+        onSaved?.(item, blob)
         ctx.addItem(item.id)
         ok = true
         if (keep) toast.success('Regenerated successfully')

@@ -15,7 +15,7 @@ import { useClient, toast, errorMessage } from '../../lib/hooks'
 import { useModels } from '../../lib/query'
 import { itemBlob, itemExtension, library, useLibrary } from '../../lib/library'
 import { kv } from '../../lib/kv'
-import { jobs, useJobCounts, usePageJobs } from '../../lib/jobs'
+import { jobs, throwIfCancelled, useJobCounts, usePageJobs } from '../../lib/jobs'
 import type { Job } from '../../lib/jobs'
 import { MOD_KEY, useCommands, usePrimaryAction } from '../../lib/commands'
 import { useApp } from '../../lib/store'
@@ -31,6 +31,8 @@ import type { CompareMode } from './EditResults'
 import { editJobData, enqueueEdit, isActive } from './editJobs'
 import type { EditPrompt, RunSettings, UpscaleModel } from './editJobs'
 import { ArtifactGrid } from '../../components/Artifact'
+import { RefSetsPanel } from './RefSetsPanel'
+import { NAKED_BASE_PROMPT, REF_KINDS, undressesFirst, useActiveRefSet } from './refSets'
 import {
   CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
   QWEN21_EDIT_PRESETS, QWEN21_MAX_REFS, QWEN21_MODEL, QWEN21_SETTINGS_PRESETS, QWEN21_TEXTURE_NEGATIVE, SIZE_MODES,
@@ -403,6 +405,37 @@ export function EditPage() {
     return out
   }, [activeQwen21, categories, selected, custom, composeMode, negativeOn, negative, clothesOn, clothesPrompt])
 
+  /* ------------------------------------------------------ reference sets */
+  const activeSet = useActiveRefSet()
+  const libraryImages = useLibrary('image')
+  const setImages = useMemo(() => {
+    if (!isQ21 || !activeSet) return []
+    const alive = new Set(libraryImages.map((i) => i.id))
+    return activeSet.images.filter((i) => activeSet.selected.includes(i.itemId) && alive.has(i.itemId))
+  }, [isQ21, activeSet, libraryImages])
+
+  /** What Proceed queues: the entries, or (with a set active) entries × selected set images. */
+  const runEntries = useMemo((): EditEntry[] => {
+    if (!isQ21 || !activeSet) return entries
+    const base: EditEntry[] = entries.length ? entries : [{
+      label: '', prompt: '', negative: negativeOn && negative.trim() ? negative.trim() : DEFAULT_NEGATIVE,
+      transparent: false, needsRef: false, variants: true,
+    }]
+    // Anti-blending terms for the set's kind (only used when CFG > 1 enables the negative prompt).
+    const kindNegative = REF_KINDS.find((k) => k.id === activeSet.kind)?.negative
+    return setImages.flatMap((img) => base.map((e) => ({
+      ...e,
+      label: [`${activeSet.name}: ${img.label}`, ...(e.label ? [e.label] : [])].join(' + '),
+      prompt: joinPromptParts([activeSet.template, ...(e.prompt ? [e.prompt] : [])]),
+      negative: kindNegative ? `${e.negative}, ${kindNegative}` : e.negative,
+      needsRef: false,
+      refSet: { setId: activeSet.id, setName: activeSet.name, itemId: img.itemId, label: img.label },
+    })))
+  }, [isQ21, activeSet, setImages, entries, negativeOn, negative])
+  /** Undress-first outfit sets add one naked base edit in front of the batch. */
+  const withBaseStep = isQ21 && !!activeSet && undressesFirst(activeSet) && runEntries.some((e) => e.refSet)
+  const runCount = runEntries.length + (withBaseStep ? 1 : 0)
+
   /* ---------------------------------------------------------- generation */
   const pageJobs = usePageJobs('edit')
   // Enhance-prompt jobs share the page; edit jobs are the ones carrying EditJobData.
@@ -414,9 +447,12 @@ export function EditPage() {
 
   const runEdit = async () => {
     if (preparing) return
-    if (!entries.length) { toast.error('Select at least one prompt or enter a custom prompt'); return }
+    if (!runEntries.length) {
+      toast.error(isQ21 && activeSet ? 'Select at least one image of the reference set' : 'Select at least one prompt or enter a custom prompt')
+      return
+    }
     if (!source) { toast.error('No source image loaded'); return }
-    if (isQ21 && !references.length && entries.some((e) => e.needsRef)) {
+    if (isQ21 && !references.length && runEntries.some((e) => e.needsRef)) {
       toast.error('That preset needs a reference image (image 2) - add one first')
       return
     }
@@ -429,7 +465,26 @@ export function EditPage() {
       references: isQ21 ? references.slice() : [],
     }
     const image = source
-    const batchEntries = entries
+    const batchEntries = runEntries
+
+    // Reference-set images become image 2 of their edit: snapshot them now.
+    const refUrls = new Map<string, string>()
+    const refIds = [...new Set(batchEntries.flatMap((e) => (e.refSet ? [e.refSet.itemId] : [])))]
+    if (refIds.length) {
+      setPreparing(true)
+      try {
+        for (const id of refIds) {
+          const it = library.get(id)
+          if (!it) throw new Error('A reference image was deleted')
+          refUrls.set(id, await blobToDataUrl(await itemBlob(it)))
+        }
+      } catch (e) {
+        toast.error('Could not load the reference images', errorMessage(e))
+        return
+      } finally {
+        setPreparing(false)
+      }
+    }
 
     // Save the original on the first run.
     let originalId = currentOriginalId
@@ -457,14 +512,45 @@ export function EditPage() {
     const orig = library.get(originalId)
     const preview = orig?.thumbUrl ?? orig?.url ?? image
     const group = `edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+
+    // Undress-first outfit sets: one naked base edit, then every outfit edit runs on that base
+    // (the GPU queue is FIFO, so the base always runs first).
+    let stepImage: string | ((signal: AbortSignal) => Promise<{ image: string; sourceItemId: string }>) = image
+    if (withBaseStep) {
+      let baseItemId: string | null = null
+      const label = `${activeSet?.name ?? 'Set'}: naked base`
+      const baseJob = enqueueEdit({
+        client, image, seed, group,
+        entry: { label, prompt: NAKED_BASE_PROMPT, negative: `${negativeOn && negative.trim() ? negative.trim() : DEFAULT_NEGATIVE}, ${CLOTHES_NEGATIVE}` },
+        settings: { ...settings, references: [] },
+        data: { originalId, label, preview },
+        onSaved: (item) => { baseItemId = item.id },
+      })
+      stepImage = async (signal) => {
+        while (!baseItemId) {
+          const state = jobs.get(baseJob)?.state
+          if (!state || state === 'failed' || state === 'cancelled') throw new Error('The naked base step did not finish')
+          throwIfCancelled(signal)
+          await new Promise((r) => setTimeout(r, 400))
+        }
+        const base = library.get(baseItemId)
+        if (!base) throw new Error('The naked base image was deleted')
+        return { image: await blobToDataUrl(await itemBlob(base)), sourceItemId: base.id }
+      }
+    }
+
     for (const entry of batchEntries) {
       enqueueEdit({
-        client, image, entry, seed, group,
-        settings: { ...settings, transparent: settings.transparent || entry.transparent },
+        client, image: entry.refSet ? stepImage : image, entry, seed, group,
+        settings: {
+          ...settings,
+          transparent: settings.transparent || entry.transparent,
+          references: entry.refSet ? [refUrls.get(entry.refSet.itemId) ?? '', ...settings.references].slice(0, QWEN21_MAX_REFS) : settings.references,
+        },
         data: { originalId, label: entry.label, preview },
       })
     }
-    if (ahead > 0) toast.info(`Queued ${batchEntries.length} edit(s)`, `${ahead} job(s) ahead`)
+    if (ahead > 0) toast.info(`Queued ${runCount} edit(s)`, `${ahead} job(s) ahead`)
   }
 
   /** Batch panels: every batch with queued/running edits, plus the newest batch until dismissed. */
@@ -562,8 +648,22 @@ export function EditPage() {
     if (!orig && !legacySource) { toast.error('Original image not found'); return }
     const itemModel = item.model ?? 'qwen-image-edit'
     const refCount = metaNumber(item, 'referenceCount') ?? 0
-    if (itemModel === QWEN21_MODEL && refCount > 0 && references.length !== refCount) {
-      toast.error(`This edit used ${refCount} reference image(s) - load the same ${refCount} again to regenerate`)
+    // Reference-set edits: the set image (image 2) is reloaded from the library.
+    const refItemId = metaString(item, 'refItemId')
+    const setRefs: string[] = []
+    if (itemModel === QWEN21_MODEL && refItemId) {
+      const ref = library.get(refItemId)
+      if (!ref) { toast.error('The reference-set image of this edit was deleted'); return }
+      try {
+        setRefs.push(await blobToDataUrl(await itemBlob(ref)))
+      } catch (e) {
+        toast.error('Could not load the reference image', errorMessage(e))
+        return
+      }
+    }
+    const manualCount = refCount - setRefs.length
+    if (itemModel === QWEN21_MODEL && manualCount > 0 && references.length !== manualCount) {
+      toast.error(`This edit used ${manualCount} reference image(s) - load the same ${manualCount} again to regenerate`)
       return
     }
     const d = modelDefaults(itemModel).off
@@ -581,11 +681,15 @@ export function EditPage() {
       sizeMode: SIZE_MODES.find((m) => m.value === sm)?.value ?? 'match',
       outWidth: metaNumber(item, 'outWidth'),
       outHeight: metaNumber(item, 'outHeight'),
-      references: refCount > 0 ? references.slice() : [],
+      references: [...setRefs, ...(manualCount > 0 ? references : [])],
     }
     let image: string
     try {
-      image = orig ? await blobToDataUrl(await itemBlob(orig)) : legacySource ?? ''
+      // Steps of an undress-first run were made from the naked base, not the original.
+      const stepId = metaString(item, 'sourceItemId')
+      const step = stepId ? library.get(stepId) : undefined
+      if (stepId && !step) toast.info('The naked base of this edit was deleted', 'Regenerating from the original instead.')
+      image = step ? await blobToDataUrl(await itemBlob(step)) : orig ? await blobToDataUrl(await itemBlob(orig)) : legacySource ?? ''
     } catch (e) {
       toast.error('Could not load the original', errorMessage(e))
       return
@@ -597,6 +701,11 @@ export function EditPage() {
       entry: {
         label, prompt: item.prompt, negative: item.negativePrompt ?? '',
         basePrompt: metaString(item, 'basePrompt'), clothedPrompt: metaString(item, 'clothedPrompt'),
+        refSet: refItemId ? {
+          setId: metaString(item, 'refSetId') ?? '', setName: metaString(item, 'refSetName') ?? '',
+          itemId: refItemId, label: metaString(item, 'refLabel') ?? '',
+        } : undefined,
+        sourceItemId: (() => { const id = metaString(item, 'sourceItemId'); return id && library.get(id) ? id : undefined })(),
       },
       data: { originalId: origId ?? '', label, preview: orig ? orig.thumbUrl ?? orig.url : image, replaces: item.id },
       keep: { id: item.id, createdAt: item.createdAt },
@@ -674,7 +783,7 @@ export function EditPage() {
 
   /* ----------------------------------------------------- shortcuts / palette */
   const busy = ahead > 0
-  const canRun = !!source && entries.length > 0 && !preparing
+  const canRun = !!source && runEntries.length > 0 && !preparing
   usePrimaryAction({ label: busy ? 'Queue edit' : 'Edit', run: () => void runEdit(), disabled: !canRun })
   useCommands([
     {
@@ -753,16 +862,19 @@ export function EditPage() {
           </div>
           {/* Plain textarea (same `field` styling as <Textarea>) so fill presets can focus/select their placeholder. */}
           <textarea ref={customRef} rows={3} className="field resize-y leading-relaxed" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="Enter custom edit instruction…" />
-          {composeMode ? (
-            entries[0] && (
+          {composeMode || (isQ21 && activeSet) ? (
+            runEntries[0] && (
               <Panel className="p-2.5 text-[11.5px] leading-relaxed text-ink-dim">
-                <span className="font-semibold text-ink-faint">Preview: </span>{entries[0].prompt}
+                <span className="font-semibold text-ink-faint">Preview{runEntries.length > 1 ? ` (1 of ${runEntries.length})` : ''}{withBaseStep ? ', run on the naked base' : ''}: </span>{runEntries[0].prompt}
               </Panel>
             )
           ) : (
             <span className="text-[11px] text-ink-faint">{selectedCount} chip(s) selected → {entries.length} image(s)</span>
           )}
         </Section>
+
+        <div className="my-4 h-px bg-line" />
+        <RefSetsPanel enabled={isQ21} onUseQwen21={() => changeModel(QWEN21_MODEL)} manualRefs={references.length} />
 
         {isQ21 && (
           <>
@@ -975,8 +1087,8 @@ export function EditPage() {
             title={`${MOD_KEY}+Enter`}
           >
             {busy
-              ? `Queue${entries.length > 1 ? ` ${entries.length} edits` : ''} (${ahead} ahead)`
-              : `Proceed${entries.length > 1 ? ` (${entries.length} images)` : ''}`}
+              ? `Queue${runCount > 1 ? ` ${runCount} edits` : ''} (${ahead} ahead)`
+              : `Proceed${runCount > 1 ? ` (${runCount} images)` : ''}`}
           </Button>
           {queuedCount > 0 && (
             <Button variant="ghost" size="sm" className="mt-2 w-full" icon={<X size={13} />} onClick={() => jobs.cancelQueued({ page: 'edit' })}>
