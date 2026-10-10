@@ -377,7 +377,7 @@ Adding a LoRA = dropping its `.safetensors` into the family folder (the host fol
 - `default_scale` is used when a request omits `scale` (otherwise 1.0).
 - `trigger_words` are appended to the prompt automatically while the LoRA is active, so clients never add them.
 - `modes` tells UIs where to offer the LoRA; the API accepts it in both modes.
-- `tags` are free-form labels UIs can key features on (e.g. `outfit-swap`: the Edit page suggests that LoRA for outfit runs and leaves it out of steps without an image 2; `edit-consistency`: suggested for local edits, with a warning when pose / gaze / composition changes are selected).
+- `tags` are free-form labels UIs can key features on (e.g. `outfit-swap`: the Edit page suggests that LoRA for outfit runs and leaves it out of steps without an image 2; `edit-consistency`: suggested for local edits, with a warning when pose / gaze / composition changes or era / art-style restyles are selected).
 
 **Request rules**
 - `loras: [{"name": "...", "scale": 0.8}, ...]` on `POST /generate/{model}`, `POST /img2img/edit/{model}`, and as a form field on `/img2img/edit/{model}/upload` (JSON list or `"name:scale,name2"`).

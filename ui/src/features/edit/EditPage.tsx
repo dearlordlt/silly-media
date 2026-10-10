@@ -37,16 +37,21 @@ import { ArtifactGrid } from '../../components/Artifact'
 import { RefSetsPanel } from './RefSetsPanel'
 import { NAKED_BASE_PROMPT, REF_KINDS, undressesFirst, useActiveRefSet } from './refSets'
 import {
-  CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
+  ART_STYLE_GROUP, CLOTHES_NEGATIVE, DEFAULT_NEGATIVE, EDIT_CATEGORIES, EDIT_ERAS, ERA_GROUP, MAX_STEPS, MODEL_LABELS, NAKED_VARIANT_SUFFIX, NUDE_BODY_IDS,
   QWEN21_EDIT_PRESETS, QWEN21_MAX_REFS, QWEN21_MODEL, QWEN21_SETTINGS_PRESETS, QWEN21_TEXTURE_NEGATIVE, SIZE_MODES,
-  computeOutputSize, customLabel, customPrompt, joinPromptParts, modelDefaults,
+  computeOutputSize, customEra, customLabel, customPrompt, joinPromptParts, modelDefaults, stylePrompt,
 } from './presets'
-import type { EditOption, SizeMode } from './presets'
+import type { EditOption, EraStyle, SizeMode } from './presets'
 
 const MODEL_KEY = 'silly-edit-model'
 const QWEN21_GROUP = 'qwen21'
 /** Chip groups that change the pose, gaze or framing (an Edit Consistency LoRA would hold them in place). */
 const STRUCTURAL_GROUPS = ['poses', 'gazes', 'composition']
+/** Chip groups that set the clothing; an era chip then restyles everything but the clothes. */
+const CLOTHING_GROUPS = ['outfits', 'body']
+/** Compose order: whole-image restyles first, so later chips (outfit, body…) refine them. */
+const GROUP_ORDER: Record<string, number> = { [ERA_GROUP]: 0, [ART_STYLE_GROUP]: 1 }
+const ERAS_BY_ID = new Map(EDIT_ERAS.map((s) => [s.id, s]))
 
 function LoraHint({ tone, action, onAction, children }: { tone: 'suggest' | 'warn'; action: string; onAction: () => void; children: ReactNode }) {
   return (
@@ -249,8 +254,12 @@ export function EditPage() {
     ...c,
     customIds: new Set((customChips[c.id] ?? []).map(customId)),
     options: [
-      ...(customChips[c.id] ?? []).map((text) => ({ id: customId(text), label: customLabel(c.custom, text), prompt: customPrompt(c.custom, text) })),
-      ...c.options,
+      ...(customChips[c.id] ?? []).map((text): EditOption & { era?: EraStyle } => {
+        if (c.id !== ERA_GROUP) return { id: customId(text), label: customLabel(c.custom, text), prompt: customPrompt(c.custom, text) }
+        const era = customEra(text)
+        return { id: customId(text), label: era.label, prompt: stylePrompt(era), era }
+      }),
+      ...c.options.map((o): EditOption & { era?: EraStyle } => (c.id === ERA_GROUP ? { ...o, era: ERAS_BY_ID.get(o.id) } : o)),
     ],
   })), [customChips])
 
@@ -374,6 +383,7 @@ export function EditPage() {
     : `Input ${srcDims.width}×${srcDims.height} → ~1MP, same aspect`
 
   /* ------------------------------------------------------ prompt building */
+  const activeSet = useActiveRefSet()
   const activeQwen21 = useMemo(
     () => (isQ21 ? QWEN21_EDIT_PRESETS.filter((p) => selected[QWEN21_GROUP]?.has(p.id)) : []),
     [isQ21, selected],
@@ -384,13 +394,22 @@ export function EditPage() {
     const baseNeg = negativeOn && negative.trim() ? negative.trim() : DEFAULT_NEGATIVE
     const withClothes = `${baseNeg}, ${CLOTHES_NEGATIVE}`
     const text = custom.trim()
-    const chips: { label: string; prompt: string; nude: boolean; transparent: boolean; needsRef: boolean; q21: boolean }[] = []
-    for (const p of activeQwen21) chips.push({ label: p.label, prompt: p.prompt, nude: false, transparent: !!p.transparent, needsRef: !!p.needsRef, q21: true })
+    // Era chips leave the clothes alone when something else decides them (an outfit / body
+    // chip in compose mode, clothed variants, an outfit run) and drop their photo look when
+    // an art style renders the image.
+    const outfitRun = isQ21 && (activeSet?.kind === 'outfit' || !!selected[QWEN21_GROUP]?.has('q21-outfit-ref'))
+    const keepClothes = clothesOn || outfitRun || (composeMode && CLOTHING_GROUPS.some((g) => (selected[g]?.size ?? 0) > 0))
+    const artMedium = composeMode && (selected[ART_STYLE_GROUP]?.size ?? 0) > 0
+    const chips: { label: string; prompt: string; nude: boolean; transparent: boolean; needsRef: boolean; q21: boolean; order: number }[] = []
+    for (const p of activeQwen21) chips.push({ label: p.label, prompt: p.prompt, nude: false, transparent: !!p.transparent, needsRef: !!p.needsRef, q21: true, order: 2 })
     for (const c of categories) {
       for (const o of c.options) {
-        if (selected[c.id]?.has(o.id)) chips.push({ label: o.label, prompt: o.prompt, nude: c.id === 'body' && !!NUDE_BODY_IDS[o.id], transparent: false, needsRef: false, q21: false })
+        if (!selected[c.id]?.has(o.id)) continue
+        const prompt = 'era' in o && o.era ? stylePrompt(o.era, { keepClothes, artMedium, overrideKeep: outfitRun }) : o.prompt
+        chips.push({ label: o.label, prompt, nude: c.id === 'body' && !!NUDE_BODY_IDS[o.id], transparent: false, needsRef: false, q21: false, order: GROUP_ORDER[c.id] ?? 2 })
       }
     }
+    chips.sort((a, b) => a.order - b.order)
 
     let out: EditEntry[] = []
     if (composeMode) {
@@ -421,10 +440,9 @@ export function EditPage() {
       ] : [e]))
     }
     return out
-  }, [activeQwen21, categories, selected, custom, composeMode, negativeOn, negative, clothesOn, clothesPrompt])
+  }, [activeQwen21, categories, selected, custom, composeMode, negativeOn, negative, clothesOn, clothesPrompt, isQ21, activeSet])
 
   /* ------------------------------------------------------ reference sets */
-  const activeSet = useActiveRefSet()
   const libraryImages = useLibrary('image')
   const setImages = useMemo(() => {
     if (!isQ21 || !activeSet) return []
@@ -464,11 +482,12 @@ export function EditPage() {
   // Edit Consistency (tag "edit-consistency"): suggest it for local edits, warn when it's on
   // for structural ones (pose / gaze / composition chips), which it would hold in place.
   const isStructural = STRUCTURAL_GROUPS.some((g) => (selected[g]?.size ?? 0) > 0)
+  const isRestyle = [ERA_GROUP, ART_STYLE_GROUP].some((g) => (selected[g]?.size ?? 0) > 0)
   const hasEdit = entries.length > 0 || !!custom.trim() || (isQ21 && !!activeSet)
   const consistencyLora = modelLoras?.model === model ? modelLoras.loras.find((l) => l.tags?.includes('edit-consistency')) : undefined
   const consistencyOn = !!consistencyLora && sendLoras.some((x) => x.name === consistencyLora.name)
-  const consistencySuggest = consistencyLora && !consistencyOn && hasEdit && !isStructural && !isOutfitRun ? consistencyLora : undefined
-  const consistencyConflict = consistencyLora && consistencyOn && isStructural ? consistencyLora : undefined
+  const consistencySuggest = consistencyLora && !consistencyOn && hasEdit && !isStructural && !isRestyle && !isOutfitRun ? consistencyLora : undefined
+  const consistencyConflict = consistencyLora && consistencyOn && (isStructural || isRestyle) ? consistencyLora : undefined
   const enableLora = (l: LoraInfo) => setLoras((cur) => [...cur.filter((x) => x.name !== l.name), { name: l.name, scale: l.default_scale ?? 1 }])
   const runCount = runEntries.length + (withBaseStep ? 1 : 0)
 
@@ -1135,7 +1154,7 @@ export function EditPage() {
             )}
             {consistencyConflict && (
               <LoraHint tone="warn" action="Turn off" onAction={() => setLoras((cur) => cur.filter((x) => x.name !== consistencyConflict.name))}>
-                <span className="text-ink">{consistencyConflict.display_name || consistencyConflict.name}</span> pins the original frame, so pose, gaze and composition changes may not happen. Turn it off for those.
+                <span className="text-ink">{consistencyConflict.display_name || consistencyConflict.name}</span> pins the original frame, so {isStructural ? 'pose, gaze and composition changes' : 'era and art-style restyles'} may only partly happen. Turn it off for those.
               </LoraHint>
             )}
             <LoraPicker model={model} value={loras} onChange={setLoras} mode="edit" />
