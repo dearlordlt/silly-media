@@ -250,7 +250,7 @@ export function stylePrompt(s: EraStyle, opts: { keepClothes?: boolean; artMediu
     // The scene isn't described: what's already in the photo is converted in place.
     opts.keepLocation
       ? `Background: the location is set by the other instructions; make it look like it belongs to ${s.era}`
-      : `Background: keep the same location and layout, but nothing modern may remain: replace every vehicle, building, sign, object and piece of technology with a version that fits ${s.era}, in the same place (for example, modern cars become vehicles from ${s.era})`,
+      : `Background: keep the same location and layout, but nothing modern may remain: replace each thing that is already in the scene with a version that fits ${s.era}, in the same place, and do not add anything new`,
     ...(opts.keepClothes ? [] : [`Outfit: ${s.outfit}`]),
     `Hair and makeup: ${s.hair}`,
     ...(opts.artMedium ? [] : [`Photo: ${s.look}`]),
