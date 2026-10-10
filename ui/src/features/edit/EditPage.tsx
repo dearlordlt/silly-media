@@ -49,6 +49,8 @@ const QWEN21_GROUP = 'qwen21'
 const STRUCTURAL_GROUPS = ['poses', 'gazes', 'composition']
 /** Chip groups that set the clothing; an era chip then restyles everything but the clothes. */
 const CLOTHING_GROUPS = ['outfits', 'body']
+/** Qwen 2.1 presets that pick the background; an era chip then only restyles that place. */
+const LOCATION_PRESETS = new Set(['q21-bg-beach', 'q21-bg-studio', 'q21-insert-ref'])
 /** Compose order: whole-image restyles first, so later chips (outfit, body…) refine them. */
 const GROUP_ORDER: Record<string, number> = { [ERA_GROUP]: 0, [ART_STYLE_GROUP]: 1 }
 const ERAS_BY_ID = new Map(EDIT_ERAS.map((s) => [s.id, s]))
@@ -399,13 +401,15 @@ export function EditPage() {
     // an art style renders the image.
     const outfitRun = isQ21 && (activeSet?.kind === 'outfit' || !!selected[QWEN21_GROUP]?.has('q21-outfit-ref'))
     const keepClothes = clothesOn || outfitRun || (composeMode && CLOTHING_GROUPS.some((g) => (selected[g]?.size ?? 0) > 0))
+    const keepLocation = (isQ21 && activeSet?.kind === 'location')
+      || (composeMode && ((selected.locations?.size ?? 0) > 0 || activeQwen21.some((p) => LOCATION_PRESETS.has(p.id))))
     const artMedium = composeMode && (selected[ART_STYLE_GROUP]?.size ?? 0) > 0
     const chips: { label: string; prompt: string; nude: boolean; transparent: boolean; needsRef: boolean; q21: boolean; order: number }[] = []
     for (const p of activeQwen21) chips.push({ label: p.label, prompt: p.prompt, nude: false, transparent: !!p.transparent, needsRef: !!p.needsRef, q21: true, order: 2 })
     for (const c of categories) {
       for (const o of c.options) {
         if (!selected[c.id]?.has(o.id)) continue
-        const prompt = 'era' in o && o.era ? stylePrompt(o.era, { keepClothes, artMedium, overrideKeep: outfitRun }) : o.prompt
+        const prompt = 'era' in o && o.era ? stylePrompt(o.era, { keepClothes, artMedium, keepLocation, overrideKeep: outfitRun }) : o.prompt
         chips.push({ label: o.label, prompt, nude: c.id === 'body' && !!NUDE_BODY_IDS[o.id], transparent: false, needsRef: false, q21: false, order: GROUP_ORDER[c.id] ?? 2 })
       }
     }
